@@ -16,10 +16,10 @@
             <groupId>com.fstojilj.luddite</groupId>
             <artifactId>common-sync</artifactId>
         </dependency>
-        <!-- Spring Data JDBC -->
+        <!-- Spring JDBC -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-jdbc</artifactId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
         </dependency>
     </dependencies>
     <build>

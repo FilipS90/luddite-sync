@@ -1,2 +1,9 @@
-com/fstojilj/luddite/sync/server/SyncServerApp.class
+com/fstojilj/luddite/sync/server/service/DirWatcherService.class
+com/fstojilj/luddite/sync/server/service/RootDirService.class
+com/fstojilj/luddite/sync/server/repository/RootDirRepository.class
+com/fstojilj/luddite/sync/server/config/AsyncConfig.class
 com/fstojilj/luddite/sync/server/dns/DuckDNSUpdateJob.class
+com/fstojilj/luddite/sync/server/SyncServerApp.class
+com/fstojilj/luddite/sync/server/utils/FileSystemUtils.class
+com/fstojilj/luddite/sync/server/repository/FileMetadataRepository.class
+com/fstojilj/luddite/sync/server/utils/FileChecksumUtils.class

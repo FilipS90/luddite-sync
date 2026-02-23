@@ -16,9 +16,8 @@ public class FileMetadata {
     private String filename;
     private Long rootDirId;
     private String relativePath;
-    private String checksum;
     private Long fileSize;
-    private String mimeType;
+    private String checksum;
     private Instant createdAt;
     private Instant modifiedAt;
     private Long syncVersion;

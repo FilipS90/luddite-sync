@@ -21,10 +21,10 @@
             <version>3.45.1.0</version>
         </dependency>
 
-        <!-- Spring Data JDBC for repository support -->
+        <!-- Spring JDBC -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-jdbc</artifactId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
         </dependency>
 
         <!-- Validation -->

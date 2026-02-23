@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CopilotDiffPersistence">
+    <option name="pendingDiffs">
+      <map>
+        <entry key="$PROJECT_DIR$/common-sync/src/main/java/com/fstojilj/luddite/sync/common/model/FileMetadata.java">
+          <value>
+            <PendingDiffInfo>
+              <option name="filePath" value="$PROJECT_DIR$/common-sync/src/main/java/com/fstojilj/luddite/sync/common/model/FileMetadata.java" />
+              <option name="originalContent" value="package com.fstojilj.luddite.sync.common.model;&#10;&#10;import lombok.AllArgsConstructor;&#10;import lombok.Builder;&#10;import lombok.Data;&#10;import lombok.NoArgsConstructor;&#10;&#10;import java.time.Instant;&#10;&#10;@AllArgsConstructor&#10;@NoArgsConstructor&#10;@Data&#10;@Builder&#10;public class FileMetadata {&#10;    private Long id;&#10;    private String filename;&#10;    private Long rootDirId;&#10;    private String relativePath;&#10;    private Long fileSize;&#10;    private String checksum;&#10;    private Instant createdAt;&#10;    private Instant modifiedAt;&#10;    private Long syncVersion;&#10;}&#10;" />
+              <option name="updatedContent" value="package com.fstojilj.luddite.sync.common.model;&#10;&#10;import lombok.AllArgsConstructor;&#10;import lombok.Builder;&#10;import lombok.Data;&#10;import lombok.NoArgsConstructor;&#10;&#10;import java.time.Instant;&#10;&#10;@AllArgsConstructor&#10;@NoArgsConstructor&#10;@Data&#10;@Builder&#10;public class FileMetadata {&#10;    private Long id;&#10;    private String filename;&#10;    private Long rootDirId;&#10;    private String relativePath;&#10;    private Long fileSize;&#10;    private String checksum;&#10;    private Instant createdAt;&#10;    private Instant modifiedAt;&#10;    private Long syncVersion;&#10;}&#10;" />
+            </PendingDiffInfo>
+          </value>
+        </entry>
+        <entry key="$PROJECT_DIR$/server-sync/src/main/java/com/fstojilj/luddite/sync/server/config/JdbcConfig.java">
+          <value>
+            <PendingDiffInfo>
+              <option name="filePath" value="$PROJECT_DIR$/server-sync/src/main/java/com/fstojilj/luddite/sync/server/config/JdbcConfig.java" />
+              <option name="updatedContent" value="package com.fstojilj.luddite.sync.server.config;&#10;&#10;import org.springframework.context.annotation.Bean;&#10;import org.springframework.context.annotation.Configuration;&#10;import org.springframework.data.jdbc.repository.config.AbstractJdbcConfiguration;&#10;import org.springframework.data.relational.core.dialect.AnsiDialect;&#10;import org.springframework.data.relational.core.dialect.Dialect;&#10;import org.springframework.jdbc.core.namedparam.NamedParameterJdbcOperations;&#10;&#10;@Configuration&#10;public class JdbcConfig extends AbstractJdbcConfiguration {&#10;&#10;    @Bean&#10;    @Override&#10;    public Dialect jdbcDialect(NamedParameterJdbcOperations operations) {&#10;        return AnsiDialect.INSTANCE;&#10;    }&#10;}&#10;" />
+            </PendingDiffInfo>
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+</project>
