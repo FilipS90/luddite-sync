@@ -64,12 +64,21 @@ public class ClientPushService {
     /**
      * Tracks events that have been sent but not yet ACK'd by any client.
      */
-    private record PendingAck(long rootDirId, String relativePath, byte eventType) {
+    private record PendingAck(long rootDirId, String relativePath, byte eventType, long sentAt) {
     }
 
     private final CopyOnWriteArraySet<ClientSession> sessions = new CopyOnWriteArraySet<>();
+
+    /**
+     * Tracks events that have been sent but not yet ACK'd by any client.
+     * TODO: pendingAcks can grow unboundedly if a client stays connected but never ACKs
+     *  (e.g. slow client, bug on client side). Consider adding a periodic cleanup that
+     *  evicts entries older than a configurable TTL and logs a warning.
+     */
     private final java.util.concurrent.ConcurrentHashMap<Long, PendingAck> pendingAcks =
             new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static final long PENDING_ACK_TTL_MS = 20_000;
 
     @PostConstruct
     public void start() throws Exception {
@@ -78,6 +87,7 @@ public class ClientPushService {
         log.info("Listening for clients on port {} (mTLS)", port);
         Thread.ofVirtual().name("client-acceptor").start(this::acceptClients);
         Thread.ofVirtual().name("buffer-drain").start(this::drainLoop);
+        Thread.ofVirtual().name("pending-ack-cleanup").start(this::pendingAckCleanupLoop);
     }
 
     @PreDestroy
@@ -89,6 +99,29 @@ public class ClientPushService {
             }
         } catch (IOException _) {
             log.warn("Error closing server socket");
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Pending ACK cleanup
+    // -------------------------------------------------------------------------
+
+    private void pendingAckCleanupLoop() {
+        while (running) {
+            try {
+                Thread.sleep(PENDING_ACK_TTL_MS);
+                long now = System.currentTimeMillis();
+                pendingAcks.entrySet().removeIf(entry -> {
+                    if (now - entry.getValue().sentAt() > PENDING_ACK_TTL_MS) {
+                        log.warn("Pending ACK timed out after {}ms for sync version {} ({}), removing — client will retry on reconnect",
+                                PENDING_ACK_TTL_MS, entry.getKey(), entry.getValue().relativePath());
+                        return true;
+                    }
+                    return false;
+                });
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
@@ -196,7 +229,7 @@ public class ClientPushService {
 
                         // Mint a version and register as pending — only stamped when ACK received
                         long syncVersion = syncVersionRepository.next();
-                        pendingAcks.put(syncVersion, new PendingAck(rootDirId, event.getRelativePath(), eventType));
+                        pendingAcks.put(syncVersion, new PendingAck(rootDirId, event.getRelativePath(), eventType, System.currentTimeMillis()));
 
                         for (ClientSession session : interested) {
                             writeToClient(session, eventType, pathBytes,
