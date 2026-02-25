@@ -152,7 +152,7 @@ public class ServerSyncService {
                 Files.deleteIfExists(target);
                 log.info("Deleted: {}", relPath);
             } else {
-                byte[] fileBytes = readExactly(in, fileSize);
+                byte[] fileBytes = in.readNBytes((int) fileSize);
                 Files.createDirectories(target.getParent());
                 Files.write(target, fileBytes);
                 log.info("Written: {} ({} bytes, v{})", relPath, fileSize, syncVersion);
@@ -193,18 +193,5 @@ public class ServerSyncService {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
-    }
-
-    private byte[] readExactly(DataInputStream in, long size) throws IOException {
-        var baos = new java.io.ByteArrayOutputStream();
-        long remaining = size;
-        byte[] buf = new byte[8192];
-        while (remaining > 0) {
-            int read = in.read(buf, 0, (int) Math.min(buf.length, remaining));
-            if (read == -1) throw new IOException("Unexpected end of stream reading file bytes");
-            baos.write(buf, 0, read);
-            remaining -= read;
-        }
-        return baos.toByteArray();
     }
 }
