@@ -71,11 +71,12 @@ This enables automatic retry on reconnect.
 | `FileEventListener`     | Spring `@EventListener` — receives `FileChangeEvent`, updates `file_metadata` in DB, then publishes to `FileEventBuffer`                             |
 | `FileEventBuffer`       | Per-rootDir `LinkedBlockingQueue` of pending `FileChangeEvent`s                                                                                      |
 | `FileEventService`      | Facade over `FileEventBuffer`                                                                                                                        |
-| `ClientPushService`     | mTLS server socket — accepts clients, handles handshake, runs catch-up, drains buffer to clients, reads ACKs                                         |
+| `ClientPushService`     | mTLS server socket — accepts clients, advertises dirs, handles handshake, runs catch-up, drains buffer to clients, reads ACKs                        |
 | `SyncVersionRepository` | Mints monotonically increasing version numbers by inserting into `sync_log`                                                                          |
 | `FileMetadataService`   | CRUD over `file_metadata` and `deleted_files`                                                                                                        |
-| `RootDirService`        | CRUD over `root_dir`, triggers initial file scan on new dir registration                                                                             |
+| `RootDirService`        | CRUD over `root_dir`, triggers initial file scan on new dir registration, stops watcher and cleans metadata on removal                               |
 | `DuckDNSUpdateJob`      | Scheduled job — updates DuckDNS every 5 minutes so clients resolve the server hostname                                                               |
+| `AdminCli`              | Interactive stdin CLI — allows adding/removing root dirs at runtime without restarting the server                                                    |
 
 ---
 
@@ -140,7 +141,7 @@ per entry:
   [8 bytes]  lastSyncVersion (long) — -1 means full sync requested
 ```
 
-#### 2. File Event (Server → Client)
+#### 3. File Event (Server → Client)
 
 Sent for each file change, both during catch-up and in real time.
 
@@ -153,7 +154,7 @@ Sent for each file change, both during catch-up and in real time.
 [N bytes]  file bytes (only present for WRITE events)
 ```
 
-#### 3. ACK (Client → Server)
+#### 4. ACK (Client → Server)
 
 Sent after successfully writing the file to disk and persisting local state.
 
@@ -179,6 +180,8 @@ Server starts
             ├─ Starts virtual thread: client-acceptor
             ├─ Starts virtual thread: buffer-drain
             └─ Starts virtual thread: pending-ack-cleanup
+  └─ AdminCli starts:
+       └─ Starts virtual thread: admin-cli (reads from stdin)
 
 Client starts
   └─ ServerSyncService starts:
@@ -279,13 +282,47 @@ entry is evicted from the in-memory `pendingAcks` map and a warning is logged. T
 
 ---
 
+## Admin CLI
+
+The server exposes an interactive CLI on `stdin` for managing root directories at runtime without restarting.
+
+```
+  Luddite Sync Server — Admin CLI
+  --------------------------------
+  list            list all registered root dirs
+  add <path>      register and watch a new root dir
+  remove <id>     unregister a root dir by ID
+  help            show this message
+  exit            shut down the server
+```
+
+- `add` — registers the path in `root_dir`, scans all existing files into `file_metadata`, starts a `DirWatcherService`
+  watcher. Connected clients will receive new events from this dir if they subscribe on next reconnect.
+- `remove` — stops the watcher, deletes all `file_metadata` and `deleted_files` entries for that dir, removes from
+  `root_dir`.
+- Dirs in `sync.server.root-dirs` in `application.yml` are registered automatically on startup. The CLI is additive for
+  runtime changes.
+
+---
+
 ## Security
 
 - **mTLS**: Both server and client authenticate with PKCS12 certificates signed by a shared CA. The server uses
   `setNeedClientAuth(true)` — unauthenticated clients are rejected at the TLS layer.
+- **Encryption in transit**: All socket data (file bytes, paths, sync versions, ACKs) is encrypted by TLS. No plaintext
+  is sent over the network.
+- **Integrity**: TLS guarantees data hasn't been tampered with in transit.
 - **Keystores**: `server-keystore.p12`, `client-keystore.p12`, `truststore.p12` — all loaded from classpath resources.
 - **Multiple clients**: All clients can share the same `client-keystore.p12` — mTLS only verifies that the cert is
   signed by the trusted CA, not that it is unique per client.
+- **Encryption at rest**: Files are written to disk in plaintext. TLS only covers data in transit.
+- **Password management**: The keystore password is in `application.yml`. For production use, move it to an environment
+  variable:
+  ```yaml
+  sync:
+    socket:
+      password: ${LUDDITE_KEYSTORE_PASSWORD}
+  ```
 
 ---
 
@@ -293,15 +330,15 @@ entry is evicted from the in-memory `pendingAcks` map and a warning is logged. T
 
 ### server-sync `application.yml`
 
-| Property                         | Default                         | Description                               |
-|----------------------------------|---------------------------------|-------------------------------------------|
-| `spring.datasource.url`          | —                               | SQLite DB path                            |
-| `sync.server.root-dirs`          | —                               | List of absolute paths to watch and serve |
-| `sync.socket.port`               | `8888`                          | mTLS socket port for client connections   |
-| `sync.socket.keystore`           | `classpath:server-keystore.p12` | Server TLS keystore                       |
-| `sync.socket.truststore`         | `classpath:truststore.p12`      | CA truststore                             |
-| `sync.socket.password`           | —                               | Keystore/truststore password              |
-| `sync.socket.pending-ack-ttl-ms` | `20000`                         | TTL for unACK'd events before eviction    |
+| Property                         | Default                         | Description                                                                                                                   |
+|----------------------------------|---------------------------------|-------------------------------------------------------------------------------------------------------------------------------|
+| `spring.datasource.url`          | —                               | SQLite DB path                                                                                                                |
+| `sync.server.root-dirs`          | —                               | Optional — list of absolute paths to watch and serve on startup. Dirs can also be added/removed at runtime via the Admin CLI. |
+| `sync.socket.port`               | `8888`                          | mTLS socket port for client connections                                                                                       |
+| `sync.socket.keystore`           | `classpath:server-keystore.p12` | Server TLS keystore                                                                                                           |
+| `sync.socket.truststore`         | `classpath:truststore.p12`      | CA truststore                                                                                                                 |
+| `sync.socket.password`           | —                               | Keystore/truststore password                                                                                                  |
+| `sync.socket.pending-ack-ttl-ms` | `20000`                         | TTL for unACK'd events before eviction                                                                                        |
 
 ### client-sync `application.yml`
 
@@ -328,6 +365,7 @@ writes, DB queries) cheap and non-blocking at the OS level.
 | `client-acceptor`              | server | Accepts new mTLS client connections                          |
 | `buffer-drain`                 | server | Polls FileEventBuffer every 50ms, pushes to clients          |
 | `pending-ack-cleanup`          | server | Evicts stale pendingAcks every `pending-ack-ttl-ms`          |
+| `admin-cli`                    | server | Reads stdin commands for managing root dirs at runtime       |
 | `client-{addr}` (virtual)      | server | One per connected client — handles handshake + ACK loop      |
 | `server-sync-receiver`         | client | Connects to server, runs receive loop, reconnects on failure |
 | `duckDnsExecutor` (virtual)    | server | Runs DuckDNS HTTP update every 5 minutes                     |
