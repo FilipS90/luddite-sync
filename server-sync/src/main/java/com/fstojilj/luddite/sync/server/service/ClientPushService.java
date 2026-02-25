@@ -32,6 +32,7 @@ public class ClientPushService {
 
     public static final byte EVENT_WRITE = 1;
     public static final byte EVENT_DELETE = 2;
+    public static final byte ACK = 3;
 
     private final FileEventService fileEventService;
     private final FileMetadataService fileMetadataService;
@@ -121,8 +122,17 @@ public class ClientPushService {
             log.info("Client {} is now live, subscribed to {} dir(s)",
                     socket.getRemoteSocketAddress(), subscribedIds.size());
 
-            // Park until the client disconnects
-            in.transferTo(java.io.OutputStream.nullOutputStream());
+            // Read ACKs from client: [1 byte ACK] [8 bytes syncVersion]
+            while (true) {
+                byte ack = in.readByte();
+                if (ack == ACK) {
+                    long syncVersion = in.readLong();
+                    syncVersionRepository.markSynced(syncVersion);
+                    log.debug("ACK received for sync version {}", syncVersion);
+                } else {
+                    log.warn("Unexpected byte from client: {}", ack);
+                }
+            }
 
         } catch (IOException e) {
             log.info("Client disconnected: {}", socket.getRemoteSocketAddress());
@@ -154,13 +164,15 @@ public class ClientPushService {
                     List<FileChangeEvent> events = fileEventService.drainForRootDir(rootDirId);
                     if (events.isEmpty()) continue;
 
+                    // Look up dir name once per rootDirId, not per event
+                    String dirName = rootDirService.getRootDirNameById(rootDirId);
+
                     for (FileChangeEvent event : events) {
                         byte eventType = event.getEventKind().name().equals("ENTRY_DELETE")
                                 ? EVENT_DELETE : EVENT_WRITE;
 
                         // Prepend the dir name so the client knows which dir this belongs to
                         // e.g. "photos" + "2024/img.jpg" -> "photos/2024/img.jpg"
-                        String dirName = rootDirService.getRootDirNameById(rootDirId);
                         String qualifiedPath = dirName + "/" + event.getRelativePath();
                         byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
 
@@ -244,9 +256,14 @@ public class ClientPushService {
                 String absPath = Path.of(rootAbsPath).resolve(file.getRelativePath()).toString();
                 String qualifiedPath = entry.dirName() + "/" + file.getRelativePath();
                 byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
-                ClientSession tmp = new ClientSession(out, Set.of());
-                writeToClient(tmp, EVENT_WRITE, pathBytes, absPath, qualifiedPath,
-                        "CATCH_UP", file.getSyncVersion());
+                byte[] fileBytes = Files.readAllBytes(Path.of(absPath));
+                out.writeByte(EVENT_WRITE);
+                out.writeInt(pathBytes.length);
+                out.write(pathBytes);
+                out.writeLong(file.getSyncVersion());
+                out.writeLong(fileBytes.length);
+                out.write(fileBytes);
+                log.debug("Catch-up WRITE (v{}) {}", file.getSyncVersion(), qualifiedPath);
             }
 
             // Send deletes that happened since lastSyncVersion
@@ -257,10 +274,15 @@ public class ClientPushService {
                 long syncVersion = ((Number) delete.get("sync_version")).longValue();
                 String qualifiedPath = entry.dirName() + "/" + relativePath;
                 byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
-                ClientSession tmp = new ClientSession(out, Set.of());
-                writeToClient(tmp, EVENT_DELETE, pathBytes, null, qualifiedPath,
-                        "CATCH_UP_DELETE", syncVersion);
+                out.writeByte(EVENT_DELETE);
+                out.writeInt(pathBytes.length);
+                out.write(pathBytes);
+                out.writeLong(syncVersion);
+                out.writeLong(0L);
+                log.debug("Catch-up DELETE (v{}) {}", syncVersion, qualifiedPath);
             }
+
+            out.flush();
         }
     }
 

@@ -74,7 +74,9 @@ public class DirWatcherService {
                     }
                     WatchEvent<Path> ev = (WatchEvent<Path>) event;
                     Path absoluteFilePath = watchedDir.resolve(ev.context());
-                    String relativePath = rootDirPath.relativize(absoluteFilePath).toString();
+                    // Use forward slashes so paths are cross-platform safe over the wire
+                    String relativePath = rootDirPath.relativize(absoluteFilePath)
+                            .toString().replace('\\', '/');
                     log.info("{} trigger for file {}", kind.name(), absoluteFilePath);
 
                     // If a new directory is created, start watching it too

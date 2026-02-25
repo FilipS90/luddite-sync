@@ -29,5 +29,10 @@ public class SyncVersionRepository {
         }
         return key.longValue();
     }
+
+    public void markSynced(long version) {
+        jdbcTemplate.update(
+                "UPDATE sync_log SET status = 'SYNCED' WHERE version = ?", version);
+    }
 }
 

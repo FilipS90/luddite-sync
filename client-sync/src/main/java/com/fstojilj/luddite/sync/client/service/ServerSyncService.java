@@ -33,6 +33,7 @@ public class ServerSyncService {
 
     private static final byte EVENT_WRITE = 1;
     private static final byte EVENT_DELETE = 2;
+    private static final byte ACK = 3;
 
     private final SyncStateRepository syncStateRepository;
     private final SyncClientProperties clientProperties;
@@ -85,7 +86,7 @@ public class ServerSyncService {
 
                 registerConfiguredDirs();
                 sendHandshake(out);
-                receiveLoop(in);
+                receiveLoop(in, out);
 
             } catch (IOException e) {
                 if (running) {
@@ -136,7 +137,7 @@ public class ServerSyncService {
         log.info("Handshake sent: {} dir(s)", entries.size());
     }
 
-    private void receiveLoop(DataInputStream in) throws IOException {
+    private void receiveLoop(DataInputStream in, DataOutputStream out) throws IOException {
         while (running) {
             byte eventType = in.readByte();
             int pathLen = in.readInt();
@@ -157,6 +158,11 @@ public class ServerSyncService {
                 Files.write(target, fileBytes);
                 log.info("Written: {} ({} bytes, v{})", relPath, fileSize, syncVersion);
             }
+
+            // ACK the server so it can mark this version as SYNCED
+            out.writeByte(ACK);
+            out.writeLong(syncVersion);
+            out.flush();
 
             syncStateRepository.upsert(dirName, syncVersion);
         }
