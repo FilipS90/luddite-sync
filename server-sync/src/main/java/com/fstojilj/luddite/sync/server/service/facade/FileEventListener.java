@@ -3,7 +3,6 @@ package com.fstojilj.luddite.sync.server.service.facade;
 import com.fstojilj.luddite.sync.server.event.FileChangeEvent;
 import com.fstojilj.luddite.sync.server.service.FileEventService;
 import com.fstojilj.luddite.sync.server.service.FileMetadataService;
-import com.fstojilj.luddite.sync.server.service.RootDirService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
@@ -17,27 +16,21 @@ import java.nio.file.Path;
 public class FileEventListener {
 
     private final FileMetadataService fileMetadataService;
-    private final RootDirService rootDirService;
     private final FileEventService fileEventService;
 
     @EventListener
     public void handleFileEvent(FileChangeEvent event) {
-        var rootDirId = event.getRootDirId();
         var absoluteFilePath = Path.of(event.getAbsoluteFilePath());
-        var eventKind = event.getEventKind();
-        var rootDirPath = Path.of(rootDirService.getRootDirPathById(rootDirId));
-        var relativeFilePath = rootDirPath.relativize(absoluteFilePath).toString();
+        var rootDirId = event.getRootDirId();
+        var relativePath = event.getRelativePath();
 
-        switch (eventKind.name()) {
-            case "ENTRY_CREATE" -> fileMetadataService.addFileMetadata(absoluteFilePath, rootDirId, relativeFilePath);
-            case "ENTRY_MODIFY" ->
-                    fileMetadataService.updateFileMetadata(absoluteFilePath, rootDirId, relativeFilePath);
-            case "ENTRY_DELETE" -> fileMetadataService.deleteFileMetadata(rootDirId, relativeFilePath);
-            default -> log.error("Unknown event kind: {}", eventKind.name());
+        switch (event.getEventKind().name()) {
+            case "ENTRY_CREATE" -> fileMetadataService.addFileMetadata(absoluteFilePath, rootDirId, relativePath);
+            case "ENTRY_MODIFY" -> fileMetadataService.updateFileMetadata(absoluteFilePath, rootDirId, relativePath);
+            case "ENTRY_DELETE" -> fileMetadataService.deleteFileMetadata(rootDirId, relativePath);
+            default -> log.error("Unknown event kind: {}", event.getEventKind().name());
         }
 
-        fileEventService.publish(event.toBuilder()
-                .relativePath(relativeFilePath)
-                .build());
+        fileEventService.publish(event);
     }
 }

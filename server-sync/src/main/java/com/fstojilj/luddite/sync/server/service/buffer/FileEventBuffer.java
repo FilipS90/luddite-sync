@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 
@@ -32,7 +33,7 @@ public class FileEventBuffer {
     /**
      * Returns the set of root dir IDs that currently have pending events.
      */
-    public java.util.Set<Long> activeRootDirIds() {
+    public Set<Long> activeRootDirIds() {
         return queues.keySet();
     }
 }
