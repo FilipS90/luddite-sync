@@ -61,7 +61,15 @@ public class ClientPushService {
     private record ClientSession(DataOutputStream out, Set<Long> subscribedRootDirIds) {
     }
 
+    /**
+     * Tracks events that have been sent but not yet ACK'd by any client.
+     */
+    private record PendingAck(long rootDirId, String relativePath, byte eventType) {
+    }
+
     private final CopyOnWriteArraySet<ClientSession> sessions = new CopyOnWriteArraySet<>();
+    private final java.util.concurrent.ConcurrentHashMap<Long, PendingAck> pendingAcks =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     @PostConstruct
     public void start() throws Exception {
@@ -127,8 +135,18 @@ public class ClientPushService {
                 byte ack = in.readByte();
                 if (ack == ACK) {
                     long syncVersion = in.readLong();
-                    syncVersionRepository.markSynced(syncVersion);
-                    log.debug("ACK received for sync version {}", syncVersion);
+                    PendingAck pending = pendingAcks.remove(syncVersion);
+                    if (pending != null) {
+                        if (pending.eventType() == EVENT_WRITE) {
+                            fileMetadataService.stampSyncVersion(pending.rootDirId(), pending.relativePath(), syncVersion);
+                        } else {
+                            fileMetadataService.recordDeletion(pending.rootDirId(), pending.relativePath(), syncVersion);
+                        }
+                        syncVersionRepository.markSynced(syncVersion);
+                        log.debug("ACK received and stamped for sync version {}", syncVersion);
+                    } else {
+                        log.warn("ACK for unknown sync version {}", syncVersion);
+                    }
                 } else {
                     log.warn("Unexpected byte from client: {}", ack);
                 }
@@ -176,13 +194,9 @@ public class ClientPushService {
                         String qualifiedPath = dirName + "/" + event.getRelativePath();
                         byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
 
-                        // Stamp version once, then send to all interested clients
+                        // Mint a version and register as pending — only stamped when ACK received
                         long syncVersion = syncVersionRepository.next();
-                        if (eventType == EVENT_WRITE) {
-                            fileMetadataService.stampSyncVersion(rootDirId, event.getRelativePath(), syncVersion);
-                        } else {
-                            fileMetadataService.recordDeletion(rootDirId, event.getRelativePath(), syncVersion);
-                        }
+                        pendingAcks.put(syncVersion, new PendingAck(rootDirId, event.getRelativePath(), eventType));
 
                         for (ClientSession session : interested) {
                             writeToClient(session, eventType, pathBytes,
