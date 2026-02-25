@@ -21,8 +21,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyStore;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 
 @Service
@@ -51,6 +53,9 @@ public class ClientPushService {
     @Value("${sync.socket.password:fichony123!}")
     private String keystorePassword;
 
+    @Value("${sync.socket.pending-ack-ttl-ms:20000}")
+    private long pendingAckTtlMs;
+
     private SSLServerSocket serverSocket;
     private volatile boolean running = false;
 
@@ -71,14 +76,11 @@ public class ClientPushService {
 
     /**
      * Tracks events that have been sent but not yet ACK'd by any client.
-     * TODO: pendingAcks can grow unboundedly if a client stays connected but never ACKs
-     *  (e.g. slow client, bug on client side). Consider adding a periodic cleanup that
-     *  evicts entries older than a configurable TTL and logs a warning.
+     * TTL is configurable via sync.socket.pending-ack-ttl-ms (default 20s).
+     * TODO: if a client stays connected but never ACKs (e.g. disk full, severe congestion),
+     *  entries will be evicted after the TTL and the client will retry on reconnect.
      */
-    private final java.util.concurrent.ConcurrentHashMap<Long, PendingAck> pendingAcks =
-            new java.util.concurrent.ConcurrentHashMap<>();
-
-    private static final long PENDING_ACK_TTL_MS = 20_000;
+    private final ConcurrentHashMap<Long, PendingAck> pendingAcks = new ConcurrentHashMap<>();
 
     @PostConstruct
     public void start() throws Exception {
@@ -109,12 +111,12 @@ public class ClientPushService {
     private void pendingAckCleanupLoop() {
         while (running) {
             try {
-                Thread.sleep(PENDING_ACK_TTL_MS);
+                Thread.sleep(pendingAckTtlMs);
                 long now = System.currentTimeMillis();
                 pendingAcks.entrySet().removeIf(entry -> {
-                    if (now - entry.getValue().sentAt() > PENDING_ACK_TTL_MS) {
+                    if (now - entry.getValue().sentAt() > pendingAckTtlMs) {
                         log.warn("Pending ACK timed out after {}ms for sync version {} ({}), removing — client will retry on reconnect",
-                                PENDING_ACK_TTL_MS, entry.getKey(), entry.getValue().relativePath());
+                                pendingAckTtlMs, entry.getKey(), entry.getValue().relativePath());
                         return true;
                     }
                     return false;
@@ -273,7 +275,7 @@ public class ClientPushService {
      * Maps dir names from the handshake to their server-side rootDirIds, skipping unknown ones.
      */
     private Set<Long> resolveSubscribedIds(List<SyncHandshakeEntry> handshake) {
-        Set<Long> ids = new java.util.HashSet<>();
+        Set<Long> ids = new HashSet<>();
         for (SyncHandshakeEntry entry : handshake) {
             rootDirService.findByName(entry.dirName())
                     .ifPresentOrElse(

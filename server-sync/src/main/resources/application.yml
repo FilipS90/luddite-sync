@@ -23,4 +23,7 @@ sync:
     keystore: classpath:server-keystore.p12
     truststore: classpath:truststore.p12
     password: fichony123!
+    # How long to wait for a client ACK before giving up and letting the client retry on reconnect.
+    # Increase this on slow connections or when syncing large files.
+    pending-ack-ttl-ms: 20000
 
