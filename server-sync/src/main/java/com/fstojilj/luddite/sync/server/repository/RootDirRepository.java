@@ -11,6 +11,8 @@ import org.springframework.stereotype.Repository;
 
 import java.sql.Statement;
 import java.util.HashSet;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 @Repository
@@ -75,5 +77,15 @@ public class RootDirRepository {
         String sql = "DELETE FROM root_dir WHERE id = ?";
         int rowsAffected = jdbcTemplate.update(sql, id);
         return rowsAffected > 0;
+    }
+
+    public Long getRootDirIdByAbsolutePath(String absolutePath) {
+        String sql = "SELECT * FROM root_dir WHERE absolute_path = ?";
+        return Objects.requireNonNull(jdbcTemplate.queryForObject(sql, rowMapper, absolutePath)).getId();
+    }
+
+    public Optional<RootDir> getRootDirById(long rootDirId) {
+        String sql = "SELECT * FROM root_dir WHERE id = ?";
+        return Optional.ofNullable(jdbcTemplate.queryForObject(sql, rowMapper, rootDirId));
     }
 }

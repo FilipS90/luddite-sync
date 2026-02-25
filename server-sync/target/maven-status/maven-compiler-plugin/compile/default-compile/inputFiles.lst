@@ -1,9 +1,0 @@
-/home/filips90/MyStuff/luddite-sync/server-sync/src/main/java/com/fstojilj/luddite/sync/server/SyncServerApp.java
-/home/filips90/MyStuff/luddite-sync/server-sync/src/main/java/com/fstojilj/luddite/sync/server/config/AsyncConfig.java
-/home/filips90/MyStuff/luddite-sync/server-sync/src/main/java/com/fstojilj/luddite/sync/server/dns/DuckDNSUpdateJob.java
-/home/filips90/MyStuff/luddite-sync/server-sync/src/main/java/com/fstojilj/luddite/sync/server/repository/FileMetadataRepository.java
-/home/filips90/MyStuff/luddite-sync/server-sync/src/main/java/com/fstojilj/luddite/sync/server/repository/RootDirRepository.java
-/home/filips90/MyStuff/luddite-sync/server-sync/src/main/java/com/fstojilj/luddite/sync/server/service/DirWatcherService.java
-/home/filips90/MyStuff/luddite-sync/server-sync/src/main/java/com/fstojilj/luddite/sync/server/service/RootDirService.java
-/home/filips90/MyStuff/luddite-sync/server-sync/src/main/java/com/fstojilj/luddite/sync/server/utils/FileChecksumUtils.java
-/home/filips90/MyStuff/luddite-sync/server-sync/src/main/java/com/fstojilj/luddite/sync/server/utils/FileSystemUtils.java

@@ -14,7 +14,6 @@ import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 
 @Repository
 @RequiredArgsConstructor
@@ -30,7 +29,6 @@ public class FileMetadataRepository {
             .relativePath(rs.getString("relative_path"))
             .checksum(rs.getString("checksum"))
             .fileSize(rs.getLong("file_size"))
-            .mimeType(rs.getString("mime_type"))
             .createdAt(rs.getTimestamp("created_at") != null ? rs.getTimestamp("created_at").toInstant() : null)
             .modifiedAt(rs.getTimestamp("modified_at") != null ? rs.getTimestamp("modified_at").toInstant() : null)
             .syncVersion(rs.getLong("sync_version"))
@@ -39,7 +37,7 @@ public class FileMetadataRepository {
 
     public long add(FileMetadata fileMetadata) {
         String sql = """
-                INSERT INTO file_metadata (filename, root_dir_id, relative_path, checksum, file_size, mime_type, created_at, modified_at, sync_version)
+                INSERT INTO file_metadata (filename, root_dir_id, relative_path, checksum, file_size, created_at, modified_at, sync_version)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
 
@@ -52,7 +50,6 @@ public class FileMetadataRepository {
             ps.setString(3, fileMetadata.getRelativePath());
             ps.setString(4, fileMetadata.getChecksum());
             ps.setLong(5, fileMetadata.getFileSize());
-            ps.setString(6, fileMetadata.getMimeType());
             ps.setTimestamp(7, fileMetadata.getCreatedAt() != null ? Timestamp.from(fileMetadata.getCreatedAt()) : Timestamp.from(Instant.now()));
             ps.setTimestamp(8, fileMetadata.getModifiedAt() != null ? Timestamp.from(fileMetadata.getModifiedAt()) : Timestamp.from(Instant.now()));
             ps.setObject(9, fileMetadata.getSyncVersion());
@@ -68,11 +65,20 @@ public class FileMetadataRepository {
         return key.longValue();
     }
 
-    private void update(FileMetadata fileMetadata) {
+    public FileMetadata findByRootDirIdAndRelativePath(Long rootDirId, String relativePath) {
+        String sql = "SELECT * FROM file_metadata WHERE root_dir_id = ? AND relative_path = ?";
+        List<FileMetadata> results = jdbcTemplate.query(sql, rowMapper, rootDirId, relativePath);
+        if (results.isEmpty()) {
+            throw new IllegalArgumentException("No FileMetadata found for rootDirId: " + rootDirId + " and relativePath: " + relativePath);
+        }
+        return results.getFirst();
+    }
+
+    public void update(FileMetadata fileMetadata) {
         String sql = """
                 UPDATE file_metadata
                 SET filename = ?, root_dir_id = ?, relative_path = ?, checksum = ?,
-                    file_size = ?, mime_type = ?, modified_at = ?, sync_version = ?
+                    file_size = ?, modified_at = ?, sync_version = ?
                 WHERE id = ?
                 """;
 
@@ -82,7 +88,6 @@ public class FileMetadataRepository {
                 fileMetadata.getRelativePath(),
                 fileMetadata.getChecksum(),
                 fileMetadata.getFileSize(),
-                fileMetadata.getMimeType(),
                 Timestamp.from(Instant.now()),
                 fileMetadata.getSyncVersion(),
                 fileMetadata.getId()
@@ -91,55 +96,19 @@ public class FileMetadataRepository {
         if (rowsAffected == 0) {
             log.warn("No FileMetadata found with id: {}", fileMetadata.getId());
         } else {
-            log.debug("Updated FileMetadata with id: {}", fileMetadata.getId());
+            log.debug("Updated FileMetadata for rootDirId: {}, relativePath: {}", fileMetadata.getRootDirId(), fileMetadata.getRelativePath());
         }
     }
 
-    public Optional<FileMetadata> findById(Long id) {
-        String sql = "SELECT * FROM file_metadata WHERE id = ?";
-        List<FileMetadata> results = jdbcTemplate.query(sql, rowMapper, id);
-        return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
-    }
-
-    public List<FileMetadata> findByRootDirId(Long rootDirId) {
-        String sql = "SELECT * FROM file_metadata WHERE root_dir_id = ?";
-        return jdbcTemplate.query(sql, rowMapper, rootDirId);
-    }
-
-    public List<FileMetadata> findBySyncVersionGreaterThan(Long syncVersion) {
-        String sql = "SELECT * FROM file_metadata WHERE sync_version > ?";
-        return jdbcTemplate.query(sql, rowMapper, syncVersion);
-    }
-
-    public void deleteById(Long id) {
-        String sql = "DELETE FROM file_metadata WHERE id = ?";
-        int rowsAffected = jdbcTemplate.update(sql, id);
+    public void delete(Long rootDirId, String relativePath) {
+        String sql = "DELETE FROM file_metadata WHERE root_dir_id = ? AND relative_path = ?";
+        int rowsAffected = jdbcTemplate.update(sql, rootDirId, relativePath);
         if (rowsAffected > 0) {
-            log.debug("Deleted FileMetadata with id: {}", id);
+            log.debug("Deleted FileMetadata for rootDirId: {}, relativePath: {}", rootDirId, relativePath);
         } else {
-            log.warn("No FileMetadata found with id: {}", id);
+            log.warn("No FileMetadata found for deletion with rootDirId: {}, relativePath: {}", rootDirId, relativePath);
         }
     }
 
-    public void deleteByChecksum(String checksum) {
-        String sql = "DELETE FROM file_metadata WHERE checksum = ?";
-        int rowsAffected = jdbcTemplate.update(sql, checksum);
-        if (rowsAffected > 0) {
-            log.debug("Deleted FileMetadata with checksum: {}", checksum);
-        } else {
-            log.warn("No FileMetadata found with checksum: {}", checksum);
-        }
-    }
 
-    public boolean existsByChecksum(String checksum) {
-        String sql = "SELECT COUNT(*) FROM file_metadata WHERE checksum = ?";
-        Integer count = jdbcTemplate.queryForObject(sql, Integer.class, checksum);
-        return count != null && count > 0;
-    }
-
-    public long count() {
-        String sql = "SELECT COUNT(*) FROM file_metadata";
-        Long count = jdbcTemplate.queryForObject(sql, Long.class);
-        return count != null ? count : 0L;
-    }
 }

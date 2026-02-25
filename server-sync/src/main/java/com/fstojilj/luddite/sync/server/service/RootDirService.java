@@ -5,6 +5,7 @@ import com.fstojilj.luddite.sync.server.repository.RootDirRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import static com.fstojilj.luddite.sync.server.utils.FileSystemUtils.getDirName;
 
@@ -20,6 +21,7 @@ public class RootDirService {
     private final DirWatcherService dirWatcherService;
 
 
+    @Transactional
     public void addRootDir(String absolutePath) {
         var dirName = getDirName(absolutePath);
         var rootDir = RootDir.builder()
@@ -29,10 +31,21 @@ public class RootDirService {
 
         long roodDirId = rootDirRepository.insert(rootDir);
         fileMetadataService.addAllFileMetadataForRoot(absolutePath, roodDirId);
-        dirWatcherService.startWatching(absolutePath);
+        dirWatcherService.startWatching(absolutePath, roodDirId);
+    }
+
+    public Long getRootDirIdByAbsolutePath(String absolutePath) {
+        return rootDirRepository.getRootDirIdByAbsolutePath(absolutePath);
     }
 
     public boolean removeRootDirById(long id) {
         return rootDirRepository.deleteRootDirById(id);
+    }
+
+    public String getRootDirPathById(long rootDirId) {
+        var rootDir = rootDirRepository.getRootDirById(rootDirId)
+                .orElseThrow(() -> new IllegalArgumentException("Root directory not found for ID: " + rootDirId));
+
+        return rootDir.getAbsolutePath();
     }
 }

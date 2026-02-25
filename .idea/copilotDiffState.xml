@@ -20,6 +20,15 @@
             </PendingDiffInfo>
           </value>
         </entry>
+        <entry key="$PROJECT_DIR$/server-sync/src/main/java/com/fstojilj/luddite/sync/server/service/FileChangeEventBuffer.java">
+          <value>
+            <PendingDiffInfo>
+              <option name="filePath" value="$PROJECT_DIR$/server-sync/src/main/java/com/fstojilj/luddite/sync/server/service/FileChangeEventBuffer.java" />
+              <option name="originalContent" value="}&#10;&#10;" />
+              <option name="updatedContent" value="package com.fstojilj.luddite.sync.server.service;&#10;&#10;import com.fstojilj.luddite.sync.server.event.FileChangeEvent;&#10;import lombok.extern.slf4j.Slf4j;&#10;&#10;import java.util.ArrayList;&#10;import java.util.List;&#10;import java.util.concurrent.LinkedBlockingQueue;&#10;import java.util.concurrent.locks.ReentrantLock;&#10;&#10;@Slf4j&#10;public class FileChangeEventBuffer {&#10;&#10;    private final LinkedBlockingQueue&lt;FileChangeEvent&gt; queue = new LinkedBlockingQueue&lt;&gt;();&#10;    private final ReentrantLock drainLock = new ReentrantLock();&#10;&#10;    private FileChangeEventBuffer() {&#10;    }&#10;&#10;    private static class Holder {&#10;        private static final FileChangeEventBuffer INSTANCE = new FileChangeEventBuffer();&#10;    }&#10;&#10;    public static FileChangeEventBuffer getInstance() {&#10;        return Holder.INSTANCE;&#10;    }&#10;&#10;    public void publish(FileChangeEvent event) {&#10;        if (!queue.offer(event)) {&#10;            log.warn(&quot;FileChangeEvent queue is full, dropping event: {}&quot;, event);&#10;        }&#10;    }&#10;&#10;    public List&lt;FileChangeEvent&gt; drain() {&#10;        drainLock.lock();&#10;        try {&#10;            List&lt;FileChangeEvent&gt; events = new ArrayList&lt;&gt;();&#10;            queue.drainTo(events);&#10;            return events;&#10;        } finally {&#10;            drainLock.unlock();&#10;        }&#10;    }&#10;}" />
+            </PendingDiffInfo>
+          </value>
+        </entry>
       </map>
     </option>
   </component>

@@ -13,7 +13,6 @@ CREATE TABLE IF NOT EXISTS file_metadata (
     relative_path TEXT NOT NULL,
     checksum TEXT NOT NULL UNIQUE,
     file_size INTEGER NOT NULL,
-    mime_type TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     sync_version INTEGER
