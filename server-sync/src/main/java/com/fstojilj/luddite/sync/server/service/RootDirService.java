@@ -47,8 +47,13 @@ public class RootDirService {
     public String getRootDirPathById(long rootDirId) {
         var rootDir = rootDirRepository.getRootDirById(rootDirId)
                 .orElseThrow(() -> new IllegalArgumentException("Root directory not found for ID: " + rootDirId));
-
         return rootDir.getAbsolutePath();
+    }
+
+    public String getRootDirNameById(long rootDirId) {
+        return rootDirRepository.getRootDirById(rootDirId)
+                .orElseThrow(() -> new IllegalArgumentException("Root directory not found for ID: " + rootDirId))
+                .getName();
     }
 
     public Optional<RootDir> findByName(String name) {

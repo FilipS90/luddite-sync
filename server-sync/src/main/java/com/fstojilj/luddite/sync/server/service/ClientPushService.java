@@ -157,7 +157,12 @@ public class ClientPushService {
                     for (FileChangeEvent event : events) {
                         byte eventType = event.getEventKind().name().equals("ENTRY_DELETE")
                                 ? EVENT_DELETE : EVENT_WRITE;
-                        byte[] pathBytes = event.getRelativePath().getBytes(StandardCharsets.UTF_8);
+
+                        // Prepend the dir name so the client knows which dir this belongs to
+                        // e.g. "photos" + "2024/img.jpg" -> "photos/2024/img.jpg"
+                        String dirName = rootDirService.getRootDirNameById(rootDirId);
+                        String qualifiedPath = dirName + "/" + event.getRelativePath();
+                        byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
 
                         // Stamp version once, then send to all interested clients
                         long syncVersion = syncVersionRepository.next();
@@ -169,7 +174,7 @@ public class ClientPushService {
 
                         for (ClientSession session : interested) {
                             writeToClient(session, eventType, pathBytes,
-                                    event.getAbsoluteFilePath(), event.getRelativePath(),
+                                    event.getAbsoluteFilePath(), qualifiedPath,
                                     event.getEventKind().name(), syncVersion);
                         }
                     }
@@ -237,9 +242,10 @@ public class ClientPushService {
             log.info("Sending {} catch-up file(s) for dir '{}'", files.size(), entry.dirName());
             for (var file : files) {
                 String absPath = Path.of(rootAbsPath).resolve(file.getRelativePath()).toString();
-                byte[] pathBytes = file.getRelativePath().getBytes(StandardCharsets.UTF_8);
+                String qualifiedPath = entry.dirName() + "/" + file.getRelativePath();
+                byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
                 ClientSession tmp = new ClientSession(out, Set.of());
-                writeToClient(tmp, EVENT_WRITE, pathBytes, absPath, file.getRelativePath(),
+                writeToClient(tmp, EVENT_WRITE, pathBytes, absPath, qualifiedPath,
                         "CATCH_UP", file.getSyncVersion());
             }
 
@@ -249,9 +255,10 @@ public class ClientPushService {
             for (var delete : deletes) {
                 String relativePath = (String) delete.get("relative_path");
                 long syncVersion = ((Number) delete.get("sync_version")).longValue();
-                byte[] pathBytes = relativePath.getBytes(StandardCharsets.UTF_8);
+                String qualifiedPath = entry.dirName() + "/" + relativePath;
+                byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
                 ClientSession tmp = new ClientSession(out, Set.of());
-                writeToClient(tmp, EVENT_DELETE, pathBytes, null, relativePath,
+                writeToClient(tmp, EVENT_DELETE, pathBytes, null, qualifiedPath,
                         "CATCH_UP_DELETE", syncVersion);
             }
         }
