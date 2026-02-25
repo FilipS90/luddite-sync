@@ -1,0 +1,114 @@
+package com.fstojilj.luddite.sync.server.cli;
+
+import com.fstojilj.luddite.sync.server.service.RootDirService;
+import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+
+/**
+ * Interactive CLI for managing server root directories at runtime.
+ * <p>
+ * Commands:
+ * list              — list all registered root dirs with their IDs
+ * add <path>        — register a new root dir and start watching it
+ * remove <id>       — stop watching and unregister a root dir by ID
+ * help              — show available commands
+ * exit              — shut down the server
+ */
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class AdminCli {
+
+    private final RootDirService rootDirService;
+
+    @PostConstruct
+    public void start() {
+        Thread.ofVirtual().name("admin-cli").start(this::runLoop);
+    }
+
+    private void runLoop() {
+        printHelp();
+        try (var reader = new BufferedReader(new InputStreamReader(System.in))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                handle(line.trim());
+            }
+        } catch (Exception e) {
+            log.error("Admin CLI error", e);
+        }
+    }
+
+    private void handle(String line) {
+        if (line.isEmpty()) return;
+
+        String[] parts = line.split("\\s+", 2);
+        String command = parts[0].toLowerCase();
+        String arg = parts.length > 1 ? parts[1] : "";
+
+        switch (command) {
+            case "list" -> {
+                var dirs = rootDirService.findAll();
+                if (dirs.isEmpty()) {
+                    System.out.println("  (no root dirs registered)");
+                } else {
+                    System.out.println("  ID  | Path");
+                    System.out.println("  ----|-----------------------------");
+                    dirs.forEach(d -> System.out.printf("  %-4d| %s%n", d.getId(), d.getAbsolutePath()));
+                }
+            }
+            case "add" -> {
+                if (arg.isEmpty()) {
+                    System.out.println("  Usage: add <absolute-path>");
+                    return;
+                }
+                try {
+                    rootDirService.addRootDir(arg);
+                    System.out.printf("  Added and watching: %s%n", arg);
+                } catch (Exception e) {
+                    System.out.printf("  Error: %s%n", e.getMessage());
+                }
+            }
+            case "remove" -> {
+                if (arg.isEmpty()) {
+                    System.out.println("  Usage: remove <id>");
+                    return;
+                }
+                try {
+                    long id = Long.parseLong(arg);
+                    boolean removed = rootDirService.removeRootDir(id);
+                    if (removed) {
+                        System.out.printf("  Removed root dir id=%d%n", id);
+                    } else {
+                        System.out.printf("  No root dir found with id=%d%n", id);
+                    }
+                } catch (NumberFormatException e) {
+                    System.out.println("  Error: id must be a number");
+                }
+            }
+            case "help" -> printHelp();
+            case "exit" -> {
+                System.out.println("  Shutting down...");
+                System.exit(0);
+            }
+            default -> System.out.printf("  Unknown command: '%s'. Type 'help' for available commands.%n", command);
+        }
+    }
+
+    private void printHelp() {
+        System.out.println();
+        System.out.println("  Luddite Sync Server — Admin CLI");
+        System.out.println("  --------------------------------");
+        System.out.println("  list            list all registered root dirs");
+        System.out.println("  add <path>      register and watch a new root dir");
+        System.out.println("  remove <id>     unregister a root dir by ID");
+        System.out.println("  help            show this message");
+        System.out.println("  exit            shut down the server");
+        System.out.println();
+    }
+}
+

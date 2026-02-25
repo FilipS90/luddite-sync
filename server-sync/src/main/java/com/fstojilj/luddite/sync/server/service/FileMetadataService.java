@@ -86,6 +86,12 @@ public class FileMetadataService {
         fileMetadataRepository.delete(rootDirId, relativeFilePath);
     }
 
+    @Transactional
+    public void deleteAllForRootDir(long rootDirId) {
+        fileMetadataRepository.deleteAllByRootDirId(rootDirId);
+        deletedFilesRepository.deleteAllByRootDirId(rootDirId);
+    }
+
     /**
      * Records a deletion event with the given syncVersion for catch-up replay.
      */

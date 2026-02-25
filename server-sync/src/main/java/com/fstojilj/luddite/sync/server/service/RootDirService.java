@@ -45,6 +45,19 @@ public class RootDirService {
         return rootDirRepository.deleteRootDirById(id);
     }
 
+    @Transactional
+    public boolean removeRootDir(long id) {
+        var rootDir = rootDirRepository.getRootDirById(id);
+        if (rootDir.isEmpty()) {
+            return false;
+        }
+        dirWatcherService.stopWatching(rootDir.get().getAbsolutePath());
+        fileMetadataService.deleteAllForRootDir(id);
+        rootDirRepository.deleteRootDirById(id);
+        log.info("Removed root dir: {} (id={})", rootDir.get().getAbsolutePath(), id);
+        return true;
+    }
+
     public String getRootDirPathById(long rootDirId) {
         var rootDir = rootDirRepository.getRootDirById(rootDirId)
                 .orElseThrow(() -> new IllegalArgumentException("Root directory not found for ID: " + rootDirId));

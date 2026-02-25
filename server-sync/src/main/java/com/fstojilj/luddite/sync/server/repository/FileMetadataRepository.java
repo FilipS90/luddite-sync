@@ -128,5 +128,10 @@ public class FileMetadataRepository {
         }
     }
 
+    public void deleteAllByRootDirId(long rootDirId) {
+        jdbcTemplate.update("DELETE FROM file_metadata WHERE root_dir_id = ?", rootDirId);
+        log.debug("Deleted all FileMetadata for rootDirId: {}", rootDirId);
+    }
+
 
 }

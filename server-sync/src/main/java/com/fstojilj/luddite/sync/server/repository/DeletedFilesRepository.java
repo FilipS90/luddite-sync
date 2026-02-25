@@ -31,5 +31,9 @@ public class DeletedFilesRepository {
                 "SELECT relative_path, sync_version FROM deleted_files WHERE root_dir_id = ? AND sync_version > ?",
                 rootDirId, lastSyncVersion);
     }
+
+    public void deleteAllByRootDirId(long rootDirId) {
+        jdbcTemplate.update("DELETE FROM deleted_files WHERE root_dir_id = ?", rootDirId);
+    }
 }
 
