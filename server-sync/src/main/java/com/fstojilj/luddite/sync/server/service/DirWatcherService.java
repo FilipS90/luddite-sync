@@ -76,6 +76,13 @@ public class DirWatcherService {
                     Path absoluteFilePath = watchedDir.resolve(ev.context());
                     String relativePath = rootDirPath.relativize(absoluteFilePath).toString();
                     log.info("{} trigger for file {}", kind.name(), absoluteFilePath);
+
+                    // If a new directory is created, start watching it too
+                    if (kind == StandardWatchEventKinds.ENTRY_CREATE && absoluteFilePath.toFile().isDirectory()) {
+                        startWatching(absoluteFilePath, rootDirPath, rootDirId);
+                        continue;
+                    }
+
                     FileChangeEvent fileChangeEvent = FileChangeEvent.builder()
                             .rootDirId(rootDirId)
                             .absoluteFilePath(absoluteFilePath.toString())

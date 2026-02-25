@@ -14,6 +14,7 @@ import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 @RequiredArgsConstructor
@@ -74,6 +75,12 @@ public class FileMetadataRepository {
         return results.getFirst();
     }
 
+    public Optional<FileMetadata> findOptionalByRootDirIdAndRelativePath(Long rootDirId, String relativePath) {
+        String sql = "SELECT * FROM file_metadata WHERE root_dir_id = ? AND relative_path = ?";
+        List<FileMetadata> results = jdbcTemplate.query(sql, rowMapper, rootDirId, relativePath);
+        return results.isEmpty() ? Optional.empty() : Optional.of(results.getFirst());
+    }
+
     public void update(FileMetadata fileMetadata) {
         String sql = """
                 UPDATE file_metadata
@@ -101,7 +108,7 @@ public class FileMetadataRepository {
     }
 
     public List<FileMetadata> findByRootDirIdWithSyncVersionAfter(long rootDirId, long lastSyncVersion) {
-        String sql = "SELECT * FROM file_metadata WHERE root_dir_id = ? AND (sync_version IS NULL OR sync_version > ?)";
+        String sql = "SELECT * FROM file_metadata WHERE root_dir_id = ? AND sync_version IS NOT NULL AND sync_version > ?";
         return jdbcTemplate.query(sql, rowMapper, rootDirId, lastSyncVersion);
     }
 

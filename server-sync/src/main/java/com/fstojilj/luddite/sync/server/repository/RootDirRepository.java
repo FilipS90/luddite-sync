@@ -30,8 +30,8 @@ public class RootDirRepository {
 
     public long insert(RootDir rootDir) {
         String sql = """
-                INSERT INTO root_dir (name, absolute_path, created_at, modified_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO root_dir (name, absolute_path)
+                VALUES (?, ?)
                 """;
 
         KeyHolder keyHolder = new GeneratedKeyHolder();
@@ -54,7 +54,7 @@ public class RootDirRepository {
     public void update(RootDir rootDir) {
         String sql = """
                 UPDATE root_dir
-                SET name = ?, absolute_path = ?, created_at = ?, modified_at = ?
+                SET name = ?, absolute_path = ?
                 WHERE id = ?
                 """;
 

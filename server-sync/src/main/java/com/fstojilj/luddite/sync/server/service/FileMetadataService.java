@@ -65,10 +65,18 @@ public class FileMetadataService {
             throw new IllegalArgumentException("Path must point to an existing file");
         }
 
-        var fileMetadata = fileMetadataRepository.findByRootDirIdAndRelativePath(rootDirId, relativeFilePath);
+        var existing = fileMetadataRepository.findOptionalByRootDirIdAndRelativePath(rootDirId, relativeFilePath);
+        if (existing.isEmpty()) {
+            // ENTRY_MODIFY can race ahead of ENTRY_CREATE - treat as add
+            log.warn("ENTRY_MODIFY for unknown file, inserting instead: {}", relativeFilePath);
+            fileMetadataRepository.add(buildFileMetadata(file, rootDirId, relativeFilePath));
+            return;
+        }
+
+        var fileMetadata = existing.get();
         fileMetadata.setFileSize(file.length());
         fileMetadata.setChecksum(calculateFileChecksum(absoluteFilePath));
-        fileMetadata.setSyncVersion(null); // reset — will be stamped when actually sent to a client
+        fileMetadata.setSyncVersion(null);
 
         fileMetadataRepository.update(fileMetadata);
     }
