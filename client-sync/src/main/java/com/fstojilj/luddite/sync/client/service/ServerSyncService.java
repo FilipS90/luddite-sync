@@ -159,12 +159,12 @@ public class ServerSyncService {
                 log.info("Written: {} ({} bytes, v{})", relPath, fileSize, syncVersion);
             }
 
-            // ACK the server so it can mark this version as SYNCED
+            // Persist local state first, then ACK the server
+            syncStateRepository.upsert(dirName, syncVersion);
+
             out.writeByte(ACK);
             out.writeLong(syncVersion);
             out.flush();
-
-            syncStateRepository.upsert(dirName, syncVersion);
         }
     }
 
