@@ -340,6 +340,24 @@ The server exposes an interactive CLI on `stdin` for managing root directories a
 | `sync.socket.password`           | —                               | Keystore/truststore password                                                                                                  |
 | `sync.socket.pending-ack-ttl-ms` | `20000`                         | TTL for unACK'd events before eviction                                                                                        |
 
+**Example:**
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:sqlite:C:/Users/fstojiljko/.luddite/server/photos.db
+
+sync:
+  server:
+    root-dirs:
+      - C:/Users/fstojiljko/photos
+      - C:/Users/fstojiljko/documents
+  socket:
+    port: 8888
+    password: ${LUDDITE_KEYSTORE_PASSWORD}
+    pending-ack-ttl-ms: 20000
+```
+
 ### client-sync `application.yml`
 
 | Property                 | Default                         | Description                                                                                                                                        |
@@ -352,6 +370,35 @@ The server exposes an interactive CLI on `stdin` for managing root directories a
 | `sync.socket.keystore`   | `classpath:client-keystore.p12` | Client TLS keystore                                                                                                                                |
 | `sync.socket.truststore` | `classpath:truststore.p12`      | CA truststore                                                                                                                                      |
 | `sync.socket.password`   | —                               | Keystore/truststore password                                                                                                                       |
+
+**Example (specific dirs):**
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:sqlite:/home/user/.luddite/client/sync.db
+
+sync:
+  server:
+    host: luddite-sync.duckdns.org
+    port: 8888
+  client:
+    mirror-dir: /home/user/.luddite
+    dirs:
+      - photos
+      - documents
+  socket:
+    password: ${LUDDITE_KEYSTORE_PASSWORD}
+```
+
+**Example (sync everything the server has):**
+
+```yaml
+sync:
+  client:
+    mirror-dir: /home/user/.luddite
+    dirs: [ ]   # empty = subscribe to all dirs advertised by the server
+```
 
 ---
 
