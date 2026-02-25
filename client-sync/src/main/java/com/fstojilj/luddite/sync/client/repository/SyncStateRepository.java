@@ -25,6 +25,18 @@ public class SyncStateRepository {
     }
 
     /**
+     * Registers a dir with lastSyncVersion = -1 if not already present.
+     * Existing entries are left untouched so their progress is preserved.
+     */
+    public void registerIfAbsent(String dirName) {
+        jdbcTemplate.update("""
+                INSERT INTO sync_state (dir_name, last_sync_version)
+                VALUES (?, -1)
+                ON CONFLICT(dir_name) DO NOTHING
+                """, dirName);
+    }
+
+    /**
      * Inserts or advances the last sync version for a given dir.
      * Never regresses — if the stored version is already higher, it is kept.
      */

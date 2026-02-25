@@ -222,15 +222,26 @@ public class ClientPushService {
 
             long rootDirId = rootDir.get().getId();
             String rootAbsPath = rootDir.get().getAbsolutePath();
+
+            // Send files created/modified since lastSyncVersion
             var files = fileMetadataService.findFilesNewerThan(rootDirId, entry.lastSyncVersion());
             log.info("Sending {} catch-up file(s) for dir '{}'", files.size(), entry.dirName());
-
             for (var file : files) {
                 String absPath = Path.of(rootAbsPath).resolve(file.getRelativePath()).toString();
                 byte[] pathBytes = file.getRelativePath().getBytes(StandardCharsets.UTF_8);
                 ClientSession tmp = new ClientSession(out, Set.of());
                 writeToClient(tmp, EVENT_WRITE, pathBytes, absPath, file.getRelativePath(),
                         "CATCH_UP", rootDirId);
+            }
+
+            // Send deletes that happened since lastSyncVersion
+            var deletes = fileMetadataService.findDeletesNewerThan(rootDirId, entry.lastSyncVersion());
+            log.info("Sending {} catch-up delete(s) for dir '{}'", deletes.size(), entry.dirName());
+            for (String relativePath : deletes) {
+                byte[] pathBytes = relativePath.getBytes(StandardCharsets.UTF_8);
+                ClientSession tmp = new ClientSession(out, Set.of());
+                writeToClient(tmp, EVENT_DELETE, pathBytes, null, relativePath,
+                        "CATCH_UP_DELETE", rootDirId);
             }
         }
     }
@@ -257,9 +268,11 @@ public class ClientPushService {
 
             out.flush();
 
-            // Stamp the version back so future clients know this file has been synced
+            // Persist the version so future clients can catch up
             if (eventType == EVENT_WRITE) {
                 fileMetadataService.stampSyncVersion(rootDirId, relativePath, syncVersion);
+            } else {
+                fileMetadataService.recordDeletion(rootDirId, relativePath, syncVersion);
             }
 
             log.debug("Pushed {} (v{}) to client: {}", kindName, syncVersion, relativePath);

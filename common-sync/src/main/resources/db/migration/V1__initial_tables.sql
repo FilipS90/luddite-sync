@@ -11,15 +11,16 @@ CREATE TABLE IF NOT EXISTS file_metadata (
     filename TEXT NOT NULL,
     root_dir_id INTEGER NOT NULL REFERENCES root_dir(id) ON DELETE CASCADE,
     relative_path TEXT NOT NULL,
-    checksum TEXT NOT NULL UNIQUE,
+    checksum TEXT NOT NULL,
     file_size INTEGER NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    sync_version INTEGER
+    modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    sync_version INTEGER,
+    UNIQUE (root_dir_id, relative_path)
 );
 
 CREATE TABLE IF NOT EXISTS sync_log (
-    version PRIMARY KEY INTEGER NOT NULL,
+    version INTEGER PRIMARY KEY AUTOINCREMENT,
     status TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -38,15 +39,6 @@ AFTER UPDATE ON file_metadata
 FOR EACH ROW
 BEGIN
     UPDATE file_metadata
-    SET modified_at = CURRENT_TIMESTAMP
-    WHERE id = NEW.id;
-END;
-
-CREATE TRIGGER update_folder_metadata_modified_at
-AFTER UPDATE ON folder_metadata
-FOR EACH ROW
-BEGIN
-    UPDATE folder_metadata
     SET modified_at = CURRENT_TIMESTAMP
     WHERE id = NEW.id;
 END;

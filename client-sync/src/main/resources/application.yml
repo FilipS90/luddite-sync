@@ -17,6 +17,8 @@ sync:
     port: 8888
   client:
     mirror-dir: ${user.home}/.luddite
+    dirs:
+      - photos
   socket:
     keystore: classpath:client-keystore.p12
     truststore: classpath:truststore.p12

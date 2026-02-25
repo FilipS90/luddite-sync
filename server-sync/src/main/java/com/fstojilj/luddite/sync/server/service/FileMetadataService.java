@@ -1,6 +1,7 @@
 package com.fstojilj.luddite.sync.server.service;
 
 import com.fstojilj.luddite.sync.common.model.FileMetadata;
+import com.fstojilj.luddite.sync.server.repository.DeletedFilesRepository;
 import com.fstojilj.luddite.sync.server.repository.FileMetadataRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,6 +21,7 @@ import static com.fstojilj.luddite.sync.server.utils.FileSystemUtils.listAllFile
 public class FileMetadataService {
 
     private final FileMetadataRepository fileMetadataRepository;
+    private final DeletedFilesRepository deletedFilesRepository;
 
     /**
      * Returns the new syncVersion assigned to this file.
@@ -76,6 +78,14 @@ public class FileMetadataService {
     }
 
     /**
+     * Records a deletion event with the given syncVersion for catch-up replay.
+     */
+    @Transactional
+    public void recordDeletion(long rootDirId, String relativePath, long syncVersion) {
+        deletedFilesRepository.insert(rootDirId, relativePath, syncVersion);
+    }
+
+    /**
      * Called after a file has been successfully sent to at least one client.
      * Sets the sync_version so future clients know they already have this version.
      */
@@ -86,6 +96,10 @@ public class FileMetadataService {
 
     public List<FileMetadata> findFilesNewerThan(long rootDirId, long lastSyncVersion) {
         return fileMetadataRepository.findByRootDirIdWithSyncVersionAfter(rootDirId, lastSyncVersion);
+    }
+
+    public List<String> findDeletesNewerThan(long rootDirId, long lastSyncVersion) {
+        return deletedFilesRepository.findByRootDirIdWithSyncVersionAfter(rootDirId, lastSyncVersion);
     }
 
     private FileMetadata buildFileMetadata(File file, long rootDirId, String relativePath) {

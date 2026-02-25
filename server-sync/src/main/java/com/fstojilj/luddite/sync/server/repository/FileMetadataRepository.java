@@ -38,7 +38,7 @@ public class FileMetadataRepository {
     public long add(FileMetadata fileMetadata) {
         String sql = """
                 INSERT INTO file_metadata (filename, root_dir_id, relative_path, checksum, file_size, created_at, modified_at, sync_version)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """;
 
         KeyHolder keyHolder = new GeneratedKeyHolder();
@@ -50,9 +50,9 @@ public class FileMetadataRepository {
             ps.setString(3, fileMetadata.getRelativePath());
             ps.setString(4, fileMetadata.getChecksum());
             ps.setLong(5, fileMetadata.getFileSize());
-            ps.setTimestamp(7, fileMetadata.getCreatedAt() != null ? Timestamp.from(fileMetadata.getCreatedAt()) : Timestamp.from(Instant.now()));
-            ps.setTimestamp(8, fileMetadata.getModifiedAt() != null ? Timestamp.from(fileMetadata.getModifiedAt()) : Timestamp.from(Instant.now()));
-            ps.setObject(9, fileMetadata.getSyncVersion());
+            ps.setTimestamp(6, fileMetadata.getCreatedAt() != null ? Timestamp.from(fileMetadata.getCreatedAt()) : Timestamp.from(Instant.now()));
+            ps.setTimestamp(7, fileMetadata.getModifiedAt() != null ? Timestamp.from(fileMetadata.getModifiedAt()) : Timestamp.from(Instant.now()));
+            ps.setObject(8, fileMetadata.getSyncVersion());
             return ps;
         }, keyHolder);
 
@@ -61,7 +61,7 @@ public class FileMetadataRepository {
             throw new IllegalStateException("Failed to retrieve generated key for FileMetadata");
         }
 
-        log.debug("Inserted FileMetadata with id: {}", fileMetadata.getId());
+        log.debug("Inserted FileMetadata with id: {}", key.longValue());
         return key.longValue();
     }
 

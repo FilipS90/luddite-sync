@@ -1,5 +1,6 @@
 package com.fstojilj.luddite.sync.client.service;
 
+import com.fstojilj.luddite.sync.client.config.SyncClientProperties;
 import com.fstojilj.luddite.sync.client.repository.SyncStateRepository;
 import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
 import jakarta.annotation.PostConstruct;
@@ -21,7 +22,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyStore;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @Service
 @Slf4j
@@ -32,6 +35,7 @@ public class ServerSyncService {
     private static final byte EVENT_DELETE = 2;
 
     private final SyncStateRepository syncStateRepository;
+    private final SyncClientProperties clientProperties;
 
     @Value("${sync.server.host:localhost}")
     private String serverHost;
@@ -39,8 +43,6 @@ public class ServerSyncService {
     @Value("${sync.server.port:8888}")
     private int serverPort;
 
-    @Value("${sync.client.mirror-dir}")
-    private String mirrorDir;
 
     @Value("${sync.socket.keystore:classpath:client-keystore.p12}")
     private Resource keystoreResource;
@@ -81,6 +83,7 @@ public class ServerSyncService {
                 var out = new DataOutputStream(socket.getOutputStream());
                 var in = new DataInputStream(socket.getInputStream());
 
+                registerConfiguredDirs();
                 sendHandshake(out);
                 receiveLoop(in);
 
@@ -97,6 +100,18 @@ public class ServerSyncService {
     }
 
     /**
+     * Ensures every dir listed in config exists in sync_state.
+     * New dirs get lastSyncVersion = -1 (full sync).
+     * Existing dirs keep their current version.
+     * Called on every connect so config changes take effect on reconnect.
+     */
+    private void registerConfiguredDirs() {
+        for (String dirName : clientProperties.getDirs()) {
+            syncStateRepository.registerIfAbsent(dirName);
+        }
+    }
+
+    /**
      * Writes the handshake to the server:
      * [4 bytes] number of dirs
      * per dir:
@@ -105,7 +120,11 @@ public class ServerSyncService {
      * [8 bytes] lastSyncVersion
      */
     private void sendHandshake(DataOutputStream out) throws IOException {
-        List<SyncHandshakeEntry> entries = syncStateRepository.findAll();
+        Set<String> configuredDirs = new HashSet<>(clientProperties.getDirs());
+        List<SyncHandshakeEntry> entries = syncStateRepository.findAll().stream()
+                .filter(e -> configuredDirs.contains(e.dirName()))
+                .toList();
+
         out.writeInt(entries.size());
         for (SyncHandshakeEntry entry : entries) {
             byte[] nameBytes = entry.dirName().getBytes(StandardCharsets.UTF_8);
@@ -125,8 +144,8 @@ public class ServerSyncService {
             long syncVersion = in.readLong();
             long fileSize = in.readLong();
 
-            Path target = Path.of(mirrorDir).resolve(relPath).normalize();
-            String dirName = target.getName(Path.of(mirrorDir).getNameCount()).toString();
+            Path target = Path.of(clientProperties.getMirrorDir()).resolve(relPath).normalize();
+            String dirName = target.getName(Path.of(clientProperties.getMirrorDir()).getNameCount()).toString();
 
             if (eventType == EVENT_DELETE) {
                 Files.deleteIfExists(target);
