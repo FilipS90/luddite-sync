@@ -10,3 +10,15 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+
+sync:
+  server:
+    host: localhost
+    port: 8888
+  client:
+    mirror-dir: ${user.home}/.luddite
+  socket:
+    keystore: classpath:client-keystore.p12
+    truststore: classpath:truststore.p12
+    password: fichony123!
+

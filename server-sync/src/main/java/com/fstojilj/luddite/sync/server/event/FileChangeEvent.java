@@ -11,6 +11,7 @@ public class FileChangeEvent {
 
     private long rootDirId;
     private String absoluteFilePath;
+    private String relativePath;
     private WatchEvent.Kind<?> eventKind;
 
 }

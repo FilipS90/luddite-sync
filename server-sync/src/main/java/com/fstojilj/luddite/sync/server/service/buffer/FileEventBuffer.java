@@ -6,21 +6,33 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 
 @Slf4j
 @Component
 public class FileEventBuffer {
 
-    private final LinkedBlockingQueue<FileChangeEvent> queue = new LinkedBlockingQueue<>();
+    private final ConcurrentHashMap<Long, LinkedBlockingQueue<FileChangeEvent>> queues =
+            new ConcurrentHashMap<>();
 
     public void publish(FileChangeEvent event) {
-        queue.add(event);
+        queues.computeIfAbsent(event.getRootDirId(), _ -> new LinkedBlockingQueue<>())
+                .add(event);
     }
 
-    public List<FileChangeEvent> drain() {
+    public List<FileChangeEvent> drainForRootDir(long rootDirId) {
+        var queue = queues.get(rootDirId);
+        if (queue == null) return List.of();
         List<FileChangeEvent> events = new ArrayList<>();
         queue.drainTo(events);
         return events;
+    }
+
+    /**
+     * Returns the set of root dir IDs that currently have pending events.
+     */
+    public java.util.Set<Long> activeRootDirIds() {
+        return queues.keySet();
     }
 }

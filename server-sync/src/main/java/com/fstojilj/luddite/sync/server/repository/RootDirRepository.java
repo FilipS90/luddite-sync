@@ -10,10 +10,7 @@ import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
 import java.sql.Statement;
-import java.util.HashSet;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 
 @Repository
 @RequiredArgsConstructor
@@ -87,5 +84,11 @@ public class RootDirRepository {
     public Optional<RootDir> getRootDirById(long rootDirId) {
         String sql = "SELECT * FROM root_dir WHERE id = ?";
         return Optional.ofNullable(jdbcTemplate.queryForObject(sql, rowMapper, rootDirId));
+    }
+
+    public Optional<RootDir> findByName(String name) {
+        String sql = "SELECT * FROM root_dir WHERE name = ?";
+        List<RootDir> results = jdbcTemplate.query(sql, rowMapper, name);
+        return results.isEmpty() ? Optional.empty() : Optional.of(results.getFirst());
     }
 }

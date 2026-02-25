@@ -100,6 +100,17 @@ public class FileMetadataRepository {
         }
     }
 
+    public List<FileMetadata> findByRootDirIdWithSyncVersionAfter(long rootDirId, long lastSyncVersion) {
+        String sql = "SELECT * FROM file_metadata WHERE root_dir_id = ? AND (sync_version IS NULL OR sync_version > ?)";
+        return jdbcTemplate.query(sql, rowMapper, rootDirId, lastSyncVersion);
+    }
+
+    public void updateSyncVersion(long rootDirId, String relativePath, long syncVersion) {
+        jdbcTemplate.update(
+                "UPDATE file_metadata SET sync_version = ? WHERE root_dir_id = ? AND relative_path = ?",
+                syncVersion, rootDirId, relativePath);
+    }
+
     public void delete(Long rootDirId, String relativePath) {
         String sql = "DELETE FROM file_metadata WHERE root_dir_id = ? AND relative_path = ?";
         int rowsAffected = jdbcTemplate.update(sql, rootDirId, relativePath);

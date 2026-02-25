@@ -21,7 +21,7 @@ TEMP_DIR="certs-temp"
 mkdir -p "$TEMP_DIR"
 cd "$TEMP_DIR"
 
-KEYSTORE_PASSWORD="changeit"
+KEYSTORE_PASSWORD="fichony123!"
 
 echo "Step 1/7: Generating CA..."
 openssl genrsa -out ca-key.pem 4096

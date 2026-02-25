@@ -21,14 +21,16 @@ public class FileMetadataService {
 
     private final FileMetadataRepository fileMetadataRepository;
 
+    /**
+     * Returns the new syncVersion assigned to this file.
+     */
     @Transactional
-    public long addFileMetadata(Path filePath, long rootDirId, String relativePath) {
+    public void addFileMetadata(Path filePath, long rootDirId, String relativePath) {
         File file = filePath.toFile();
         if (!file.exists() || !file.isFile()) {
             throw new IllegalArgumentException("Path must point to an existing file");
         }
-
-        return fileMetadataRepository.add(buildFileMetadata(file, rootDirId, relativePath));
+        fileMetadataRepository.add(buildFileMetadata(file, rootDirId, relativePath));
     }
 
     @Transactional
@@ -50,6 +52,9 @@ public class FileMetadataService {
         }
     }
 
+    /**
+     * Returns the new syncVersion assigned to this file.
+     */
     @Transactional
     public void updateFileMetadata(Path absoluteFilePath, long rootDirId, String relativeFilePath) {
         File file = absoluteFilePath.toFile();
@@ -60,6 +65,7 @@ public class FileMetadataService {
         var fileMetadata = fileMetadataRepository.findByRootDirIdAndRelativePath(rootDirId, relativeFilePath);
         fileMetadata.setFileSize(file.length());
         fileMetadata.setChecksum(calculateFileChecksum(absoluteFilePath));
+        fileMetadata.setSyncVersion(null); // reset — will be stamped when actually sent to a client
 
         fileMetadataRepository.update(fileMetadata);
     }
@@ -67,6 +73,19 @@ public class FileMetadataService {
     @Transactional
     public void deleteFileMetadata(long rootDirId, String relativeFilePath) {
         fileMetadataRepository.delete(rootDirId, relativeFilePath);
+    }
+
+    /**
+     * Called after a file has been successfully sent to at least one client.
+     * Sets the sync_version so future clients know they already have this version.
+     */
+    @Transactional
+    public void stampSyncVersion(long rootDirId, String relativePath, long syncVersion) {
+        fileMetadataRepository.updateSyncVersion(rootDirId, relativePath, syncVersion);
+    }
+
+    public List<FileMetadata> findFilesNewerThan(long rootDirId, long lastSyncVersion) {
+        return fileMetadataRepository.findByRootDirIdWithSyncVersionAfter(rootDirId, lastSyncVersion);
     }
 
     private FileMetadata buildFileMetadata(File file, long rootDirId, String relativePath) {

@@ -7,6 +7,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Optional;
+
 import static com.fstojilj.luddite.sync.server.utils.FileSystemUtils.getDirName;
 
 @Service
@@ -47,5 +49,9 @@ public class RootDirService {
                 .orElseThrow(() -> new IllegalArgumentException("Root directory not found for ID: " + rootDirId));
 
         return rootDir.getAbsolutePath();
+    }
+
+    public Optional<RootDir> findByName(String name) {
+        return rootDirRepository.findByName(name);
     }
 }
