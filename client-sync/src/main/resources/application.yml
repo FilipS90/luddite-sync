@@ -17,6 +17,9 @@ sync:
     port: 8888
   client:
     mirror-dir: ${user.home}/.luddite
+    # Optional: list of dir names to sync from the server.
+    # If empty, the client will subscribe to ALL dirs available on the server.
+    # Dir names must match the server-side root dir names (last component of the path).
     dirs:
       - photos
   socket:

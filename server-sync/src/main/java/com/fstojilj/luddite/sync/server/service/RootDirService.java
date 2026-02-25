@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
+import java.util.Set;
 
 import static com.fstojilj.luddite.sync.server.utils.FileSystemUtils.getDirName;
 
@@ -58,5 +59,9 @@ public class RootDirService {
 
     public Optional<RootDir> findByName(String name) {
         return rootDirRepository.findByName(name);
+    }
+
+    public Set<RootDir> findAll() {
+        return rootDirRepository.findAll();
     }
 }

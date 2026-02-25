@@ -154,6 +154,10 @@ public class ClientPushService {
             var in = new DataInputStream(socket.getInputStream());
             var out = new DataOutputStream(socket.getOutputStream());
 
+            // Step 1: advertise available root dirs to the client
+            sendAvailableDirs(out);
+
+            // Step 2: read client's subscription handshake
             List<SyncHandshakeEntry> handshake = readHandshake(in);
             log.info("Handshake from {}: {} dir(s)", socket.getRemoteSocketAddress(), handshake.size());
 
@@ -250,6 +254,28 @@ public class ClientPushService {
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Sends all available root dir names to the client so it can decide what to subscribe to.
+     * Wire format:
+     * [4 bytes] number of dirs (int)
+     * per dir:
+     * [4 bytes] name length (int)
+     * [N bytes] name (UTF-8)
+     */
+    private void sendAvailableDirs(DataOutputStream out) throws IOException {
+        List<String> dirNames = rootDirService.findAll().stream()
+                .map(dir -> dir.getName())
+                .toList();
+        out.writeInt(dirNames.size());
+        for (String name : dirNames) {
+            byte[] nameBytes = name.getBytes(StandardCharsets.UTF_8);
+            out.writeInt(nameBytes.length);
+            out.write(nameBytes);
+        }
+        out.flush();
+        log.info("Advertised {} available dir(s) to client", dirNames.size());
+    }
 
     /**
      * Reads the handshake sent by the client:

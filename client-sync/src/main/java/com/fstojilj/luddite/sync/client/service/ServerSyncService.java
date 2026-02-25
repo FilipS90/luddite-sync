@@ -22,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyStore;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -84,8 +85,26 @@ public class ServerSyncService {
                 var out = new DataOutputStream(socket.getOutputStream());
                 var in = new DataInputStream(socket.getInputStream());
 
-                registerConfiguredDirs();
-                sendHandshake(out);
+                // Step 1: read available dirs advertised by the server
+                List<String> availableDirs = readAvailableDirs(in);
+                log.info("Server advertises {} dir(s): {}", availableDirs.size(), availableDirs);
+
+                // Step 2: decide which dirs to subscribe to
+                // If client has dirs configured → use intersection with server's available dirs
+                // If client has no dirs configured → subscribe to all available dirs
+                List<String> configuredDirs = clientProperties.getDirs();
+                List<String> dirsToSync = configuredDirs.isEmpty()
+                        ? availableDirs
+                        : availableDirs.stream().filter(configuredDirs::contains).toList();
+
+                if (dirsToSync.isEmpty()) {
+                    log.warn("No matching dirs between server and client config. Server has: {}, client wants: {}",
+                            availableDirs, configuredDirs);
+                }
+
+                // Step 3: register dirs locally and send handshake
+                registerDirs(dirsToSync);
+                sendHandshake(out, dirsToSync);
                 receiveLoop(in, out);
 
             } catch (IOException e) {
@@ -101,13 +120,29 @@ public class ServerSyncService {
     }
 
     /**
-     * Ensures every dir listed in config exists in sync_state.
-     * New dirs get lastSyncVersion = -1 (full sync).
-     * Existing dirs keep their current version.
-     * Called on every connect so config changes take effect on reconnect.
+     * Reads the list of available root dir names advertised by the server.
+     * Wire format:
+     * [4 bytes] number of dirs (int)
+     * per dir:
+     * [4 bytes] name length (int)
+     * [N bytes] name (UTF-8)
      */
-    private void registerConfiguredDirs() {
-        for (String dirName : clientProperties.getDirs()) {
+    private List<String> readAvailableDirs(DataInputStream in) throws IOException {
+        int count = in.readInt();
+        List<String> dirs = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            int len = in.readInt();
+            dirs.add(new String(in.readNBytes(len), StandardCharsets.UTF_8));
+        }
+        return dirs;
+    }
+
+    /**
+     * Registers dirs in local sync_state if not already present.
+     * Called on every connect so newly discovered dirs get a -1 starting version.
+     */
+    private void registerDirs(List<String> dirs) {
+        for (String dirName : dirs) {
             syncStateRepository.registerIfAbsent(dirName);
         }
     }
@@ -116,14 +151,14 @@ public class ServerSyncService {
      * Writes the handshake to the server:
      * [4 bytes] number of dirs
      * per dir:
-     * [4 bytes] dir name length
+     * [4 bytes] dir name length (int)
      * [N bytes] dir name (UTF-8)
      * [8 bytes] lastSyncVersion
      */
-    private void sendHandshake(DataOutputStream out) throws IOException {
-        Set<String> configuredDirs = new HashSet<>(clientProperties.getDirs());
+    private void sendHandshake(DataOutputStream out, List<String> dirsToSync) throws IOException {
+        Set<String> syncSet = new HashSet<>(dirsToSync);
         List<SyncHandshakeEntry> entries = syncStateRepository.findAll().stream()
-                .filter(e -> configuredDirs.contains(e.dirName()))
+                .filter(e -> syncSet.contains(e.dirName()))
                 .toList();
 
         out.writeInt(entries.size());
@@ -134,7 +169,7 @@ public class ServerSyncService {
             out.writeLong(entry.lastSyncVersion());
         }
         out.flush();
-        log.info("Handshake sent: {} dir(s)", entries.size());
+        log.info("Handshake sent: {} dir(s): {}", entries.size(), dirsToSync);
     }
 
     private void receiveLoop(DataInputStream in, DataOutputStream out) throws IOException {

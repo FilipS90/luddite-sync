@@ -117,9 +117,20 @@ socket.
 
 All multi-byte integers use Java `DataOutputStream` (big-endian).
 
-#### 1. Handshake (Client → Server)
+#### 1. Directory Advertisement (Server → Client)
 
-Sent immediately after the TLS handshake completes.
+Sent by the server immediately after the TLS handshake, before the client sends anything.
+
+```
+[4 bytes]  number of available dirs (int)
+per dir:
+  [4 bytes]  name length (int)
+  [N bytes]  name (UTF-8 string)
+```
+
+#### 2. Handshake (Client → Server)
+
+Sent by the client after receiving the server's directory advertisement.
 
 ```
 [4 bytes]  number of directory entries (int)
@@ -181,6 +192,15 @@ Client                                    Server
   │                                          │
   │── TLS handshake (mTLS) ────────────────▶│
   │                                          │ serveClient() starts on virtual thread
+  │◀── available dir names ─────────────────│  sendAvailableDirs()
+  │    ["photos", "documents", ...]          │
+  │                                          │
+  │  client resolves dirs to subscribe:      │
+  │  - if sync.client.dirs configured        │
+  │    → intersect with server's list        │
+  │  - if sync.client.dirs is empty          │
+  │    → subscribe to all available dirs     │
+  │                                          │
   │── Handshake packet ─────────────────────▶│
   │   [dirs + lastSyncVersions]              │  resolveSubscribedIds()
   │                                          │  sendCatchUp()
@@ -285,16 +305,16 @@ entry is evicted from the in-memory `pendingAcks` map and a warning is logged. T
 
 ### client-sync `application.yml`
 
-| Property                 | Default                         | Description                                                                      |
-|--------------------------|---------------------------------|----------------------------------------------------------------------------------|
-| `spring.datasource.url`  | —                               | SQLite DB path                                                                   |
-| `sync.server.host`       | `localhost`                     | Server hostname or IP                                                            |
-| `sync.server.port`       | `8888`                          | Server socket port                                                               |
-| `sync.client.mirror-dir` | —                               | Local directory where synced files are written                                   |
-| `sync.client.dirs`       | —                               | List of dir names to request from server (must match server-side root dir names) |
-| `sync.socket.keystore`   | `classpath:client-keystore.p12` | Client TLS keystore                                                              |
-| `sync.socket.truststore` | `classpath:truststore.p12`      | CA truststore                                                                    |
-| `sync.socket.password`   | —                               | Keystore/truststore password                                                     |
+| Property                 | Default                         | Description                                                                                                                                        |
+|--------------------------|---------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `spring.datasource.url`  | —                               | SQLite DB path                                                                                                                                     |
+| `sync.server.host`       | `localhost`                     | Server hostname or IP                                                                                                                              |
+| `sync.server.port`       | `8888`                          | Server socket port                                                                                                                                 |
+| `sync.client.mirror-dir` | —                               | Local directory where synced files are written                                                                                                     |
+| `sync.client.dirs`       | —                               | Optional — dir names to sync from server. If empty, subscribes to **all** dirs the server advertises. Names must match server-side root dir names. |
+| `sync.socket.keystore`   | `classpath:client-keystore.p12` | Client TLS keystore                                                                                                                                |
+| `sync.socket.truststore` | `classpath:truststore.p12`      | CA truststore                                                                                                                                      |
+| `sync.socket.password`   | —                               | Keystore/truststore password                                                                                                                       |
 
 ---
 
