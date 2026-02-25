@@ -144,28 +144,37 @@ public class ClientPushService {
         while (running) {
             try {
                 for (long rootDirId : fileEventService.activeRootDirIds()) {
-                    List<FileChangeEvent> events = fileEventService.drainForRootDir(rootDirId);
-                    if (events.isEmpty()) continue;
-
                     List<ClientSession> interested = sessions.stream()
                             .filter(s -> s.subscribedRootDirIds().contains(rootDirId))
                             .toList();
 
+                    // Don't drain if nobody is listening — events would be lost
                     if (interested.isEmpty()) continue;
+
+                    List<FileChangeEvent> events = fileEventService.drainForRootDir(rootDirId);
+                    if (events.isEmpty()) continue;
 
                     for (FileChangeEvent event : events) {
                         byte eventType = event.getEventKind().name().equals("ENTRY_DELETE")
                                 ? EVENT_DELETE : EVENT_WRITE;
                         byte[] pathBytes = event.getRelativePath().getBytes(StandardCharsets.UTF_8);
 
+                        // Stamp version once, then send to all interested clients
+                        long syncVersion = syncVersionRepository.next();
+                        if (eventType == EVENT_WRITE) {
+                            fileMetadataService.stampSyncVersion(rootDirId, event.getRelativePath(), syncVersion);
+                        } else {
+                            fileMetadataService.recordDeletion(rootDirId, event.getRelativePath(), syncVersion);
+                        }
+
                         for (ClientSession session : interested) {
                             writeToClient(session, eventType, pathBytes,
                                     event.getAbsoluteFilePath(), event.getRelativePath(),
-                                    event.getEventKind().name(), rootDirId);
+                                    event.getEventKind().name(), syncVersion);
                         }
                     }
                 }
-                Thread.sleep(50); // brief pause to avoid busy-spinning
+                Thread.sleep(50);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
@@ -231,27 +240,27 @@ public class ClientPushService {
                 byte[] pathBytes = file.getRelativePath().getBytes(StandardCharsets.UTF_8);
                 ClientSession tmp = new ClientSession(out, Set.of());
                 writeToClient(tmp, EVENT_WRITE, pathBytes, absPath, file.getRelativePath(),
-                        "CATCH_UP", rootDirId);
+                        "CATCH_UP", file.getSyncVersion());
             }
 
             // Send deletes that happened since lastSyncVersion
             var deletes = fileMetadataService.findDeletesNewerThan(rootDirId, entry.lastSyncVersion());
             log.info("Sending {} catch-up delete(s) for dir '{}'", deletes.size(), entry.dirName());
-            for (String relativePath : deletes) {
+            for (var delete : deletes) {
+                String relativePath = (String) delete.get("relative_path");
+                long syncVersion = ((Number) delete.get("sync_version")).longValue();
                 byte[] pathBytes = relativePath.getBytes(StandardCharsets.UTF_8);
                 ClientSession tmp = new ClientSession(out, Set.of());
                 writeToClient(tmp, EVENT_DELETE, pathBytes, null, relativePath,
-                        "CATCH_UP_DELETE", rootDirId);
+                        "CATCH_UP_DELETE", syncVersion);
             }
         }
     }
 
     private void writeToClient(ClientSession session, byte eventType, byte[] pathBytes,
                                String absolutePath, String relativePath, String kindName,
-                               long rootDirId) {
+                               long syncVersion) {
         try {
-            long syncVersion = syncVersionRepository.next();
-
             DataOutputStream out = session.out();
             out.writeByte(eventType);
             out.writeInt(pathBytes.length);
@@ -268,12 +277,6 @@ public class ClientPushService {
 
             out.flush();
 
-            // Persist the version so future clients can catch up
-            if (eventType == EVENT_WRITE) {
-                fileMetadataService.stampSyncVersion(rootDirId, relativePath, syncVersion);
-            } else {
-                fileMetadataService.recordDeletion(rootDirId, relativePath, syncVersion);
-            }
 
             log.debug("Pushed {} (v{}) to client: {}", kindName, syncVersion, relativePath);
         } catch (IOException e) {

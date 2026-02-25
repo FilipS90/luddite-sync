@@ -145,13 +145,14 @@ public class ServerSyncService {
             long fileSize = in.readLong();
 
             Path target = Path.of(clientProperties.getMirrorDir()).resolve(relPath).normalize();
-            String dirName = target.getName(Path.of(clientProperties.getMirrorDir()).getNameCount()).toString();
+            // first component of relPath is the dir name (e.g. "photos" from "photos/img.jpg")
+            String dirName = Path.of(relPath).getName(0).toString();
 
             if (eventType == EVENT_DELETE) {
                 Files.deleteIfExists(target);
                 log.info("Deleted: {}", relPath);
             } else {
-                byte[] fileBytes = in.readNBytes((int) fileSize);
+                byte[] fileBytes = readExactly(in, fileSize);
                 Files.createDirectories(target.getParent());
                 Files.write(target, fileBytes);
                 log.info("Written: {} ({} bytes, v{})", relPath, fileSize, syncVersion);
@@ -192,5 +193,18 @@ public class ServerSyncService {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    private byte[] readExactly(DataInputStream in, long size) throws IOException {
+        var baos = new java.io.ByteArrayOutputStream();
+        long remaining = size;
+        byte[] buf = new byte[8192];
+        while (remaining > 0) {
+            int read = in.read(buf, 0, (int) Math.min(buf.length, remaining));
+            if (read == -1) throw new IOException("Unexpected end of stream reading file bytes");
+            baos.write(buf, 0, read);
+            remaining -= read;
+        }
+        return baos.toByteArray();
     }
 }

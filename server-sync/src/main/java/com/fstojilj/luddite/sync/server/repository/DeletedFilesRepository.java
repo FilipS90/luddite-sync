@@ -5,6 +5,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Map;
 
 @Repository
 @RequiredArgsConstructor
@@ -23,12 +24,12 @@ public class DeletedFilesRepository {
     }
 
     /**
-     * Returns relative paths of files deleted after the given syncVersion for a root dir.
+     * Returns relative_path + sync_version of files deleted after the given syncVersion.
      */
-    public List<String> findByRootDirIdWithSyncVersionAfter(long rootDirId, long lastSyncVersion) {
+    public List<Map<String, Object>> findByRootDirIdWithSyncVersionAfter(long rootDirId, long lastSyncVersion) {
         return jdbcTemplate.queryForList(
-                "SELECT relative_path FROM deleted_files WHERE root_dir_id = ? AND sync_version > ?",
-                String.class, rootDirId, lastSyncVersion);
+                "SELECT relative_path, sync_version FROM deleted_files WHERE root_dir_id = ? AND sync_version > ?",
+                rootDirId, lastSyncVersion);
     }
 }
 

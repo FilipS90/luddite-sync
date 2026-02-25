@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import static com.fstojilj.luddite.sync.server.utils.FileChecksumUtils.calculateFileChecksum;
 import static com.fstojilj.luddite.sync.server.utils.FileSystemUtils.listAllFilesForDir;
@@ -98,7 +99,7 @@ public class FileMetadataService {
         return fileMetadataRepository.findByRootDirIdWithSyncVersionAfter(rootDirId, lastSyncVersion);
     }
 
-    public List<String> findDeletesNewerThan(long rootDirId, long lastSyncVersion) {
+    public List<Map<String, Object>> findDeletesNewerThan(long rootDirId, long lastSyncVersion) {
         return deletedFilesRepository.findByRootDirIdWithSyncVersionAfter(rootDirId, lastSyncVersion);
     }
 
