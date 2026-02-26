@@ -67,6 +67,19 @@ public class ServerSyncService {
     @PreDestroy
     public void stop() {
         running = false;
+        closeSocket();
+    }
+
+    /**
+     * Drops the current connection so connectAndReceive() reconnects immediately,
+     * re-reading available dirs from the server. Called by the CLI's 'refresh' command.
+     */
+    public void reconnect() {
+        log.info("Reconnect requested — dropping current connection to re-poll server dirs");
+        closeSocket();
+    }
+
+    private void closeSocket() {
         try {
             if (socket != null && !socket.isClosed()) {
                 socket.close();
@@ -89,13 +102,22 @@ public class ServerSyncService {
                 List<String> availableDirs = readAvailableDirs(in);
                 log.info("Server advertises {} dir(s): {}", availableDirs.size(), availableDirs);
 
-                // Step 2: decide which dirs to subscribe to
-                // If client has dirs configured → use intersection with server's available dirs
-                // If client has no dirs configured → subscribe to all available dirs
+                // Step 2: decide which dirs to subscribe to.
+                // If client has no dirs configured, print what the server offers and wait
+                // for the user to subscribe via CLI — without dropping the connection.
                 List<String> configuredDirs = clientProperties.getDirs();
-                List<String> dirsToSync = configuredDirs.isEmpty()
-                        ? availableDirs
-                        : availableDirs.stream().filter(configuredDirs::contains).toList();
+                if (configuredDirs.isEmpty()) {
+                    printAvailableDirs(availableDirs);
+                    while (running && clientProperties.getDirs().isEmpty()) {
+                        sleep(2_000);
+                    }
+                    if (!running) break;
+                    configuredDirs = clientProperties.getDirs();
+                }
+
+                List<String> dirsToSync = availableDirs.stream()
+                        .filter(configuredDirs::contains)
+                        .toList();
 
                 if (dirsToSync.isEmpty()) {
                     log.warn("No matching dirs between server and client config. Server has: {}, client wants: {}",
@@ -117,6 +139,20 @@ public class ServerSyncService {
                 break;
             }
         }
+    }
+
+    private void printAvailableDirs(List<String> availableDirs) {
+        System.out.println();
+        System.out.println("  Server has the following directories available:");
+        System.out.println("  -----------------------------------------------");
+        if (availableDirs.isEmpty()) {
+            System.out.println("  (none)");
+        } else {
+            availableDirs.forEach(d -> System.out.println("  - " + d));
+        }
+        System.out.println();
+        System.out.println("  Use 'add <name>' in the CLI to subscribe, then sync will begin automatically.");
+        System.out.println();
     }
 
     /**

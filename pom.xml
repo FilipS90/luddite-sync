@@ -36,12 +36,6 @@
                 <artifactId>common-sync</artifactId>
                 <version>${project.version}</version>
             </dependency>
-            <!-- Flyway SQLite support (not in Spring Boot BOM) -->
-            <dependency>
-                <groupId>org.flywaydb</groupId>
-                <artifactId>flyway-database-sqlite</artifactId>
-                <version>${flyway.version}</version>
-            </dependency>
         </dependencies>
     </dependencyManagement>
 
