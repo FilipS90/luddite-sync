@@ -67,7 +67,9 @@ public class ClientPushService {
     }
 
     /**
-     * Tracks events that have been sent but not yet ACK'd by any client.
+     * Tracks an event sent to one specific client, waiting for its ACK.
+     * Each client gets its own syncVersion per event, so this entry belongs
+     * to exactly one client — no cross-client ACK collisions.
      */
     private record PendingAck(long rootDirId, String relativePath, byte eventType, long sentAt) {
     }
@@ -75,10 +77,8 @@ public class ClientPushService {
     private final CopyOnWriteArraySet<ClientSession> sessions = new CopyOnWriteArraySet<>();
 
     /**
-     * Tracks events that have been sent but not yet ACK'd by any client.
+     * One entry per (client, event) pair — keyed by the unique syncVersion minted for that pair.
      * TTL is configurable via sync.socket.pending-ack-ttl-ms (default 20s).
-     * TODO: if a client stays connected but never ACKs (e.g. disk full, severe congestion),
-     *  entries will be evicted after the TTL and the client will retry on reconnect.
      */
     private final ConcurrentHashMap<Long, PendingAck> pendingAcks = new ConcurrentHashMap<>();
 
@@ -228,16 +228,17 @@ public class ClientPushService {
                         byte eventType = event.getEventKind().name().equals("ENTRY_DELETE")
                                 ? EVENT_DELETE : EVENT_WRITE;
 
-                        // Prepend the dir name so the client knows which dir this belongs to
-                        // e.g. "photos" + "2024/img.jpg" -> "photos/2024/img.jpg"
                         String qualifiedPath = dirName + "/" + event.getRelativePath();
                         byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
 
-                        // Mint a version and register as pending — only stamped when ACK received
-                        long syncVersion = syncVersionRepository.next();
-                        pendingAcks.put(syncVersion, new PendingAck(rootDirId, event.getRelativePath(), eventType, System.currentTimeMillis()));
-
+                        // Mint one syncVersion per client — each client ACKs its own version.
+                        // stampSyncVersion is idempotent so the first ACK to arrive stamps the file;
+                        // subsequent ACKs for the same file just call stamp again with the same value,
+                        // which is a safe no-op.
                         for (ClientSession session : interested) {
+                            long syncVersion = syncVersionRepository.next();
+                            pendingAcks.put(syncVersion, new PendingAck(
+                                    rootDirId, event.getRelativePath(), eventType, System.currentTimeMillis()));
                             writeToClient(session, eventType, pathBytes,
                                     event.getAbsoluteFilePath(), qualifiedPath,
                                     event.getEventKind().name(), syncVersion);

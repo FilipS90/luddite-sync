@@ -114,7 +114,7 @@ public class FileMetadataRepository {
 
     public void updateSyncVersion(long rootDirId, String relativePath, long syncVersion) {
         jdbcTemplate.update(
-                "UPDATE file_metadata SET sync_version = ? WHERE root_dir_id = ? AND relative_path = ?",
+                "UPDATE file_metadata SET sync_version = MAX(COALESCE(sync_version, 0), ?) WHERE root_dir_id = ? AND relative_path = ?",
                 syncVersion, rootDirId, relativePath);
     }
 
