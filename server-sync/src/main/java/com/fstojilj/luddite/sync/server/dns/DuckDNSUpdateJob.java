@@ -3,6 +3,7 @@ package com.fstojilj.luddite.sync.server.dns;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -19,11 +20,13 @@ public class DuckDNSUpdateJob {
 
     @Getter
     @Setter
-    private volatile String domain = "luddite-sync";
+    @Value("${sync.dns.domain:luddite-sync}")
+    private volatile String domain;
 
     @Getter
     @Setter
-    private volatile String token = "83b58635-8e13-4337-b5ab-027f58eae593";
+    @Value("${sync.dns.token:}")
+    private volatile String token;
 
     @Scheduled(fixedRate = 300000, initialDelay = 0) // Every 5 minutes, run immediately on startup
     @Async("duckDnsExecutor")

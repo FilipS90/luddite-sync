@@ -5,6 +5,14 @@ set -e  # Exit on error
 echo "=== Certificate Generation for Sync App ==="
 echo ""
 
+# Accept password as argument
+if [ -z "$1" ]; then
+    echo "Usage: ./certs_setup.sh <keystore-password>"
+    exit 1
+fi
+
+KEYSTORE_PASSWORD="$1"
+
 # Check dependencies
 if ! command -v openssl &> /dev/null; then
     echo "Error: openssl not found"
@@ -21,7 +29,6 @@ TEMP_DIR="certs-temp"
 mkdir -p "$TEMP_DIR"
 cd "$TEMP_DIR"
 
-KEYSTORE_PASSWORD="fichony123!"
 
 echo "Step 1/7: Generating CA..."
 openssl genrsa -out ca-key.pem 4096

@@ -16,6 +16,11 @@ spring:
 sync:
   server:
     root-dirs: [ ]
+  dns:
+    # Your DuckDNS subdomain (without .duckdns.org) — e.g. "luddite-sync" for luddite-sync.duckdns.org
+    domain: luddite-sync
+    # Your DuckDNS token — find it at https://www.duckdns.org after logging in
+    token: ${LUDDITE_DUCKDNS_TOKEN:}
   socket:
     port: 8888
     keystore: classpath:server-keystore.p12
