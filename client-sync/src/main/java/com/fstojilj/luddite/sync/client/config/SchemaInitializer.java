@@ -31,6 +31,16 @@ public class SchemaInitializer implements ApplicationRunner {
                 )
                 """);
 
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS synced_files (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    dir_name      TEXT    NOT NULL,
+                    relative_path TEXT    NOT NULL,
+                    UNIQUE (dir_name, relative_path),
+                    FOREIGN KEY (dir_name) REFERENCES sync_state(dir_name)
+                )
+                """);
+
         log.info("SQLite schema initialized successfully");
     }
 }

@@ -10,8 +10,6 @@ spring:
   flyway:
     enabled: false
 
-  server:
-    port: 9999
 
 sync:
   server:

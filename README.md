@@ -12,6 +12,7 @@ communication happens through a persistent binary TCP socket secured with mTLS.
 - [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
 - [Certificate Setup](#certificate-setup)
+- [Port Forwarding](#port-forwarding)
 - [DuckDNS Setup](#duckdns-setup)
 - [Configuration](#configuration)
 - [Running](#running)
@@ -46,6 +47,10 @@ All modules are Java 25 / Spring Boot 3 Maven projects under a single parent POM
 - Maven 3.9+
 - `openssl` and `keytool` (JDK) — for certificate generation
 - A [DuckDNS](https://www.duckdns.org) account — for dynamic DNS (server side only)
+
+> **SQLite** does not need to be installed. The JDBC driver bundles the native SQLite library and extracts it at
+> runtime automatically. The database directories (`~/.luddite/server/` and `~/.luddite/client/`) are also created
+> automatically on first startup.
 
 ---
 
@@ -124,6 +129,52 @@ client-sync/src/main/resources/truststore.p12
 
 > **Multiple clients** can share the same `client-keystore.p12` — mTLS only verifies that the certificate is signed
 > by the trusted CA, not that it is unique per client.
+
+---
+
+## Port Forwarding
+
+The server listens for client connections on port `8888` (configurable via `sync.socket.port`). If the server machine
+is behind a home router or NAT, you need to forward this port so clients can reach it from outside the local network.
+
+### Steps (general — exact UI varies by router)
+
+1. Log in to your router admin panel — typically at `192.168.1.1` or `192.168.0.1` in a browser
+2. Find the **Port Forwarding** section (sometimes under "NAT", "Virtual Server", or "Advanced")
+3. Create a new rule:
+
+   | Field             | Value                                      |
+         |-------------------|--------------------------------------------|
+   | Name              | luddite-sync                               |
+   | Protocol          | TCP                                        |
+   | External port     | 8888                                       |
+   | Internal IP       | Local IP of the server machine             |
+   | Internal port     | 8888                                       |
+
+4. Save and apply
+
+### Finding the server machine's local IP
+
+```bash
+# Linux/macOS
+ip route get 1 | awk '{print $7}'
+
+# Windows
+ipconfig | findstr "IPv4"
+```
+
+### Verifying the port is reachable
+
+From any external machine or phone (not on the same network), you can verify with:
+
+```bash
+nc -zv luddite-sync.duckdns.org 8888
+```
+
+Or use an online tool like [portchecker.co](https://portchecker.co).
+
+> **Tip:** Assign a static local IP to the server machine in your router's DHCP settings so the forwarding rule
+> doesn't break if the machine's local IP changes after a reboot.
 
 ---
 
