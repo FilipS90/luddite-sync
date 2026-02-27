@@ -57,12 +57,18 @@ All modules are Java 25 / Spring Boot 3 Maven projects under a single parent POM
 ## Quick Start
 
 **1. Clone and run the install script**
+**1. Clone and run the install script**
 
 ```bash
 git clone https://github.com/FilipS90/luddite-sync.git
 cd luddite-sync
+
+# Linux/macOS
 chmod +x install.sh
 ./install.sh
+
+# Windows
+install.bat
 ```
 
 The script will prompt for:
@@ -144,7 +150,7 @@ is behind a home router or NAT, you need to forward this port so clients can rea
 3. Create a new rule:
 
    | Field             | Value                                      |
-            |-------------------|--------------------------------------------|
+               |-------------------|--------------------------------------------|
    | Name              | luddite-sync                               |
    | Protocol          | TCP                                        |
    | External port     | 8888                                       |
