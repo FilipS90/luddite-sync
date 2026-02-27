@@ -86,14 +86,6 @@ echo.
 echo    Next steps:
 echo    1. Build:  mvnw.cmd clean package -DskipTests
 echo.
-echo    Distribute the following files to BOTH machines:
-echo      server-sync\target\server-sync-0.0.1-SNAPSHOT.jar
-echo      client-sync\target\client-sync-0.0.1-SNAPSHOT.jar
-echo      luddite.bat (Windows)
-echo      luddite.sh  (Linux/macOS)
-echo.
-echo    On each machine, place all files in the same directory.
-echo.
 echo    Start server machine:  luddite.bat
 echo    Start client machine:  luddite.bat client ^<server-host^>
 echo =======================================

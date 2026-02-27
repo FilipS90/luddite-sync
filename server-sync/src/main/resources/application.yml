@@ -16,9 +16,9 @@ sync:
     root-dirs: [ ]
   dns:
     # Your DuckDNS subdomain (without .duckdns.org) — e.g. "luddite-sync" for luddite-sync.duckdns.org
-    domain: luddite-sync
+    domain: ludditesync
     # Your DuckDNS token — find it at https://www.duckdns.org after logging in
-    token: ${LUDDITE_DUCKDNS_TOKEN:}
+    token: e4889e64-07af-4899-a068-704903bcba8b
   socket:
     port: 8888
     keystore: classpath:server-keystore.p12

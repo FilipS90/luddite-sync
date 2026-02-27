@@ -57,7 +57,6 @@ All modules are Java 25 / Spring Boot 3 Maven projects under a single parent POM
 ## Quick Start
 
 **1. Clone and run the install script**
-**1. Clone and run the install script**
 
 ```bash
 git clone https://github.com/FilipS90/luddite-sync.git
@@ -150,7 +149,7 @@ is behind a home router or NAT, you need to forward this port so clients can rea
 3. Create a new rule:
 
    | Field             | Value                                      |
-               |-------------------|--------------------------------------------|
+                     |-------------------|--------------------------------------------|
    | Name              | luddite-sync                               |
    | Protocol          | TCP                                        |
    | External port     | 8888                                       |
@@ -322,14 +321,8 @@ sync:
 
 ## Running
 
-After building, distribute the following **four files** to **both machines** and place them in the same directory:
-
-```
-server-sync-0.0.1-SNAPSHOT.jar
-client-sync-0.0.1-SNAPSHOT.jar
-luddite.sh       ← Linux/macOS
-luddite.bat      ← Windows
-```
+After building, run the wrapper script from the project root. It resolves the JARs from `server-sync/target/` and
+`client-sync/target/` automatically.
 
 ### Server machine
 
@@ -345,9 +338,6 @@ luddite.bat           # Windows
 luddite.bat client luddite-sync.duckdns.org     # Windows
 ```
 
-Both machines have both JARs and the wrapper script, so either can swap roles at any time without needing to transfer
-any files.
-
 ---
 
 ## CLI Reference
@@ -357,7 +347,7 @@ any files.
 Interactive CLI available on `stdin` after the server starts.
 
 ```
-  list                list all registered root dirs
+  list                list all registered root dirs and connected client addresses
   add <path>          register and watch a new root dir
   remove <id>         unregister a root dir by ID
   dns                 show current DuckDNS domain and token
@@ -405,8 +395,6 @@ script on the server machine detects exit code `2` and automatically starts `cli
 machine.
 
 You then start `server-sync.jar` on your machine manually (or via the wrapper).
-
-### Swapping back (from the server)
 
 ### Swapping back (from the server)
 

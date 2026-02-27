@@ -15,7 +15,7 @@ import java.io.InputStreamReader;
  * Interactive CLI for managing server root directories and DNS at runtime.
  * <p>
  * Commands:
- * list              — list all registered root dirs with their IDs
+ * list              — list all registered root dirs and connected client addresses
  * add &lt;path&gt;        — register a new root dir and start watching it
  * remove &lt;id&gt;       — stop watching and unregister a root dir by ID
  * dns               — show current DuckDNS domain and token
@@ -171,7 +171,7 @@ public class AdminCli {
         System.out.println();
         System.out.println("  Luddite Sync Server — Admin CLI");
         System.out.println("  --------------------------------");
-        System.out.println("  list              list all registered root dirs");
+        System.out.println("  list                list root dirs and connected client addresses");
         System.out.println("  add <path>        register and watch a new root dir");
         System.out.println("  remove <id>       unregister a root dir by ID");
         System.out.println("  dns               show current DuckDNS domain & token");

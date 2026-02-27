@@ -10,8 +10,8 @@ rem   luddite.bat                        — start in server mode (default)
 rem   luddite.bat client <remote-host>   — start in client mode pointing at remote-host
 
 set SCRIPT_DIR=%~dp0
-set SERVER_JAR=%SCRIPT_DIR%server-sync-0.0.1-SNAPSHOT.jar
-set CLIENT_JAR=%SCRIPT_DIR%client-sync-0.0.1-SNAPSHOT.jar
+set SERVER_JAR=%SCRIPT_DIR%server-sync\target\server-sync-0.0.1-SNAPSHOT.jar
+set CLIENT_JAR=%SCRIPT_DIR%client-sync\target\client-sync-0.0.1-SNAPSHOT.jar
 
 if "%1"=="client" (set MODE=client) else (set MODE=server)
 if "%2"=="" (set REMOTE_HOST=localhost) else (set REMOTE_HOST=%2)

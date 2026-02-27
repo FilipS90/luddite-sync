@@ -15,8 +15,8 @@
 #   ./luddite.sh client <remote-host>   — start in client mode pointing at remote-host
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SERVER_JAR="$SCRIPT_DIR/server-sync-0.0.1-SNAPSHOT.jar"
-CLIENT_JAR="$SCRIPT_DIR/client-sync-0.0.1-SNAPSHOT.jar"
+SERVER_JAR="$SCRIPT_DIR/server-sync/target/server-sync-0.0.1-SNAPSHOT.jar"
+CLIENT_JAR="$SCRIPT_DIR/client-sync/target/client-sync-0.0.1-SNAPSHOT.jar"
 
 MODE=${1:-server}
 REMOTE_HOST=${2:-localhost}
