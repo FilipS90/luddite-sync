@@ -149,7 +149,7 @@ is behind a home router or NAT, you need to forward this port so clients can rea
 3. Create a new rule:
 
    | Field             | Value                                      |
-                        |-------------------|--------------------------------------------|
+                           |-------------------|--------------------------------------------|
    | Name              | luddite-sync                               |
    | Protocol          | TCP                                        |
    | External port     | 8888                                       |
@@ -446,6 +446,10 @@ luddite.bat client 192.168.1.100
 - The wrapper passes the correct keystore via Spring Boot args when switching modes
 - The original server machine running as client will catch up from its last known sync version on reconnect
 - The `synced_files` audit on connect ensures any manually deleted files are automatically re-fetched
+- **Other connected clients (e.g. C)** temporarily lose connection when A goes down. When B starts as the new server,
+  it updates DuckDNS to point at B's IP on startup automatically. Since C connects by hostname
+  (`luddite-sync.duckdns.org`), it will resolve to B on its next retry (every 5s) and reconnect — no config changes
+  needed on C.
 
 ---
 
