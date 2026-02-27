@@ -61,12 +61,14 @@ keytool -import -trustcacerts -alias ca -file ca-cert.pem \
 
 echo "Step 7/7: Copying keystores to modules..."
 
-# Copy to server
+# Copy to server — includes client-keystore so server machine can run as client if role is swapped
 cp server-keystore.p12 ../../server-sync/src/main/resources/
+cp client-keystore.p12 ../../server-sync/src/main/resources/
 cp truststore.p12 ../../server-sync/src/main/resources/
 
-# Copy to client
+# Copy to client — includes server-keystore so client machine can run as server if role is swapped
 cp client-keystore.p12 ../../client-sync/src/main/resources/
+cp server-keystore.p12 ../../client-sync/src/main/resources/
 cp truststore.p12 ../../client-sync/src/main/resources/
 
 echo ""
@@ -74,8 +76,10 @@ echo "✓ Certificates generated and copied!"
 echo ""
 echo "Files copied:"
 echo "  → server-sync/src/main/resources/server-keystore.p12"
+echo "  → server-sync/src/main/resources/client-keystore.p12"
 echo "  → server-sync/src/main/resources/truststore.p12"
 echo "  → client-sync/src/main/resources/client-keystore.p12"
+echo "  → client-sync/src/main/resources/server-keystore.p12"
 echo "  → client-sync/src/main/resources/truststore.p12"
 echo ""
 

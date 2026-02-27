@@ -36,6 +36,8 @@ public class ServerSyncService {
     private static final byte EVENT_WRITE = 1;
     private static final byte EVENT_DELETE = 2;
     private static final byte ACK = 3;
+    private static final byte SHUTDOWN = 4;
+    private static final byte RESUME_SERVER_MODE = 5;
 
     private final SyncStateRepository syncStateRepository;
     private final SyncedFileRepository syncedFileRepository;
@@ -79,6 +81,26 @@ public class ServerSyncService {
     public void reconnect() {
         log.info("Reconnect requested — dropping current connection to re-poll server dirs");
         closeSocket();
+    }
+
+    /**
+     * Sends a SHUTDOWN signal to the server over the existing mTLS socket.
+     * The server will log the request and call System.exit(0).
+     * Use this when you are at the client site and need to remotely stop the server.
+     */
+    public void sendShutdown() {
+        if (socket == null || socket.isClosed()) {
+            log.warn("Cannot send shutdown — not connected to server");
+            return;
+        }
+        try {
+            var out = new DataOutputStream(socket.getOutputStream());
+            out.writeByte(SHUTDOWN);
+            out.flush();
+            log.info("Shutdown signal sent to server");
+        } catch (IOException e) {
+            log.warn("Failed to send shutdown signal: {}", e.getMessage());
+        }
     }
 
     private void closeSocket() {
@@ -236,6 +258,12 @@ public class ServerSyncService {
     private void receiveLoop(DataInputStream in, DataOutputStream out) throws IOException {
         while (running) {
             byte eventType = in.readByte();
+
+            if (eventType == RESUME_SERVER_MODE) {
+                log.info("Resume-server-mode signal received from server — exiting with code 2 to restart as server");
+                System.exit(2);
+            }
+
             int pathLen = in.readInt();
             String relPath = new String(in.readNBytes(pathLen), StandardCharsets.UTF_8);
             long syncVersion = in.readLong();
@@ -246,13 +274,9 @@ public class ServerSyncService {
             String dirName = Path.of(relPath).getName(0).toString();
 
             if (eventType == EVENT_DELETE) {
-                if (clientProperties.isDesynced(dirName)) {
-                    log.debug("Ignoring DELETE for desynced dir '{}': {}", dirName, relPath);
-                } else {
-                    Files.deleteIfExists(target);
-                    syncedFileRepository.delete(dirName, relPath);
-                    log.info("Deleted: {}", relPath);
-                }
+                Files.deleteIfExists(target);
+                syncedFileRepository.delete(dirName, relPath);
+                log.info("Deleted: {}", relPath);
             } else {
                 byte[] fileBytes = in.readNBytes((int) fileSize);
                 Files.createDirectories(target.getParent());

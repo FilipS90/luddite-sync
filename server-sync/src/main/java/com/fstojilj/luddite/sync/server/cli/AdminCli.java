@@ -1,6 +1,7 @@
 package com.fstojilj.luddite.sync.server.cli;
 
 import com.fstojilj.luddite.sync.server.dns.DuckDNSUpdateJob;
+import com.fstojilj.luddite.sync.server.service.ClientPushService;
 import com.fstojilj.luddite.sync.server.service.RootDirService;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +22,7 @@ import java.io.InputStreamReader;
  * dns domain &lt;d&gt;    — change DuckDNS domain
  * dns token &lt;t&gt;     — change DuckDNS token
  * dns update        — trigger an immediate DuckDNS update
+ * swap-back         — send a swap-back signal to all clients so they restart as servers
  * help              — show available commands
  * exit              — shut down the server
  */
@@ -31,6 +33,7 @@ public class AdminCli {
 
     private final RootDirService rootDirService;
     private final DuckDNSUpdateJob duckDNSUpdateJob;
+    private final ClientPushService clientPushService;
 
     @PostConstruct
     public void start() {
@@ -97,6 +100,10 @@ public class AdminCli {
                 }
             }
             case "dns" -> handleDns(arg);
+            case "swap-back" -> {
+                System.out.println("  Sending resume-server-mode signal to all connected clients...");
+                clientPushService.sendResumeServerMode();
+            }
             case "help" -> printHelp();
             case "exit" -> {
                 System.out.println("  Shutting down...");
@@ -154,6 +161,7 @@ public class AdminCli {
         System.out.println("  dns domain <d>    change DuckDNS domain");
         System.out.println("  dns token <t>     change DuckDNS token");
         System.out.println("  dns update        trigger an immediate DuckDNS update");
+        System.out.println("  swap-back         send swap-back signal to all clients");
         System.out.println("  help              show this message");
         System.out.println("  exit              shut down the server");
         System.out.println();

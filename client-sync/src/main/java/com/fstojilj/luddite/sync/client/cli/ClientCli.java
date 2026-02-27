@@ -15,13 +15,14 @@ import java.io.InputStreamReader;
  * Interactive CLI for managing client directory subscriptions at runtime.
  * <p>
  * Commands:
- * list              — show subscribed dirs and their sync state
- * add &lt;name&gt;        — subscribe to a server directory by name
- * remove &lt;name&gt;     — unsubscribe from a directory
- * refresh           — reconnect to server to re-poll available directories
- * mirror            — show the current mirror directory
- * help              — show available commands
- * exit              — shut down the client
+ * list                — show subscribed dirs and their sync state
+ * add &lt;name&gt;          — subscribe to a server directory by name
+ * remove &lt;name&gt;       — unsubscribe from a directory
+ * refresh             — reconnect to server to re-poll available directories
+ * shutdown-server     — send a remote shutdown signal to the server over the socket
+ * mirror              — show the current mirror directory
+ * help                — show available commands
+ * exit                — shut down the client
  */
 @Component
 @RequiredArgsConstructor
@@ -75,7 +76,6 @@ public class ClientCli {
                             entry.dirName(), entry.lastSyncVersion(), subscribed ? "yes" : "no");
                 }
 
-                // Show configured dirs not yet in sync_state
                 for (String dir : subscribedDirs) {
                     boolean alreadyListed = entries.stream().anyMatch(e -> e.dirName().equals(dir));
                     if (!alreadyListed) {
@@ -112,6 +112,10 @@ public class ClientCli {
                 System.out.println("  Reconnecting to server to re-poll available directories...");
                 serverSyncService.reconnect();
             }
+            case "shutdown-server" -> {
+                System.out.println("  Sending shutdown signal to server...");
+                serverSyncService.sendShutdown();
+            }
             case "mirror" -> System.out.printf("  Mirror directory: %s%n", clientProperties.getMirrorDir());
             case "help" -> printHelp();
             case "exit" -> {
@@ -126,13 +130,14 @@ public class ClientCli {
         System.out.println();
         System.out.println("  Luddite Sync Client — CLI");
         System.out.println("  -------------------------");
-        System.out.println("  list              show subscribed dirs and sync state");
-        System.out.println("  add <name>        subscribe to a server directory");
-        System.out.println("  remove <name>     unsubscribe from a directory");
-        System.out.println("  refresh           reconnect and re-poll server for available dirs");
-        System.out.println("  mirror            show current mirror directory");
-        System.out.println("  help              show this message");
-        System.out.println("  exit              shut down the client");
+        System.out.println("  list                show subscribed dirs and sync state");
+        System.out.println("  add <name>          subscribe to a server directory");
+        System.out.println("  remove <name>       unsubscribe from a directory");
+        System.out.println("  refresh             reconnect and re-poll server for available dirs");
+        System.out.println("  shutdown-server     remotely shut down the server");
+        System.out.println("  mirror              show current mirror directory");
+        System.out.println("  help                show this message");
+        System.out.println("  exit                shut down the client");
         System.out.println();
     }
 }

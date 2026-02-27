@@ -418,3 +418,66 @@ writes, DB queries) cheap and non-blocking at the OS level.
 | `duckDnsExecutor` (virtual)    | server | Runs DuckDNS HTTP update every 5 minutes                     |
 | `dir-watcher-{path}` (virtual) | server | One per watched directory — blocks on `WatchService.take()`  |
 
+---
+
+## Role Swap
+
+Since both modules share the same mTLS certificates and the data on disk is identical after a full sync, you can
+**swap which machine acts as server and which acts as client** at any time. This is useful when you are physically
+at the client machine and want to push new files from there.
+
+### When to swap
+
+- You are at the client machine and have new files you want to be the source of truth
+- You want to temporarily push from the client side, then swap back when done
+
+### How to swap
+
+Both JARs are self-contained — no code changes needed. You just run the opposite JAR on each machine and update
+`application.yml` to point at the new server.
+
+**Step 1 — Stop both machines:**
+
+```
+# Machine A (was server): stop server-sync
+# Machine B (was client): stop client-sync
+```
+
+**Step 2 — On Machine B (new server), update `application.yml`:**
+
+```yaml
+sync:
+  server:
+    root-dirs:
+      - /path/to/your/photos   # the directory with your new files
+  socket:
+    port: 8888
+```
+
+Then run `server-sync.jar`.
+
+**Step 3 — On Machine A (new client), update `application.yml`:**
+
+```yaml
+sync:
+  server:
+    host: <Machine B IP or hostname>
+    port: 8888
+  client:
+    mirror-dir: /path/to/mirror
+    dirs:
+      - photos
+```
+
+Then run `client-sync.jar`.
+
+**Step 4 — Swap back when done:**  
+Repeat in reverse — stop both, restore original configs, restart original JARs.
+
+### Important notes
+
+- The new client's `sync_state` DB will have the old sync versions from when it was the server — these are irrelevant
+  in client mode. The client will register the dirs fresh and catch up from version `-1` if needed.
+- If the new client already has the files on disk from when it was the server, the `synced_files` audit on connect
+  will see them as present and skip a full re-sync — meaning the swap is fast.
+- Certificates do not need to change — both machines already have both `keystore.p12` and `truststore.p12`.

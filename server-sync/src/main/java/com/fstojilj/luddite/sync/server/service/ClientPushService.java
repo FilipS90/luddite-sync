@@ -11,11 +11,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
-import javax.net.ssl.KeyManagerFactory;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLServerSocket;
-import javax.net.ssl.SSLSocket;
-import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.*;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -39,6 +35,8 @@ public class ClientPushService {
     public static final byte EVENT_WRITE = 1;
     public static final byte EVENT_DELETE = 2;
     public static final byte ACK = 3;
+    public static final byte SHUTDOWN = 4;
+    public static final byte RESUME_SERVER_MODE = 5;
 
     private final FileEventService fileEventService;
     private final FileMetadataService fileMetadataService;
@@ -85,6 +83,22 @@ public class ClientPushService {
      * TTL is configurable via sync.socket.pending-ack-ttl-ms (default 20s).
      */
     private final ConcurrentHashMap<Long, PendingAck> pendingAcks = new ConcurrentHashMap<>();
+
+    /**
+     * Sends a RESUME_SERVER_MODE signal to all connected clients.
+     * Each client will exit with code 2, causing its wrapper script to restart it as a server.
+     */
+    public void sendResumeServerMode() {
+        sessions.forEach(session -> {
+            try {
+                session.out().writeByte(RESUME_SERVER_MODE);
+                session.out().flush();
+                log.info("RESUME_SERVER_MODE signal sent to a client");
+            } catch (IOException e) {
+                log.warn("Failed to send RESUME_SERVER_MODE to a client: {}", e.getMessage());
+            }
+        });
+    }
 
     @PostConstruct
     public void start() throws Exception {
@@ -174,9 +188,10 @@ public class ClientPushService {
                     socket.getRemoteSocketAddress(), subscribedIds.size());
 
             // Read ACKs from client: [1 byte ACK] [8 bytes syncVersion]
+            // or a SHUTDOWN signal: [1 byte SHUTDOWN]
             while (true) {
-                byte ack = in.readByte();
-                if (ack == ACK) {
+                byte msg = in.readByte();
+                if (msg == ACK) {
                     long syncVersion = in.readLong();
                     PendingAck pending = pendingAcks.remove(syncVersion);
                     if (pending != null) {
@@ -190,8 +205,11 @@ public class ClientPushService {
                     } else {
                         log.warn("ACK for unknown sync version {}", syncVersion);
                     }
+                } else if (msg == SHUTDOWN) {
+                    log.info("Shutdown signal received from client {} — exiting with code 2 to trigger client mode", socket.getRemoteSocketAddress());
+                    System.exit(2);
                 } else {
-                    log.warn("Unexpected byte from client: {}", ack);
+                    log.warn("Unexpected byte from client: {}", msg);
                 }
             }
 
