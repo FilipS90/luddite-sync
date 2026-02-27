@@ -37,6 +37,16 @@ public class SyncStateRepository {
     }
 
     /**
+     * Resets the last sync version for a dir back to -1, forcing a full re-sync
+     * on the next handshake with the server.
+     */
+    public void reset(String dirName) {
+        jdbcTemplate.update("""
+                UPDATE sync_state SET last_sync_version = -1 WHERE dir_name = ?
+                """, dirName);
+    }
+
+    /**
      * Inserts or advances the last sync version for a given dir.
      * Never regresses — if the stored version is already higher, it is kept.
      */

@@ -2,6 +2,7 @@ package com.fstojilj.luddite.sync.client.service;
 
 import com.fstojilj.luddite.sync.client.config.SyncClientProperties;
 import com.fstojilj.luddite.sync.client.repository.SyncStateRepository;
+import com.fstojilj.luddite.sync.client.repository.SyncedFileRepository;
 import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -37,6 +38,7 @@ public class ServerSyncService {
     private static final byte ACK = 3;
 
     private final SyncStateRepository syncStateRepository;
+    private final SyncedFileRepository syncedFileRepository;
     private final SyncClientProperties clientProperties;
 
     @Value("${sync.server.host:localhost}")
@@ -124,8 +126,9 @@ public class ServerSyncService {
                             availableDirs, configuredDirs);
                 }
 
-                // Step 3: register dirs locally and send handshake
+                // Step 3: register dirs locally, audit for missing files, then send handshake
                 registerDirs(dirsToSync);
+                auditMissingFiles(dirsToSync);
                 sendHandshake(out, dirsToSync);
                 receiveLoop(in, out);
 
@@ -184,6 +187,28 @@ public class ServerSyncService {
     }
 
     /**
+     * Audits the mirror directory against the DB records of synced files.
+     * If any previously-synced file is missing from disk, the dir's last_sync_version
+     * is reset to -1 so the server re-sends those files. Only the missing file records
+     * are removed — files still on disk keep their records.
+     */
+    private void auditMissingFiles(List<String> dirs) {
+        Path mirrorRoot = Path.of(clientProperties.getMirrorDir());
+        for (String dirName : dirs) {
+            List<String> recorded = syncedFileRepository.findAllByDir(dirName);
+            List<String> missing = recorded.stream()
+                    .filter(rel -> !Files.exists(mirrorRoot.resolve(rel)))
+                    .toList();
+            if (!missing.isEmpty()) {
+                log.warn("Dir '{}': {} file(s) missing from disk — resetting sync version to force re-sync: {}",
+                        dirName, missing.size(), missing);
+                syncStateRepository.reset(dirName);
+                missing.forEach(rel -> syncedFileRepository.delete(dirName, rel));
+            }
+        }
+    }
+
+    /**
      * Writes the handshake to the server:
      * [4 bytes] number of dirs
      * per dir:
@@ -221,12 +246,18 @@ public class ServerSyncService {
             String dirName = Path.of(relPath).getName(0).toString();
 
             if (eventType == EVENT_DELETE) {
-                Files.deleteIfExists(target);
-                log.info("Deleted: {}", relPath);
+                if (clientProperties.isDesynced(dirName)) {
+                    log.debug("Ignoring DELETE for desynced dir '{}': {}", dirName, relPath);
+                } else {
+                    Files.deleteIfExists(target);
+                    syncedFileRepository.delete(dirName, relPath);
+                    log.info("Deleted: {}", relPath);
+                }
             } else {
                 byte[] fileBytes = in.readNBytes((int) fileSize);
                 Files.createDirectories(target.getParent());
                 Files.write(target, fileBytes);
+                syncedFileRepository.upsert(dirName, relPath);
                 log.info("Written: {} ({} bytes, v{})", relPath, fileSize, syncVersion);
             }
 
