@@ -25,6 +25,11 @@ if "%MODE%"=="server" (
         set MODE=client
         goto loop
     )
+    if %ERRORLEVEL%==3 (
+        echo [luddite] Switch-mode complete -- restarting as CLIENT (connecting to %REMOTE_HOST%)
+        set MODE=client
+        goto loop
+    )
     echo [luddite] Server exited with code %ERRORLEVEL% -- restarting in server mode in 5s...
     timeout /t 5 /nobreak >nul
     goto loop

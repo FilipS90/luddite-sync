@@ -144,7 +144,7 @@ is behind a home router or NAT, you need to forward this port so clients can rea
 3. Create a new rule:
 
    | Field             | Value                                      |
-         |-------------------|--------------------------------------------|
+            |-------------------|--------------------------------------------|
    | Name              | luddite-sync                               |
    | Protocol          | TCP                                        |
    | External port     | 8888                                       |
@@ -358,7 +358,7 @@ Interactive CLI available on `stdin` after the server starts.
   dns domain <d>      change DuckDNS domain at runtime
   dns token <t>       change DuckDNS token at runtime
   dns update          trigger an immediate DuckDNS update
-  swap-back           send resume-server-mode signal to all connected clients
+  switch-mode <addr>  signal a specific client to restart as a server (use 'list' to see addresses)
   help                show this message
   exit                shut down the server
 ```
@@ -402,15 +402,30 @@ You then start `server-sync.jar` on your machine manually (or via the wrapper).
 
 ### Swapping back (from the server)
 
-When you are done and want to restore the original roles, type `swap-back` in the **server Admin CLI** (running on your
-machine, which is now acting as server):
+### Swapping back (from the server)
+
+When you are done and want to restore the original roles, type `switch-mode <addr>` in the **server Admin CLI**.
+Use `list` to see the address of the connected client first:
 
 ```
-swap-back
+list
+switch-mode /192.168.1.10:54321
 ```
 
-This sends a `RESUME_SERVER_MODE` signal to the connected client (the original server machine). That client exits with
-code `2`, and its wrapper script restarts it as a server. You then stop your server and restart your client.
+This does two things atomically:
+
+1. Sends `RESUME_SERVER_MODE` to the specified client — it exits with code `2`, wrapper restarts it as a server
+2. The current server itself exits with code `3` — its wrapper restarts it as a client pointing at the original server
+
+Both machines swap roles cleanly with no manual intervention.
+
+### Exit codes
+
+| Code | Meaning                                                             |
+|------|---------------------------------------------------------------------|
+| `0`  | Normal exit / crash — wrapper restarts in the same mode after 5s    |
+| `2`  | Received `SHUTDOWN` or `RESUME_SERVER_MODE` — restart in other mode |
+| `3`  | Sent `switch-mode` signal — this machine restarts as client         |
 
 ### Wrapper script usage
 

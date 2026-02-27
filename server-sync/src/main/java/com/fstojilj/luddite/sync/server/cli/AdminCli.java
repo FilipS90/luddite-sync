@@ -22,7 +22,7 @@ import java.io.InputStreamReader;
  * dns domain &lt;d&gt;    — change DuckDNS domain
  * dns token &lt;t&gt;     — change DuckDNS token
  * dns update        — trigger an immediate DuckDNS update
- * swap-back         — send a swap-back signal to all clients so they restart as servers
+ * switch-mode &lt;addr&gt; — signal a specific client to restart as a server
  * help              — show available commands
  * exit              — shut down the server
  */
@@ -69,6 +69,14 @@ public class AdminCli {
                     System.out.println("  ----|-----------------------------");
                     dirs.forEach(d -> System.out.printf("  %-4d| %s%n", d.getId(), d.getAbsolutePath()));
                 }
+                var clients = clientPushService.listConnectedClients();
+                System.out.println();
+                if (clients.isEmpty()) {
+                    System.out.println("  Connected clients: (none)");
+                } else {
+                    System.out.println("  Connected clients:");
+                    clients.forEach(c -> System.out.println("    - " + c));
+                }
             }
             case "add" -> {
                 if (arg.isEmpty()) {
@@ -100,9 +108,18 @@ public class AdminCli {
                 }
             }
             case "dns" -> handleDns(arg);
-            case "swap-back" -> {
-                System.out.println("  Sending resume-server-mode signal to all connected clients...");
-                clientPushService.sendResumeServerMode();
+            case "switch-mode" -> {
+                if (arg.isEmpty()) {
+                    System.out.println("  Usage: switch-mode <client-address>");
+                    System.out.println("  Use 'list' to see connected client addresses.");
+                    return;
+                }
+                boolean sent = clientPushService.sendResumeServerMode(arg);
+                if (sent) {
+                    System.out.printf("  Switch-mode signal sent to %s%n", arg);
+                } else {
+                    System.out.printf("  No connected client found with address: %s%n", arg);
+                }
             }
             case "help" -> printHelp();
             case "exit" -> {
@@ -161,7 +178,7 @@ public class AdminCli {
         System.out.println("  dns domain <d>    change DuckDNS domain");
         System.out.println("  dns token <t>     change DuckDNS token");
         System.out.println("  dns update        trigger an immediate DuckDNS update");
-        System.out.println("  swap-back         send swap-back signal to all clients");
+        System.out.println("  switch-mode <addr>  signal a specific client to restart as a server");
         System.out.println("  help              show this message");
         System.out.println("  exit              shut down the server");
         System.out.println();

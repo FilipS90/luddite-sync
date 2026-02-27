@@ -63,9 +63,9 @@ public class ClientPushService {
 
     /**
      * One entry per connected client.
-     * Holds the output stream and the set of rootDirIds the client subscribed to.
+     * Holds the output stream, the remote address, and the set of rootDirIds the client subscribed to.
      */
-    private record ClientSession(DataOutputStream out, Set<Long> subscribedRootDirIds) {
+    private record ClientSession(DataOutputStream out, String address, Set<Long> subscribedRootDirIds) {
     }
 
     /**
@@ -85,19 +85,33 @@ public class ClientPushService {
     private final ConcurrentHashMap<Long, PendingAck> pendingAcks = new ConcurrentHashMap<>();
 
     /**
-     * Sends a RESUME_SERVER_MODE signal to all connected clients.
-     * Each client will exit with code 2, causing its wrapper script to restart it as a server.
+     * Returns addresses of all currently connected clients — used by the CLI to show who is connected.
      */
-    public void sendResumeServerMode() {
-        sessions.forEach(session -> {
-            try {
-                session.out().writeByte(RESUME_SERVER_MODE);
-                session.out().flush();
-                log.info("RESUME_SERVER_MODE signal sent to a client");
-            } catch (IOException e) {
-                log.warn("Failed to send RESUME_SERVER_MODE to a client: {}", e.getMessage());
-            }
-        });
+    public List<String> listConnectedClients() {
+        return sessions.stream().map(ClientSession::address).toList();
+    }
+
+    /**
+     * Sends a RESUME_SERVER_MODE signal to a specific client identified by address.
+     * The targeted client will exit with code 2, causing its wrapper script to restart it as a server.
+     */
+    public boolean sendResumeServerMode(String address) {
+        return sessions.stream()
+                .filter(s -> s.address().equals(address))
+                .findFirst()
+                .map(session -> {
+                    try {
+                        session.out().writeByte(RESUME_SERVER_MODE);
+                        session.out().flush();
+                        log.info("RESUME_SERVER_MODE signal sent to {} — exiting with code 3 to restart as client", address);
+                        System.exit(3);
+                        return true;
+                    } catch (IOException e) {
+                        log.warn("Failed to send RESUME_SERVER_MODE to {}: {}", address, e.getMessage());
+                        return false;
+                    }
+                })
+                .orElse(false);
     }
 
     @PostConstruct
@@ -182,7 +196,8 @@ public class ClientPushService {
             Set<Long> subscribedIds = resolveSubscribedIds(handshake);
             sendCatchUp(handshake, out);
 
-            ClientSession session = new ClientSession(out, subscribedIds);
+            String address = socket.getRemoteSocketAddress().toString();
+            ClientSession session = new ClientSession(out, address, subscribedIds);
             sessions.add(session);
             log.info("Client {} is now live, subscribed to {} dir(s)",
                     socket.getRemoteSocketAddress(), subscribedIds.size());

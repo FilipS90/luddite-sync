@@ -29,6 +29,9 @@ while true; do
         if [ $EXIT_CODE -eq 2 ]; then
             echo "[luddite] Shutdown signal received — switching to CLIENT mode (connecting to $REMOTE_HOST)"
             MODE=client
+        elif [ $EXIT_CODE -eq 3 ]; then
+            echo "[luddite] Switch-mode complete — restarting as CLIENT (connecting to $REMOTE_HOST)"
+            MODE=client
         else
             echo "[luddite] Server exited with code $EXIT_CODE — restarting in server mode in 5s..."
             sleep 5
