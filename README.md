@@ -149,7 +149,7 @@ is behind a home router or NAT, you need to forward this port so clients can rea
 3. Create a new rule:
 
    | Field             | Value                                      |
-                     |-------------------|--------------------------------------------|
+                        |-------------------|--------------------------------------------|
    | Name              | luddite-sync                               |
    | Protocol          | TCP                                        |
    | External port     | 8888                                       |
@@ -347,14 +347,15 @@ luddite.bat client luddite-sync.duckdns.org     # Windows
 Interactive CLI available on `stdin` after the server starts.
 
 ```
-  list                list all registered root dirs and connected client addresses
+  list                list all registered root dirs
+  listc               list connected clients and their addresses
   add <path>          register and watch a new root dir
   remove <id>         unregister a root dir by ID
   dns                 show current DuckDNS domain and token
   dns domain <d>      change DuckDNS domain at runtime
   dns token <t>       change DuckDNS token at runtime
   dns update          trigger an immediate DuckDNS update
-  switch-mode <addr>  signal a specific client to restart as a server (use 'list' to see addresses)
+  switch-mode <addr>  signal a specific client to restart as a server (use 'listc' for addresses)
   help                show this message
   exit                shut down the server
 ```
@@ -402,7 +403,7 @@ When you are done and want to restore the original roles, type `switch-mode <add
 Use `list` to see the address of the connected client first:
 
 ```
-list
+listc
 switch-mode /192.168.1.10:54321
 ```
 

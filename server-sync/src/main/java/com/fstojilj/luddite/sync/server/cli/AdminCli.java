@@ -15,14 +15,15 @@ import java.io.InputStreamReader;
  * Interactive CLI for managing server root directories and DNS at runtime.
  * <p>
  * Commands:
- * list              — list all registered root dirs and connected client addresses
+ * list              — list all registered root dirs
+ * listc             — list connected clients and their addresses
  * add &lt;path&gt;        — register a new root dir and start watching it
  * remove &lt;id&gt;       — stop watching and unregister a root dir by ID
  * dns               — show current DuckDNS domain and token
  * dns domain &lt;d&gt;    — change DuckDNS domain
  * dns token &lt;t&gt;     — change DuckDNS token
  * dns update        — trigger an immediate DuckDNS update
- * switch-mode &lt;addr&gt; — signal a specific client to restart as a server
+ * switch-mode &lt;addr&gt; — signal a specific client to restart as a server (use 'listc' for addresses)
  * help              — show available commands
  * exit              — shut down the server
  */
@@ -69,10 +70,11 @@ public class AdminCli {
                     System.out.println("  ----|-----------------------------");
                     dirs.forEach(d -> System.out.printf("  %-4d| %s%n", d.getId(), d.getAbsolutePath()));
                 }
+            }
+            case "listc" -> {
                 var clients = clientPushService.listConnectedClients();
-                System.out.println();
                 if (clients.isEmpty()) {
-                    System.out.println("  Connected clients: (none)");
+                    System.out.println("  (no clients connected)");
                 } else {
                     System.out.println("  Connected clients:");
                     clients.forEach(c -> System.out.println("    - " + c));
@@ -111,7 +113,7 @@ public class AdminCli {
             case "switch-mode" -> {
                 if (arg.isEmpty()) {
                     System.out.println("  Usage: switch-mode <client-address>");
-                    System.out.println("  Use 'list' to see connected client addresses.");
+                    System.out.println("  Use 'listc' to see connected client addresses.");
                     return;
                 }
                 boolean sent = clientPushService.sendResumeServerMode(arg);
@@ -171,16 +173,17 @@ public class AdminCli {
         System.out.println();
         System.out.println("  Luddite Sync Server — Admin CLI");
         System.out.println("  --------------------------------");
-        System.out.println("  list                list root dirs and connected client addresses");
-        System.out.println("  add <path>        register and watch a new root dir");
-        System.out.println("  remove <id>       unregister a root dir by ID");
-        System.out.println("  dns               show current DuckDNS domain & token");
-        System.out.println("  dns domain <d>    change DuckDNS domain");
-        System.out.println("  dns token <t>     change DuckDNS token");
-        System.out.println("  dns update        trigger an immediate DuckDNS update");
-        System.out.println("  switch-mode <addr>  signal a specific client to restart as a server");
-        System.out.println("  help              show this message");
-        System.out.println("  exit              shut down the server");
+        System.out.println("  list                list all registered root dirs");
+        System.out.println("  listc               list connected clients and their addresses");
+        System.out.println("  add <path>          register and watch a new root dir");
+        System.out.println("  remove <id>         unregister a root dir by ID");
+        System.out.println("  dns                 show current DuckDNS domain & token");
+        System.out.println("  dns domain <d>      change DuckDNS domain");
+        System.out.println("  dns token <t>       change DuckDNS token");
+        System.out.println("  dns update          trigger an immediate DuckDNS update");
+        System.out.println("  switch-mode <addr>  signal a specific client to restart as a server (use 'listc' for addresses)");
+        System.out.println("  help                show this message");
+        System.out.println("  exit                shut down the server");
         System.out.println();
     }
 }
