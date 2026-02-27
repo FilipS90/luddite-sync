@@ -139,8 +139,11 @@ client-sync/src/main/resources/truststore.p12
 
 ## Port Forwarding
 
-The server listens for client connections on port `8888` (configurable via `sync.socket.port`). If the server machine
-is behind a home router or NAT, you need to forward this port so clients can reach it from outside the local network.
+The server listens for client connections on port `8888` (configurable via `sync.socket.port`). If the machine
+is behind a home router or NAT, you need to forward this port so other machines can reach it.
+
+> **If you plan to use role swapping, both machines need port `8888` forwarded** — because either machine can become
+> the server at any point. Set up port forwarding on all participating machines upfront.
 
 ### Steps (general — exact UI varies by router)
 
@@ -149,7 +152,7 @@ is behind a home router or NAT, you need to forward this port so clients can rea
 3. Create a new rule:
 
    | Field             | Value                                      |
-                           |-------------------|--------------------------------------------|
+                              |-------------------|--------------------------------------------|
    | Name              | luddite-sync                               |
    | Protocol          | TCP                                        |
    | External port     | 8888                                       |
