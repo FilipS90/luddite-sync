@@ -20,12 +20,12 @@ public class DuckDNSUpdateJob {
 
     @Getter
     @Setter
-    @Value("${sync.dns.domain:luddite-sync}")
+    @Value("${sync.dns.domain}")
     private volatile String domain;
 
     @Getter
     @Setter
-    @Value("${sync.dns.token:}")
+    @Value("${sync.dns.token}")
     private volatile String token;
 
     @Scheduled(fixedRate = 300000, initialDelay = 0) // Every 5 minutes, run immediately on startup
@@ -57,7 +57,7 @@ public class DuckDNSUpdateJob {
         }
 
 
-        if (response.body().equals("OK")) {
+        if (response.body().contains("OK")) {
             log.info("DuckDNS updated successfully");
         } else {
             log.error("DuckDNS update failed: {}", response.body());
