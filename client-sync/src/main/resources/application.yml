@@ -12,7 +12,7 @@ spring:
 
 sync:
   server:
-    host: ludditesync.duckdns.org
+    host: luddite-sync.duckdns.org
     port: 8888
   client:
     mirror-dir: ${user.home}/.luddite
