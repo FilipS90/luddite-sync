@@ -56,7 +56,7 @@ public class ServerSyncService {
     @Value("${sync.socket.truststore:classpath:truststore.p12}")
     private Resource truststoreResource;
 
-    @Value("${sync.socket.password:fichony123!}")
+    @Value("${sync.socket.password}")
     private String keystorePassword;
 
     private volatile boolean running = false;
