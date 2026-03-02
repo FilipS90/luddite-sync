@@ -20,13 +20,6 @@
             <artifactId>common-sync</artifactId>
         </dependency>
 
-        <!-- Web client for sync requests -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
-        </dependency>
-
-
         <!-- Spring JDBC -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
