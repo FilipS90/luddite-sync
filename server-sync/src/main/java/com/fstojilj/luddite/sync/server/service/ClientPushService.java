@@ -198,11 +198,10 @@ public class ClientPushService {
             log.info("Handshake from {}: {} dir(s)", socket.getRemoteSocketAddress(), handshake.size());
 
             Set<Long> subscribedIds = resolveSubscribedIds(handshake);
-            sendCatchUp(handshake, out);
-
             String address = socket.getRemoteSocketAddress().toString();
             ClientSession session = new ClientSession(out, address, subscribedIds);
             sessions.add(session);
+            sendCatchUp(handshake, session);
             log.info("Client {} is now live, subscribed to {} dir(s)",
                     socket.getRemoteSocketAddress(), subscribedIds.size());
 
@@ -358,7 +357,7 @@ public class ClientPushService {
      * For each requested dir, sends all files whose sync_version is newer
      * than what the client reported.
      */
-    private void sendCatchUp(List<SyncHandshakeEntry> handshake, DataOutputStream out) throws IOException {
+    private void sendCatchUp(List<SyncHandshakeEntry> handshake, ClientSession session) throws IOException {
         for (SyncHandshakeEntry entry : handshake) {
             var rootDir = rootDirService.findByName(entry.dirName());
             if (rootDir.isEmpty()) continue;
@@ -374,12 +373,15 @@ public class ClientPushService {
                 String qualifiedPath = entry.dirName() + "/" + file.getRelativePath();
                 byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
                 byte[] fileBytes = Files.readAllBytes(Path.of(absPath));
-                out.writeByte(EVENT_WRITE);
-                out.writeInt(pathBytes.length);
-                out.write(pathBytes);
-                out.writeLong(file.getSyncVersion());
-                out.writeLong(fileBytes.length);
-                out.write(fileBytes);
+                synchronized (session.out()) {
+                    session.out().writeByte(EVENT_WRITE);
+                    session.out().writeInt(pathBytes.length);
+                    session.out().write(pathBytes);
+                    session.out().writeLong(file.getSyncVersion());
+                    session.out().writeLong(fileBytes.length);
+                    session.out().write(fileBytes);
+                    session.out().flush();
+                }
                 log.debug("Catch-up WRITE (v{}) {}", file.getSyncVersion(), qualifiedPath);
             }
 
@@ -391,15 +393,16 @@ public class ClientPushService {
                 long syncVersion = ((Number) delete.get("sync_version")).longValue();
                 String qualifiedPath = entry.dirName() + "/" + relativePath;
                 byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
-                out.writeByte(EVENT_DELETE);
-                out.writeInt(pathBytes.length);
-                out.write(pathBytes);
-                out.writeLong(syncVersion);
-                out.writeLong(0L);
+                synchronized (session.out()) {
+                    session.out().writeByte(EVENT_DELETE);
+                    session.out().writeInt(pathBytes.length);
+                    session.out().write(pathBytes);
+                    session.out().writeLong(syncVersion);
+                    session.out().writeLong(0L);
+                    session.out().flush();
+                }
                 log.debug("Catch-up DELETE (v{}) {}", syncVersion, qualifiedPath);
             }
-
-            out.flush();
         }
     }
 
@@ -408,22 +411,22 @@ public class ClientPushService {
                                long syncVersion) {
         try {
             DataOutputStream out = session.out();
-            out.writeByte(eventType);
-            out.writeInt(pathBytes.length);
-            out.write(pathBytes);
-            out.writeLong(syncVersion);
+            synchronized (out) {
+                out.writeByte(eventType);
+                out.writeInt(pathBytes.length);
+                out.write(pathBytes);
+                out.writeLong(syncVersion);
 
-            if (eventType == EVENT_WRITE) {
-                byte[] fileBytes = Files.readAllBytes(Path.of(absolutePath));
-                out.writeLong(fileBytes.length);
-                out.write(fileBytes);
-            } else {
-                out.writeLong(0L);
+                if (eventType == EVENT_WRITE) {
+                    byte[] fileBytes = Files.readAllBytes(Path.of(absolutePath));
+                    out.writeLong(fileBytes.length);
+                    out.write(fileBytes);
+                } else {
+                    out.writeLong(0L);
+                }
+
+                out.flush();
             }
-
-            out.flush();
-
-
             log.debug("Pushed {} (v{}) to client: {}", kindName, syncVersion, relativePath);
         } catch (IOException e) {
             log.warn("Failed to push to client, removing session: {}", e.getMessage());

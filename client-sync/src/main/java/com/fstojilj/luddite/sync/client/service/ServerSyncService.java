@@ -135,7 +135,6 @@ public class ServerSyncService {
                     while (running && clientProperties.getDirs().isEmpty()) {
                         sleep(2_000);
                     }
-                    if (!running) break;
                     configuredDirs = clientProperties.getDirs();
                 }
 
