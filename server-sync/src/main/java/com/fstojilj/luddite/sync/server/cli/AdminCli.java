@@ -1,8 +1,8 @@
 package com.fstojilj.luddite.sync.server.cli;
 
 import com.fstojilj.luddite.sync.server.dns.DuckDNSUpdateJob;
-import com.fstojilj.luddite.sync.server.service.ClientPushService;
 import com.fstojilj.luddite.sync.server.service.RootDirService;
+import com.fstojilj.luddite.sync.server.service.ServerPushService;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,7 +34,7 @@ public class AdminCli {
 
     private final RootDirService rootDirService;
     private final DuckDNSUpdateJob duckDNSUpdateJob;
-    private final ClientPushService clientPushService;
+    private final ServerPushService serverPushService;
 
     @PostConstruct
     public void start() {
@@ -72,7 +72,7 @@ public class AdminCli {
                 }
             }
             case "listc" -> {
-                var clients = clientPushService.listConnectedClients();
+                var clients = serverPushService.listConnectedClients();
                 if (clients.isEmpty()) {
                     System.out.println("  (no clients connected)");
                 } else {
@@ -116,7 +116,7 @@ public class AdminCli {
                     System.out.println("  Use 'listc' to see connected client addresses.");
                     return;
                 }
-                boolean sent = clientPushService.sendResumeServerMode(arg);
+                boolean sent = serverPushService.sendResumeServerMode(arg);
                 if (sent) {
                     System.out.printf("  Switch-mode signal sent to %s%n", arg);
                 } else {

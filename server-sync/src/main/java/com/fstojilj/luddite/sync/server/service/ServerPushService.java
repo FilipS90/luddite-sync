@@ -34,7 +34,7 @@ import java.util.concurrent.CopyOnWriteArraySet;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-public class ClientPushService {
+public class ServerPushService {
 
     public static final byte EVENT_WRITE = 1;
     public static final byte EVENT_DELETE = 2;

@@ -31,7 +31,7 @@ import java.util.Set;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-public class ServerSyncService {
+public class ClientSyncService {
 
     private static final byte EVENT_WRITE = 1;
     private static final byte EVENT_DELETE = 2;

@@ -36,7 +36,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class ClientPushServiceTest {
+class ServerPushServiceTest {
 
     @Mock
     private FileEventService fileEventService;
@@ -48,16 +48,16 @@ class ClientPushServiceTest {
     private SyncVersionRepository syncVersionRepository;
 
     @InjectMocks
-    private ClientPushService clientPushService;
+    private ServerPushService serverPushService;
 
     @TempDir
     Path tempDir;
 
     @BeforeEach
     void setUp() {
-        ReflectionTestUtils.setField(clientPushService, "port", 8888);
-        ReflectionTestUtils.setField(clientPushService, "keystorePassword", "test");
-        ReflectionTestUtils.setField(clientPushService, "pendingAckTtlMs", 20000L);
+        ReflectionTestUtils.setField(serverPushService, "port", 8888);
+        ReflectionTestUtils.setField(serverPushService, "keystorePassword", "test");
+        ReflectionTestUtils.setField(serverPushService, "pendingAckTtlMs", 20000L);
     }
 
     // -------------------------------------------------------------------------
@@ -66,22 +66,22 @@ class ClientPushServiceTest {
 
     @Test
     void listConnectedClients_noSessions_shouldReturnEmpty() {
-        assertThat(clientPushService.listConnectedClients()).isEmpty();
+        assertThat(serverPushService.listConnectedClients()).isEmpty();
     }
 
     @Test
     @SuppressWarnings("unchecked")
     void listConnectedClients_withSessions_shouldReturnAddresses() throws Exception {
-        var sessions = (CopyOnWriteArraySet<Object>) ReflectionTestUtils.getField(clientPushService, "sessions");
+        var sessions = (CopyOnWriteArraySet<Object>) ReflectionTestUtils.getField(serverPushService, "sessions");
         Class<?> sessionClass = Class.forName(
-                "com.fstojilj.luddite.sync.server.service.ClientPushService$ClientSession");
+                "com.fstojilj.luddite.sync.server.service.ServerPushService$ClientSession");
         var ctor = sessionClass.getDeclaredConstructors()[0];
         ctor.setAccessible(true);
         Object session = ctor.newInstance(
                 new DataOutputStream(new ByteArrayOutputStream()), "/192.168.1.10:54321", Set.of(1L));
         sessions.add(session);
 
-        List<String> clients = clientPushService.listConnectedClients();
+        List<String> clients = serverPushService.listConnectedClients();
 
         assertThat(clients).containsExactly("/192.168.1.10:54321");
     }
@@ -92,7 +92,7 @@ class ClientPushServiceTest {
 
     @Test
     void sendResumeServerMode_noMatchingSession_shouldReturnFalse() {
-        boolean result = clientPushService.sendResumeServerMode("/10.0.0.1:9999");
+        boolean result = serverPushService.sendResumeServerMode("/10.0.0.1:9999");
         assertThat(result).isFalse();
     }
 
@@ -102,12 +102,12 @@ class ClientPushServiceTest {
 
     @Test
     void stop_whenRunning_shouldSetRunningFalse() {
-        ReflectionTestUtils.setField(clientPushService, "running", true);
-        ReflectionTestUtils.setField(clientPushService, "serverSocket", null);
+        ReflectionTestUtils.setField(serverPushService, "running", true);
+        ReflectionTestUtils.setField(serverPushService, "serverSocket", null);
 
-        clientPushService.stop();
+        serverPushService.stop();
 
-        boolean running = (boolean) ReflectionTestUtils.getField(clientPushService, "running");
+        boolean running = (boolean) ReflectionTestUtils.getField(serverPushService, "running");
         assertThat(running).isFalse();
     }
 
@@ -121,10 +121,10 @@ class ClientPushServiceTest {
         when(rootDirService.findByName("photos")).thenReturn(Optional.of(
                 RootDir.builder().id(42L).name("photos").absolutePath("/photos").build()));
 
-        Method method = ClientPushService.class.getDeclaredMethod("resolveSubscribedIds", List.class);
+        Method method = ServerPushService.class.getDeclaredMethod("resolveSubscribedIds", List.class);
         method.setAccessible(true);
 
-        Set<Long> ids = (Set<Long>) method.invoke(clientPushService,
+        Set<Long> ids = (Set<Long>) method.invoke(serverPushService,
                 List.of(new SyncHandshakeEntry("photos", 0L)));
 
         assertThat(ids).containsExactly(42L);
@@ -135,10 +135,10 @@ class ClientPushServiceTest {
     void resolveSubscribedIds_unknownDir_shouldReturnEmptySet() throws Exception {
         when(rootDirService.findByName("unknown")).thenReturn(Optional.empty());
 
-        Method method = ClientPushService.class.getDeclaredMethod("resolveSubscribedIds", List.class);
+        Method method = ServerPushService.class.getDeclaredMethod("resolveSubscribedIds", List.class);
         method.setAccessible(true);
 
-        Set<Long> ids = (Set<Long>) method.invoke(clientPushService,
+        Set<Long> ids = (Set<Long>) method.invoke(serverPushService,
                 List.of(new SyncHandshakeEntry("unknown", 0L)));
 
         assertThat(ids).isEmpty();
@@ -152,10 +152,10 @@ class ClientPushServiceTest {
         when(rootDirService.findByName("docs")).thenReturn(Optional.of(
                 RootDir.builder().id(2L).name("docs").absolutePath("/docs").build()));
 
-        Method method = ClientPushService.class.getDeclaredMethod("resolveSubscribedIds", List.class);
+        Method method = ServerPushService.class.getDeclaredMethod("resolveSubscribedIds", List.class);
         method.setAccessible(true);
 
-        Set<Long> ids = (Set<Long>) method.invoke(clientPushService,
+        Set<Long> ids = (Set<Long>) method.invoke(serverPushService,
                 List.of(new SyncHandshakeEntry("photos", 0L), new SyncHandshakeEntry("docs", 0L)));
 
         assertThat(ids).containsExactlyInAnyOrder(1L, 2L);
@@ -175,9 +175,9 @@ class ClientPushServiceTest {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(baos);
 
-        Method method = ClientPushService.class.getDeclaredMethod("sendAvailableDirs", DataOutputStream.class);
+        Method method = ServerPushService.class.getDeclaredMethod("sendAvailableDirs", DataOutputStream.class);
         method.setAccessible(true);
-        method.invoke(clientPushService, out);
+        method.invoke(serverPushService, out);
 
         DataInputStream in = new DataInputStream(new ByteArrayInputStream(baos.toByteArray()));
         int count = in.readInt();
@@ -199,9 +199,9 @@ class ClientPushServiceTest {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(baos);
 
-        Method method = ClientPushService.class.getDeclaredMethod("sendAvailableDirs", DataOutputStream.class);
+        Method method = ServerPushService.class.getDeclaredMethod("sendAvailableDirs", DataOutputStream.class);
         method.setAccessible(true);
-        method.invoke(clientPushService, out);
+        method.invoke(serverPushService, out);
 
         DataInputStream in = new DataInputStream(new ByteArrayInputStream(baos.toByteArray()));
         assertThat(in.readInt()).isEqualTo(0);
@@ -225,10 +225,10 @@ class ClientPushServiceTest {
 
         DataInputStream in = new DataInputStream(new ByteArrayInputStream(baos.toByteArray()));
 
-        Method method = ClientPushService.class.getDeclaredMethod("readHandshake", DataInputStream.class);
+        Method method = ServerPushService.class.getDeclaredMethod("readHandshake", DataInputStream.class);
         method.setAccessible(true);
 
-        List<SyncHandshakeEntry> entries = (List<SyncHandshakeEntry>) method.invoke(clientPushService, in);
+        List<SyncHandshakeEntry> entries = (List<SyncHandshakeEntry>) method.invoke(serverPushService, in);
 
         assertThat(entries).hasSize(1);
         assertThat(entries.get(0).dirName()).isEqualTo("photos");
@@ -243,10 +243,10 @@ class ClientPushServiceTest {
 
         DataInputStream in = new DataInputStream(new ByteArrayInputStream(baos.toByteArray()));
 
-        Method method = ClientPushService.class.getDeclaredMethod("readHandshake", DataInputStream.class);
+        Method method = ServerPushService.class.getDeclaredMethod("readHandshake", DataInputStream.class);
         method.setAccessible(true);
 
-        List<SyncHandshakeEntry> entries = (List<SyncHandshakeEntry>) method.invoke(clientPushService, in);
+        List<SyncHandshakeEntry> entries = (List<SyncHandshakeEntry>) method.invoke(serverPushService, in);
 
         assertThat(entries).isEmpty();
     }
@@ -262,23 +262,23 @@ class ClientPushServiceTest {
         DataOutputStream out = new DataOutputStream(baos);
 
         Class<?> sessionClass = Class.forName(
-                "com.fstojilj.luddite.sync.server.service.ClientPushService$ClientSession");
+                "com.fstojilj.luddite.sync.server.service.ServerPushService$ClientSession");
         var ctor = sessionClass.getDeclaredConstructors()[0];
         ctor.setAccessible(true);
         Object session = ctor.newInstance(out, "/client:9000", Set.of(1L));
 
-        Method method = ClientPushService.class.getDeclaredMethod(
+        Method method = ServerPushService.class.getDeclaredMethod(
                 "writeToClient",
                 sessionClass, byte.class, byte[].class, String.class, String.class, String.class, long.class);
         method.setAccessible(true);
 
         byte[] pathBytes = "photos/img.jpg".getBytes(StandardCharsets.UTF_8);
-        method.invoke(clientPushService,
-                session, ClientPushService.EVENT_DELETE, pathBytes,
+        method.invoke(serverPushService,
+                session, ServerPushService.EVENT_DELETE, pathBytes,
                 "/photos/img.jpg", "photos/img.jpg", "ENTRY_DELETE", 99L);
 
         DataInputStream in = new DataInputStream(new ByteArrayInputStream(baos.toByteArray()));
-        assertThat(in.readByte()).isEqualTo(ClientPushService.EVENT_DELETE);
+        assertThat(in.readByte()).isEqualTo(ServerPushService.EVENT_DELETE);
         assertThat(in.readInt()).isEqualTo(pathBytes.length);
         in.readNBytes(pathBytes.length);
         assertThat(in.readLong()).isEqualTo(99L);
@@ -294,23 +294,23 @@ class ClientPushServiceTest {
         DataOutputStream out = new DataOutputStream(baos);
 
         Class<?> sessionClass = Class.forName(
-                "com.fstojilj.luddite.sync.server.service.ClientPushService$ClientSession");
+                "com.fstojilj.luddite.sync.server.service.ServerPushService$ClientSession");
         var ctor = sessionClass.getDeclaredConstructors()[0];
         ctor.setAccessible(true);
         Object session = ctor.newInstance(out, "/client:9000", Set.of(1L));
 
-        Method method = ClientPushService.class.getDeclaredMethod(
+        Method method = ServerPushService.class.getDeclaredMethod(
                 "writeToClient",
                 sessionClass, byte.class, byte[].class, String.class, String.class, String.class, long.class);
         method.setAccessible(true);
 
         byte[] pathBytes = "photos/photo.jpg".getBytes(StandardCharsets.UTF_8);
-        method.invoke(clientPushService,
-                session, ClientPushService.EVENT_WRITE, pathBytes,
+        method.invoke(serverPushService,
+                session, ServerPushService.EVENT_WRITE, pathBytes,
                 file.toString(), "photos/photo.jpg", "ENTRY_CREATE", 10L);
 
         DataInputStream in = new DataInputStream(new ByteArrayInputStream(baos.toByteArray()));
-        assertThat(in.readByte()).isEqualTo(ClientPushService.EVENT_WRITE);
+        assertThat(in.readByte()).isEqualTo(ServerPushService.EVENT_WRITE);
         assertThat(in.readInt()).isEqualTo(pathBytes.length);
         in.readNBytes(pathBytes.length);
         assertThat(in.readLong()).isEqualTo(10L); // syncVersion
@@ -341,13 +341,13 @@ class ClientPushServiceTest {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(baos);
 
-        Method method = ClientPushService.class.getDeclaredMethod("sendCatchUp", List.class, DataOutputStream.class);
+        Method method = ServerPushService.class.getDeclaredMethod("sendCatchUp", List.class, DataOutputStream.class);
         method.setAccessible(true);
-        method.invoke(clientPushService, List.of(new SyncHandshakeEntry("photos", 0L)), out);
+        method.invoke(serverPushService, List.of(new SyncHandshakeEntry("photos", 0L)), out);
 
         DataInputStream in = new DataInputStream(new ByteArrayInputStream(baos.toByteArray()));
         // First message: EVENT_WRITE for img.jpg
-        assertThat(in.readByte()).isEqualTo(ClientPushService.EVENT_WRITE);
+        assertThat(in.readByte()).isEqualTo(ServerPushService.EVENT_WRITE);
     }
 
     @Test
@@ -357,9 +357,9 @@ class ClientPushServiceTest {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(baos);
 
-        Method method = ClientPushService.class.getDeclaredMethod("sendCatchUp", List.class, DataOutputStream.class);
+        Method method = ServerPushService.class.getDeclaredMethod("sendCatchUp", List.class, DataOutputStream.class);
         method.setAccessible(true);
-        method.invoke(clientPushService, List.of(new SyncHandshakeEntry("unknown", 0L)), out);
+        method.invoke(serverPushService, List.of(new SyncHandshakeEntry("unknown", 0L)), out);
 
         // Nothing written
         assertThat(baos.size()).isEqualTo(0);
@@ -377,12 +377,12 @@ class ClientPushServiceTest {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(baos);
 
-        Method method = ClientPushService.class.getDeclaredMethod("sendCatchUp", List.class, DataOutputStream.class);
+        Method method = ServerPushService.class.getDeclaredMethod("sendCatchUp", List.class, DataOutputStream.class);
         method.setAccessible(true);
-        method.invoke(clientPushService, List.of(new SyncHandshakeEntry("photos", 0L)), out);
+        method.invoke(serverPushService, List.of(new SyncHandshakeEntry("photos", 0L)), out);
 
         DataInputStream in = new DataInputStream(new ByteArrayInputStream(baos.toByteArray()));
-        assertThat(in.readByte()).isEqualTo(ClientPushService.EVENT_DELETE);
+        assertThat(in.readByte()).isEqualTo(ServerPushService.EVENT_DELETE);
     }
 
     @Test
@@ -409,9 +409,9 @@ class ClientPushServiceTest {
         when(mockSocket.getOutputStream()).thenReturn(new ByteArrayOutputStream());
         when(mockSocket.getRemoteSocketAddress()).thenReturn(new java.net.InetSocketAddress("localhost", 9000));
 
-        Method method = ClientPushService.class.getDeclaredMethod("serveClient", SSLSocket.class);
+        Method method = ServerPushService.class.getDeclaredMethod("serveClient", SSLSocket.class);
         method.setAccessible(true);
-        method.invoke(clientPushService, mockSocket);
+        method.invoke(serverPushService, mockSocket);
 
         // serveClient completed without exception — session was added during the call
         // (session cleanup depends on socket.isClosed() which is false on mock)
@@ -428,9 +428,9 @@ class ClientPushServiceTest {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(baos);
 
-        Method method = ClientPushService.class.getDeclaredMethod("sendCatchUp", List.class, DataOutputStream.class);
+        Method method = ServerPushService.class.getDeclaredMethod("sendCatchUp", List.class, DataOutputStream.class);
         method.setAccessible(true);
-        method.invoke(clientPushService, List.of(new SyncHandshakeEntry("photos", 0L)), out);
+        method.invoke(serverPushService, List.of(new SyncHandshakeEntry("photos", 0L)), out);
 
         assertThat(baos.size()).isEqualTo(0);
     }
@@ -443,15 +443,15 @@ class ClientPushServiceTest {
     @SuppressWarnings("unchecked")
     void pendingAcks_expiredEntry_shouldBeEvictable() throws Exception {
         long ttl = 100L;
-        ReflectionTestUtils.setField(clientPushService, "pendingAckTtlMs", ttl);
+        ReflectionTestUtils.setField(serverPushService, "pendingAckTtlMs", ttl);
 
-        var pendingAcks = (ConcurrentHashMap<Long, Object>) ReflectionTestUtils.getField(clientPushService, "pendingAcks");
+        var pendingAcks = (ConcurrentHashMap<Long, Object>) ReflectionTestUtils.getField(serverPushService, "pendingAcks");
 
         Class<?> pendingAckClass = Class.forName(
-                "com.fstojilj.luddite.sync.server.service.ClientPushService$PendingAck");
+                "com.fstojilj.luddite.sync.server.service.ServerPushService$PendingAck");
         var ctor = pendingAckClass.getDeclaredConstructors()[0];
         ctor.setAccessible(true);
-        Object expiredAck = ctor.newInstance(1L, "img.jpg", ClientPushService.EVENT_WRITE, 0L);
+        Object expiredAck = ctor.newInstance(1L, "img.jpg", ServerPushService.EVENT_WRITE, 0L);
         pendingAcks.put(99L, expiredAck);
 
         long now = System.currentTimeMillis();
@@ -474,13 +474,13 @@ class ClientPushServiceTest {
     void pendingAcks_freshEntry_shouldNotBeEvicted() throws Exception {
         long ttl = 20000L;
 
-        var pendingAcks = (ConcurrentHashMap<Long, Object>) ReflectionTestUtils.getField(clientPushService, "pendingAcks");
+        var pendingAcks = (ConcurrentHashMap<Long, Object>) ReflectionTestUtils.getField(serverPushService, "pendingAcks");
 
         Class<?> pendingAckClass = Class.forName(
-                "com.fstojilj.luddite.sync.server.service.ClientPushService$PendingAck");
+                "com.fstojilj.luddite.sync.server.service.ServerPushService$PendingAck");
         var ctor = pendingAckClass.getDeclaredConstructors()[0];
         ctor.setAccessible(true);
-        Object freshAck = ctor.newInstance(1L, "img.jpg", ClientPushService.EVENT_WRITE, System.currentTimeMillis());
+        Object freshAck = ctor.newInstance(1L, "img.jpg", ServerPushService.EVENT_WRITE, System.currentTimeMillis());
         pendingAcks.put(100L, freshAck);
 
         long now = System.currentTimeMillis();
@@ -506,11 +506,11 @@ class ClientPushServiceTest {
     @Test
     void drainLoop_whenNotRunning_shouldNotCallFileEventService() throws Exception {
         // running stays false (default), so drainLoop exits immediately
-        ReflectionTestUtils.setField(clientPushService, "running", false);
+        ReflectionTestUtils.setField(serverPushService, "running", false);
 
-        Method method = ClientPushService.class.getDeclaredMethod("drainLoop");
+        Method method = ServerPushService.class.getDeclaredMethod("drainLoop");
         method.setAccessible(true);
-        method.invoke(clientPushService);
+        method.invoke(serverPushService);
 
         // fileEventService.activeRootDirIds() must never be called when not running
         org.mockito.Mockito.verifyNoInteractions(fileEventService);
@@ -519,18 +519,18 @@ class ClientPushServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void drainLoop_noSessions_shouldSkipEvents() throws Exception {
-        ReflectionTestUtils.setField(clientPushService, "running", true);
+        ReflectionTestUtils.setField(serverPushService, "running", true);
 
         when(fileEventService.activeRootDirIds()).thenAnswer(inv -> {
             // After first call, turn off running to exit the loop
-            ReflectionTestUtils.setField(clientPushService, "running", false);
+            ReflectionTestUtils.setField(serverPushService, "running", false);
             return Set.of(1L);
         });
 
         // No sessions => nothing is interested => events are not drained
-        Method method = ClientPushService.class.getDeclaredMethod("drainLoop");
+        Method method = ServerPushService.class.getDeclaredMethod("drainLoop");
         method.setAccessible(true);
-        method.invoke(clientPushService);
+        method.invoke(serverPushService);
 
         verify(fileEventService, org.mockito.Mockito.never())
                 .drainForRootDir(org.mockito.ArgumentMatchers.anyLong());
@@ -542,11 +542,11 @@ class ClientPushServiceTest {
 
     @Test
     void pendingAckCleanupLoop_whenNotRunning_shouldReturnImmediately() throws Exception {
-        ReflectionTestUtils.setField(clientPushService, "running", false);
+        ReflectionTestUtils.setField(serverPushService, "running", false);
 
-        Method method = ClientPushService.class.getDeclaredMethod("pendingAckCleanupLoop");
+        Method method = ServerPushService.class.getDeclaredMethod("pendingAckCleanupLoop");
         method.setAccessible(true);
-        method.invoke(clientPushService); // Must not block
+        method.invoke(serverPushService); // Must not block
     }
 
     // -------------------------------------------------------------------------
@@ -570,7 +570,7 @@ class ClientPushServiceTest {
         w.write(nameBytes);
         w.writeLong(0L); // lastSyncVersion
         // ACK message
-        w.writeByte(ClientPushService.ACK);
+        w.writeByte(ServerPushService.ACK);
         w.writeLong(syncVersion);
         w.flush();
         return baos.toByteArray();
@@ -582,12 +582,12 @@ class ClientPushServiceTest {
         long syncVersion = 7L;
 
         // Pre-seed a pending ack for syncVersion 7
-        var pendingAcks = (ConcurrentHashMap<Long, Object>) ReflectionTestUtils.getField(clientPushService, "pendingAcks");
+        var pendingAcks = (ConcurrentHashMap<Long, Object>) ReflectionTestUtils.getField(serverPushService, "pendingAcks");
         Class<?> pendingAckClass = Class.forName(
-                "com.fstojilj.luddite.sync.server.service.ClientPushService$PendingAck");
+                "com.fstojilj.luddite.sync.server.service.ServerPushService$PendingAck");
         var pendingCtor = pendingAckClass.getDeclaredConstructors()[0];
         pendingCtor.setAccessible(true);
-        pendingAcks.put(syncVersion, pendingCtor.newInstance(1L, "img.jpg", ClientPushService.EVENT_WRITE, System.currentTimeMillis()));
+        pendingAcks.put(syncVersion, pendingCtor.newInstance(1L, "img.jpg", ServerPushService.EVENT_WRITE, System.currentTimeMillis()));
 
         // Server will advertise 0 dirs, client will send 0-entry handshake then ACK then EOF
         when(rootDirService.findAll()).thenReturn(Set.of());
@@ -600,9 +600,9 @@ class ClientPushServiceTest {
         when(mockSocket.getOutputStream()).thenReturn(serverOut);
         when(mockSocket.getRemoteSocketAddress()).thenReturn(new java.net.InetSocketAddress("localhost", 9000));
 
-        Method method = ClientPushService.class.getDeclaredMethod("serveClient", SSLSocket.class);
+        Method method = ServerPushService.class.getDeclaredMethod("serveClient", SSLSocket.class);
         method.setAccessible(true);
-        method.invoke(clientPushService, mockSocket);
+        method.invoke(serverPushService, mockSocket);
 
         // ACK was received and processed — pending ack should be gone
         assertThat(pendingAcks).doesNotContainKey(syncVersion);
@@ -619,7 +619,7 @@ class ClientPushServiceTest {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         DataOutputStream w = new DataOutputStream(baos);
         w.writeInt(0); // 0 handshake entries
-        w.writeByte(ClientPushService.ACK);
+        w.writeByte(ServerPushService.ACK);
         w.writeLong(999L); // unknown syncVersion
         w.flush();
 
@@ -628,9 +628,9 @@ class ClientPushServiceTest {
         when(mockSocket.getOutputStream()).thenReturn(new ByteArrayOutputStream());
         when(mockSocket.getRemoteSocketAddress()).thenReturn(new java.net.InetSocketAddress("localhost", 9000));
 
-        Method method = ClientPushService.class.getDeclaredMethod("serveClient", SSLSocket.class);
+        Method method = ServerPushService.class.getDeclaredMethod("serveClient", SSLSocket.class);
         method.setAccessible(true);
-        method.invoke(clientPushService, mockSocket); // Should not throw
+        method.invoke(serverPushService, mockSocket); // Should not throw
 
         org.mockito.Mockito.verifyNoInteractions(fileMetadataService);
     }
@@ -641,17 +641,17 @@ class ClientPushServiceTest {
         long syncVersion = 15L;
         when(rootDirService.findAll()).thenReturn(Set.of());
 
-        var pendingAcks = (ConcurrentHashMap<Long, Object>) ReflectionTestUtils.getField(clientPushService, "pendingAcks");
+        var pendingAcks = (ConcurrentHashMap<Long, Object>) ReflectionTestUtils.getField(serverPushService, "pendingAcks");
         Class<?> pendingAckClass = Class.forName(
-                "com.fstojilj.luddite.sync.server.service.ClientPushService$PendingAck");
+                "com.fstojilj.luddite.sync.server.service.ServerPushService$PendingAck");
         var pendingCtor = pendingAckClass.getDeclaredConstructors()[0];
         pendingCtor.setAccessible(true);
-        pendingAcks.put(syncVersion, pendingCtor.newInstance(1L, "old.jpg", ClientPushService.EVENT_DELETE, System.currentTimeMillis()));
+        pendingAcks.put(syncVersion, pendingCtor.newInstance(1L, "old.jpg", ServerPushService.EVENT_DELETE, System.currentTimeMillis()));
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         DataOutputStream w = new DataOutputStream(baos);
         w.writeInt(0); // 0 handshake entries
-        w.writeByte(ClientPushService.ACK);
+        w.writeByte(ServerPushService.ACK);
         w.writeLong(syncVersion);
         w.flush();
 
@@ -660,9 +660,9 @@ class ClientPushServiceTest {
         when(mockSocket.getOutputStream()).thenReturn(new ByteArrayOutputStream());
         when(mockSocket.getRemoteSocketAddress()).thenReturn(new java.net.InetSocketAddress("localhost", 9000));
 
-        Method method = ClientPushService.class.getDeclaredMethod("serveClient", SSLSocket.class);
+        Method method = ServerPushService.class.getDeclaredMethod("serveClient", SSLSocket.class);
         method.setAccessible(true);
-        method.invoke(clientPushService, mockSocket);
+        method.invoke(serverPushService, mockSocket);
 
         verify(fileMetadataService).recordDeletion(1L, "old.jpg", syncVersion);
     }
@@ -680,9 +680,9 @@ class ClientPushServiceTest {
         when(mockSocket.getOutputStream()).thenReturn(new ByteArrayOutputStream());
         when(mockSocket.getRemoteSocketAddress()).thenReturn(new java.net.InetSocketAddress("localhost", 9000));
 
-        Method method = ClientPushService.class.getDeclaredMethod("serveClient", SSLSocket.class);
+        Method method = ServerPushService.class.getDeclaredMethod("serveClient", SSLSocket.class);
         method.setAccessible(true);
-        method.invoke(clientPushService, mockSocket); // Should not throw
+        method.invoke(serverPushService, mockSocket); // Should not throw
     }
 
     @Test
@@ -700,9 +700,9 @@ class ClientPushServiceTest {
         when(mockSocket.getOutputStream()).thenReturn(new ByteArrayOutputStream());
         when(mockSocket.getRemoteSocketAddress()).thenReturn(new java.net.InetSocketAddress("localhost", 9000));
 
-        Method method = ClientPushService.class.getDeclaredMethod("serveClient", SSLSocket.class);
+        Method method = ServerPushService.class.getDeclaredMethod("serveClient", SSLSocket.class);
         method.setAccessible(true);
-        method.invoke(clientPushService, mockSocket); // Should not throw
+        method.invoke(serverPushService, mockSocket); // Should not throw
     }
 
     // -------------------------------------------------------------------------
@@ -718,11 +718,11 @@ class ClientPushServiceTest {
         // Build session subscribed to rootDir 1
         ByteArrayOutputStream clientOut = new ByteArrayOutputStream();
         Class<?> sessionClass = Class.forName(
-                "com.fstojilj.luddite.sync.server.service.ClientPushService$ClientSession");
+                "com.fstojilj.luddite.sync.server.service.ServerPushService$ClientSession");
         var ctor = sessionClass.getDeclaredConstructors()[0];
         ctor.setAccessible(true);
         Object session = ctor.newInstance(new DataOutputStream(clientOut), "/client:9000", Set.of(1L));
-        var sessions = (CopyOnWriteArraySet<Object>) ReflectionTestUtils.getField(clientPushService, "sessions");
+        var sessions = (CopyOnWriteArraySet<Object>) ReflectionTestUtils.getField(serverPushService, "sessions");
         sessions.add(session);
 
         // Build a FileChangeEvent
@@ -734,23 +734,23 @@ class ClientPushServiceTest {
                         .eventKind(java.nio.file.StandardWatchEventKinds.ENTRY_MODIFY)
                         .build();
 
-        ReflectionTestUtils.setField(clientPushService, "running", true);
+        ReflectionTestUtils.setField(serverPushService, "running", true);
 
         when(fileEventService.activeRootDirIds()).thenAnswer(inv -> {
-            ReflectionTestUtils.setField(clientPushService, "running", false);
+            ReflectionTestUtils.setField(serverPushService, "running", false);
             return Set.of(1L);
         });
         when(fileEventService.drainForRootDir(1L)).thenReturn(List.of(event));
         when(rootDirService.getRootDirNameById(1L)).thenReturn("photos");
         when(syncVersionRepository.next()).thenReturn(42L);
 
-        Method method = ClientPushService.class.getDeclaredMethod("drainLoop");
+        Method method = ServerPushService.class.getDeclaredMethod("drainLoop");
         method.setAccessible(true);
-        method.invoke(clientPushService);
+        method.invoke(serverPushService);
 
         // Check that client received an EVENT_WRITE byte
         DataInputStream in = new DataInputStream(new ByteArrayInputStream(clientOut.toByteArray()));
-        assertThat(in.readByte()).isEqualTo(ClientPushService.EVENT_WRITE);
+        assertThat(in.readByte()).isEqualTo(ServerPushService.EVENT_WRITE);
     }
 
     // -------------------------------------------------------------------------
@@ -759,11 +759,11 @@ class ClientPushServiceTest {
 
     @Test
     void constants_shouldHaveExpectedValues() {
-        assertThat(ClientPushService.EVENT_WRITE).isEqualTo((byte) 1);
-        assertThat(ClientPushService.EVENT_DELETE).isEqualTo((byte) 2);
-        assertThat(ClientPushService.ACK).isEqualTo((byte) 3);
-        assertThat(ClientPushService.SHUTDOWN).isEqualTo((byte) 4);
-        assertThat(ClientPushService.RESUME_SERVER_MODE).isEqualTo((byte) 5);
+        assertThat(ServerPushService.EVENT_WRITE).isEqualTo((byte) 1);
+        assertThat(ServerPushService.EVENT_DELETE).isEqualTo((byte) 2);
+        assertThat(ServerPushService.ACK).isEqualTo((byte) 3);
+        assertThat(ServerPushService.SHUTDOWN).isEqualTo((byte) 4);
+        assertThat(ServerPushService.RESUME_SERVER_MODE).isEqualTo((byte) 5);
     }
 }
 

@@ -46,14 +46,14 @@ public class FileMetadataRepository {
 
         jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
-            ps.setString(1, fileMetadata.getFilename());
-            ps.setLong(2, fileMetadata.getRootDirId());
-            ps.setString(3, fileMetadata.getRelativePath());
-            ps.setString(4, fileMetadata.getChecksum());
-            ps.setLong(5, fileMetadata.getFileSize());
-            ps.setTimestamp(6, fileMetadata.getCreatedAt() != null ? Timestamp.from(fileMetadata.getCreatedAt()) : Timestamp.from(Instant.now()));
-            ps.setTimestamp(7, fileMetadata.getModifiedAt() != null ? Timestamp.from(fileMetadata.getModifiedAt()) : Timestamp.from(Instant.now()));
-            ps.setObject(8, fileMetadata.getSyncVersion());
+            ps.setString(1, fileMetadata.filename());
+            ps.setLong(2, fileMetadata.rootDirId());
+            ps.setString(3, fileMetadata.relativePath());
+            ps.setString(4, fileMetadata.checksum());
+            ps.setLong(5, fileMetadata.fileSize());
+            ps.setTimestamp(6, fileMetadata.createdAt() != null ? Timestamp.from(fileMetadata.createdAt()) : Timestamp.from(Instant.now()));
+            ps.setTimestamp(7, fileMetadata.modifiedAt() != null ? Timestamp.from(fileMetadata.modifiedAt()) : Timestamp.from(Instant.now()));
+            ps.setObject(8, fileMetadata.syncVersion());
             return ps;
         }, keyHolder);
 
@@ -90,20 +90,20 @@ public class FileMetadataRepository {
                 """;
 
         int rowsAffected = jdbcTemplate.update(sql,
-                fileMetadata.getFilename(),
-                fileMetadata.getRootDirId(),
-                fileMetadata.getRelativePath(),
-                fileMetadata.getChecksum(),
-                fileMetadata.getFileSize(),
+                fileMetadata.filename(),
+                fileMetadata.rootDirId(),
+                fileMetadata.relativePath(),
+                fileMetadata.checksum(),
+                fileMetadata.fileSize(),
                 Timestamp.from(Instant.now()),
-                fileMetadata.getSyncVersion(),
-                fileMetadata.getId()
+                fileMetadata.syncVersion(),
+                fileMetadata.id()
         );
 
         if (rowsAffected == 0) {
-            log.warn("No FileMetadata found with id: {}", fileMetadata.getId());
+            log.warn("No FileMetadata found with id: {}", fileMetadata.id());
         } else {
-            log.debug("Updated FileMetadata for rootDirId: {}, relativePath: {}", fileMetadata.getRootDirId(), fileMetadata.getRelativePath());
+            log.debug("Updated FileMetadata for rootDirId: {}, relativePath: {}", fileMetadata.rootDirId(), fileMetadata.relativePath());
         }
     }
 

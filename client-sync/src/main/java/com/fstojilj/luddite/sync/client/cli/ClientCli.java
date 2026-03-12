@@ -2,7 +2,7 @@ package com.fstojilj.luddite.sync.client.cli;
 
 import com.fstojilj.luddite.sync.client.config.SyncClientProperties;
 import com.fstojilj.luddite.sync.client.repository.SyncStateRepository;
-import com.fstojilj.luddite.sync.client.service.ServerSyncService;
+import com.fstojilj.luddite.sync.client.service.ClientSyncService;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,7 +31,7 @@ public class ClientCli {
 
     private final SyncClientProperties clientProperties;
     private final SyncStateRepository syncStateRepository;
-    private final ServerSyncService serverSyncService;
+    private final ClientSyncService clientSyncService;
 
     @PostConstruct
     public void start() {
@@ -110,11 +110,11 @@ public class ClientCli {
             }
             case "refresh" -> {
                 System.out.println("  Reconnecting to server to re-poll available directories...");
-                serverSyncService.reconnect();
+                clientSyncService.reconnect();
             }
             case "shutdown-server" -> {
                 System.out.println("  Sending shutdown signal to server...");
-                serverSyncService.sendShutdown();
+                clientSyncService.sendShutdown();
             }
             case "mirror" -> System.out.printf("  Mirror directory: %s%n", clientProperties.getMirrorDir());
             case "help" -> printHelp();

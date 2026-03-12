@@ -73,10 +73,11 @@ public class FileMetadataService {
             return;
         }
 
-        var fileMetadata = existing.get();
-        fileMetadata.setFileSize(file.length());
-        fileMetadata.setChecksum(calculateFileChecksum(absoluteFilePath));
-        fileMetadata.setSyncVersion(null);
+        var fileMetadata = existing.get().toBuilder()
+                .fileSize(file.length())
+                .checksum(calculateFileChecksum(absoluteFilePath))
+                .syncVersion(null)
+                .build();
 
         fileMetadataRepository.update(fileMetadata);
     }
