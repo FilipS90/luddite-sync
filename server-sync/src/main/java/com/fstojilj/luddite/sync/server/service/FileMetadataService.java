@@ -1,6 +1,7 @@
 package com.fstojilj.luddite.sync.server.service;
 
 import com.fstojilj.luddite.sync.common.model.FileMetadata;
+import com.fstojilj.luddite.sync.server.repository.DeletedFilesRepository;
 import com.fstojilj.luddite.sync.server.repository.FileMetadataRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -10,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import static com.fstojilj.luddite.sync.server.utils.FileChecksumUtils.calculateFileChecksum;
 import static com.fstojilj.luddite.sync.server.utils.FileSystemUtils.listAllFilesForDir;
@@ -20,15 +22,18 @@ import static com.fstojilj.luddite.sync.server.utils.FileSystemUtils.listAllFile
 public class FileMetadataService {
 
     private final FileMetadataRepository fileMetadataRepository;
+    private final DeletedFilesRepository deletedFilesRepository;
 
+    /**
+     * Returns the new syncVersion assigned to this file.
+     */
     @Transactional
-    public long addFileMetadata(Path filePath, long rootDirId, String relativePath) {
+    public void addFileMetadata(Path filePath, long rootDirId, String relativePath) {
         File file = filePath.toFile();
         if (!file.exists() || !file.isFile()) {
             throw new IllegalArgumentException("Path must point to an existing file");
         }
-
-        return fileMetadataRepository.add(buildFileMetadata(file, rootDirId, relativePath));
+        fileMetadataRepository.add(buildFileMetadata(file, rootDirId, relativePath));
     }
 
     @Transactional
@@ -50,6 +55,9 @@ public class FileMetadataService {
         }
     }
 
+    /**
+     * Returns the new syncVersion assigned to this file.
+     */
     @Transactional
     public void updateFileMetadata(Path absoluteFilePath, long rootDirId, String relativeFilePath) {
         File file = absoluteFilePath.toFile();
@@ -57,9 +65,19 @@ public class FileMetadataService {
             throw new IllegalArgumentException("Path must point to an existing file");
         }
 
-        var fileMetadata = fileMetadataRepository.findByRootDirIdAndRelativePath(rootDirId, relativeFilePath);
-        fileMetadata.setFileSize(file.length());
-        fileMetadata.setChecksum(calculateFileChecksum(absoluteFilePath));
+        var existing = fileMetadataRepository.findOptionalByRootDirIdAndRelativePath(rootDirId, relativeFilePath);
+        if (existing.isEmpty()) {
+            // ENTRY_MODIFY can race ahead of ENTRY_CREATE - treat as add
+            log.warn("ENTRY_MODIFY for unknown file, inserting instead: {}", relativeFilePath);
+            fileMetadataRepository.add(buildFileMetadata(file, rootDirId, relativeFilePath));
+            return;
+        }
+
+        var fileMetadata = existing.get().toBuilder()
+                .fileSize(file.length())
+                .checksum(calculateFileChecksum(absoluteFilePath))
+                .syncVersion(null)
+                .build();
 
         fileMetadataRepository.update(fileMetadata);
     }
@@ -67,6 +85,37 @@ public class FileMetadataService {
     @Transactional
     public void deleteFileMetadata(long rootDirId, String relativeFilePath) {
         fileMetadataRepository.delete(rootDirId, relativeFilePath);
+    }
+
+    @Transactional
+    public void deleteAllForRootDir(long rootDirId) {
+        fileMetadataRepository.deleteAllByRootDirId(rootDirId);
+        deletedFilesRepository.deleteAllByRootDirId(rootDirId);
+    }
+
+    /**
+     * Records a deletion event with the given syncVersion for catch-up replay.
+     */
+    @Transactional
+    public void recordDeletion(long rootDirId, String relativePath, long syncVersion) {
+        deletedFilesRepository.insert(rootDirId, relativePath, syncVersion);
+    }
+
+    /**
+     * Called after a file has been successfully sent to at least one client.
+     * Sets the sync_version so future clients know they already have this version.
+     */
+    @Transactional
+    public void stampSyncVersion(long rootDirId, String relativePath, long syncVersion) {
+        fileMetadataRepository.updateSyncVersion(rootDirId, relativePath, syncVersion);
+    }
+
+    public List<FileMetadata> findFilesNewerThan(long rootDirId, long lastSyncVersion) {
+        return fileMetadataRepository.findByRootDirIdWithSyncVersionAfter(rootDirId, lastSyncVersion);
+    }
+
+    public List<Map<String, Object>> findDeletesNewerThan(long rootDirId, long lastSyncVersion) {
+        return deletedFilesRepository.findByRootDirIdWithSyncVersionAfter(rootDirId, lastSyncVersion);
     }
 
     private FileMetadata buildFileMetadata(File file, long rootDirId, String relativePath) {

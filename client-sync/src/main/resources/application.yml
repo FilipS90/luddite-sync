@@ -2,11 +2,26 @@ spring:
   application:
     name: client-sync
   datasource:
-    url: jdbc:sqlite:${user.home}/.luddite/client/photos.db?mode=rwc
+    url: jdbc:sqlite:${user.home}/.luddite/client/sync.db
     driver-class-name: org.sqlite.JDBC
   jdbc:
     template:
       query-timeout: 5
   flyway:
-    enabled: true
-    locations: classpath:db/migration
+    enabled: false
+
+sync:
+  server:
+    host: luddite-sync.duckdns.org
+    port: 8888
+  client:
+    mirror-dir: ${user.home}/.luddite
+    # List of dir names to sync from the server.
+    # If empty, no directories are synced — use the CLI 'add <name>' command to subscribe.
+    # Dir names must match the server-side root dir names (last component of the path).
+    dirs: [ ]
+  socket:
+    keystore: classpath:client-keystore.p12
+    truststore: classpath:truststore.p12
+    password: ${KEYSTORE_PASSWORD}
+

@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -19,10 +20,11 @@ public class FileEventService {
         buffer.publish(event);
     }
 
-    public List<FileChangeEvent> drainAndProcess() {
-        List<FileChangeEvent> events = buffer.drain();
-        // TODO: deduplicate, group by root dir, update FileMetadata, notify clients
-        log.info("Processing {} file change events", events.size());
-        return events;
+    public List<FileChangeEvent> drainForRootDir(long rootDirId) {
+        return buffer.drainForRootDir(rootDirId);
+    }
+
+    public Set<Long> activeRootDirIds() {
+        return buffer.activeRootDirIds();
     }
 }

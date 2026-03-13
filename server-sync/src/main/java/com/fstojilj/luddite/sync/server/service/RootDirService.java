@@ -7,6 +7,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Optional;
+import java.util.Set;
+
 import static com.fstojilj.luddite.sync.server.utils.FileSystemUtils.getDirName;
 
 @Service
@@ -42,10 +45,36 @@ public class RootDirService {
         return rootDirRepository.deleteRootDirById(id);
     }
 
+    @Transactional
+    public boolean removeRootDir(long id) {
+        var rootDir = rootDirRepository.getRootDirById(id);
+        if (rootDir.isEmpty()) {
+            return false;
+        }
+        dirWatcherService.stopWatching(rootDir.get().getAbsolutePath());
+        fileMetadataService.deleteAllForRootDir(id);
+        rootDirRepository.deleteRootDirById(id);
+        log.info("Removed root dir: {} (id={})", rootDir.get().getAbsolutePath(), id);
+        return true;
+    }
+
     public String getRootDirPathById(long rootDirId) {
         var rootDir = rootDirRepository.getRootDirById(rootDirId)
                 .orElseThrow(() -> new IllegalArgumentException("Root directory not found for ID: " + rootDirId));
-
         return rootDir.getAbsolutePath();
+    }
+
+    public String getRootDirNameById(long rootDirId) {
+        return rootDirRepository.getRootDirById(rootDirId)
+                .orElseThrow(() -> new IllegalArgumentException("Root directory not found for ID: " + rootDirId))
+                .getName();
+    }
+
+    public Optional<RootDir> findByName(String name) {
+        return rootDirRepository.findByName(name);
+    }
+
+    public Set<RootDir> findAll() {
+        return rootDirRepository.findAll();
     }
 }

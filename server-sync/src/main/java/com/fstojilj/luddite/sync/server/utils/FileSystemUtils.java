@@ -6,7 +6,6 @@ import java.io.File;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
-import java.util.Objects;
 
 @Slf4j
 public final class FileSystemUtils {
@@ -26,6 +25,11 @@ public final class FileSystemUtils {
 
     public static List<File> listAllFilesForDir(String absolutePath) {
         File rootDir = new File(absolutePath);
-        return List.of(Objects.requireNonNull(rootDir.listFiles()));
+        if (!rootDir.exists() || !rootDir.isDirectory()) {
+            log.warn("Path does not exist or is not a directory: {}", absolutePath);
+            return List.of();
+        }
+        File[] files = rootDir.listFiles();
+        return files != null ? List.of(files) : List.of();
     }
 }

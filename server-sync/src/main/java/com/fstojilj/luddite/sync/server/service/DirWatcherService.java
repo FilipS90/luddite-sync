@@ -32,15 +32,15 @@ public class DirWatcherService {
 
     public void startWatching(String rootPath, long rootDirId) {
         Path rootDir = Paths.get(rootPath).toAbsolutePath();
-        startWatching(rootDir, rootDirId);
+        startWatching(rootDir, rootDir, rootDirId);
     }
 
-    private void startWatching(Path pathToWatch, long rootDirId) {
+    private void startWatching(Path pathToWatch, Path rootDirPath, long rootDirId) {
         if (activeWatchers.containsKey(pathToWatch.toString())) {
             log.warn("Already watching: {}", pathToWatch);
             return;
         }
-        executor.execute(() -> watch(pathToWatch, rootDirId));
+        executor.execute(() -> watch(pathToWatch, rootDirPath, rootDirId));
     }
 
     public void stopWatching(String pathToWatch) {
@@ -54,7 +54,7 @@ public class DirWatcherService {
         }
     }
 
-    private void watch(Path watchedDir, long rootDirId) {
+    private void watch(Path watchedDir, Path rootDirPath, long rootDirId) {
         WatchService watchService = null;
         try {
             watchService = FileSystems.getDefault().newWatchService();
@@ -63,7 +63,7 @@ public class DirWatcherService {
                     StandardWatchEventKinds.ENTRY_MODIFY,
                     StandardWatchEventKinds.ENTRY_DELETE
             );
-            recursivelyWatchSubdirs(watchedDir, rootDirId);
+            recursivelyWatchSubdirs(watchedDir, rootDirPath, rootDirId);
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to initialize WatchService for path: " + watchedDir, e);
         }
@@ -81,12 +81,22 @@ public class DirWatcherService {
                         continue;
                     }
                     WatchEvent<Path> ev = (WatchEvent<Path>) event;
-                    Path filename = ev.context();
-                    String absoluteFilePath = watchedDir.resolve(filename).toString();
+                    Path absoluteFilePath = watchedDir.resolve(ev.context());
+                    // Use forward slashes so paths are cross-platform safe over the wire
+                    String relativePath = rootDirPath.relativize(absoluteFilePath)
+                            .toString().replace('\\', '/');
                     log.info("{} trigger for file {}", kind.name(), absoluteFilePath);
+
+                    // If a new directory is created, start watching it too
+                    if (kind == StandardWatchEventKinds.ENTRY_CREATE && absoluteFilePath.toFile().isDirectory()) {
+                        startWatching(absoluteFilePath, rootDirPath, rootDirId);
+                        continue;
+                    }
+
                     FileChangeEvent fileChangeEvent = FileChangeEvent.builder()
                             .rootDirId(rootDirId)
-                            .absoluteFilePath(absoluteFilePath)
+                            .absoluteFilePath(absoluteFilePath.toString())
+                            .relativePath(relativePath)
                             .eventKind(kind)
                             .build();
                     eventPublisher.publishEvent(fileChangeEvent);
@@ -113,11 +123,11 @@ public class DirWatcherService {
         }
     }
 
-    private void recursivelyWatchSubdirs(Path currentDir, long rootDirId) throws IOException {
+    private void recursivelyWatchSubdirs(Path currentDir, Path rootDirPath, long rootDirId) throws IOException {
         try (var fileStream = Files.walk(currentDir, Integer.MAX_VALUE)) {
             fileStream.filter(Files::isDirectory)
                     .filter(dir -> !dir.equals(currentDir))
-                    .forEach(dir -> startWatching(dir, rootDirId));
+                    .forEach(dir -> startWatching(dir, rootDirPath, rootDirId));
         } catch (IOException e) {
             throw new IOException("Failed to recursively watch subdirectories of: " + currentDir, e);
         }

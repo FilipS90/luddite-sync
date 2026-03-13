@@ -10,7 +10,9 @@ import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
 import java.sql.Statement;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -33,8 +35,8 @@ public class RootDirRepository {
 
     public long insert(RootDir rootDir) {
         String sql = """
-                INSERT INTO root_dir (name, absolute_path, created_at, modified_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO root_dir (name, absolute_path)
+                VALUES (?, ?)
                 """;
 
         KeyHolder keyHolder = new GeneratedKeyHolder();
@@ -57,7 +59,7 @@ public class RootDirRepository {
     public void update(RootDir rootDir) {
         String sql = """
                 UPDATE root_dir
-                SET name = ?, absolute_path = ?, created_at = ?, modified_at = ?
+                SET name = ?, absolute_path = ?
                 WHERE id = ?
                 """;
 
@@ -87,5 +89,11 @@ public class RootDirRepository {
     public Optional<RootDir> getRootDirById(long rootDirId) {
         String sql = "SELECT * FROM root_dir WHERE id = ?";
         return Optional.ofNullable(jdbcTemplate.queryForObject(sql, rowMapper, rootDirId));
+    }
+
+    public Optional<RootDir> findByName(String name) {
+        String sql = "SELECT * FROM root_dir WHERE name = ?";
+        List<RootDir> results = jdbcTemplate.query(sql, rowMapper, name);
+        return results.isEmpty() ? Optional.empty() : Optional.of(results.getFirst());
     }
 }

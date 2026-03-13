@@ -14,6 +14,7 @@ import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 @RequiredArgsConstructor
@@ -38,21 +39,21 @@ public class FileMetadataRepository {
     public long add(FileMetadata fileMetadata) {
         String sql = """
                 INSERT INTO file_metadata (filename, root_dir_id, relative_path, checksum, file_size, created_at, modified_at, sync_version)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """;
 
         KeyHolder keyHolder = new GeneratedKeyHolder();
 
         jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
-            ps.setString(1, fileMetadata.getFilename());
-            ps.setLong(2, fileMetadata.getRootDirId());
-            ps.setString(3, fileMetadata.getRelativePath());
-            ps.setString(4, fileMetadata.getChecksum());
-            ps.setLong(5, fileMetadata.getFileSize());
-            ps.setTimestamp(7, fileMetadata.getCreatedAt() != null ? Timestamp.from(fileMetadata.getCreatedAt()) : Timestamp.from(Instant.now()));
-            ps.setTimestamp(8, fileMetadata.getModifiedAt() != null ? Timestamp.from(fileMetadata.getModifiedAt()) : Timestamp.from(Instant.now()));
-            ps.setObject(9, fileMetadata.getSyncVersion());
+            ps.setString(1, fileMetadata.filename());
+            ps.setLong(2, fileMetadata.rootDirId());
+            ps.setString(3, fileMetadata.relativePath());
+            ps.setString(4, fileMetadata.checksum());
+            ps.setLong(5, fileMetadata.fileSize());
+            ps.setTimestamp(6, fileMetadata.createdAt() != null ? Timestamp.from(fileMetadata.createdAt()) : Timestamp.from(Instant.now()));
+            ps.setTimestamp(7, fileMetadata.modifiedAt() != null ? Timestamp.from(fileMetadata.modifiedAt()) : Timestamp.from(Instant.now()));
+            ps.setObject(8, fileMetadata.syncVersion());
             return ps;
         }, keyHolder);
 
@@ -61,7 +62,7 @@ public class FileMetadataRepository {
             throw new IllegalStateException("Failed to retrieve generated key for FileMetadata");
         }
 
-        log.debug("Inserted FileMetadata with id: {}", fileMetadata.getId());
+        log.debug("Inserted FileMetadata with id: {}", key.longValue());
         return key.longValue();
     }
 
@@ -74,6 +75,12 @@ public class FileMetadataRepository {
         return results.getFirst();
     }
 
+    public Optional<FileMetadata> findOptionalByRootDirIdAndRelativePath(Long rootDirId, String relativePath) {
+        String sql = "SELECT * FROM file_metadata WHERE root_dir_id = ? AND relative_path = ?";
+        List<FileMetadata> results = jdbcTemplate.query(sql, rowMapper, rootDirId, relativePath);
+        return results.isEmpty() ? Optional.empty() : Optional.of(results.getFirst());
+    }
+
     public void update(FileMetadata fileMetadata) {
         String sql = """
                 UPDATE file_metadata
@@ -83,21 +90,32 @@ public class FileMetadataRepository {
                 """;
 
         int rowsAffected = jdbcTemplate.update(sql,
-                fileMetadata.getFilename(),
-                fileMetadata.getRootDirId(),
-                fileMetadata.getRelativePath(),
-                fileMetadata.getChecksum(),
-                fileMetadata.getFileSize(),
+                fileMetadata.filename(),
+                fileMetadata.rootDirId(),
+                fileMetadata.relativePath(),
+                fileMetadata.checksum(),
+                fileMetadata.fileSize(),
                 Timestamp.from(Instant.now()),
-                fileMetadata.getSyncVersion(),
-                fileMetadata.getId()
+                fileMetadata.syncVersion(),
+                fileMetadata.id()
         );
 
         if (rowsAffected == 0) {
-            log.warn("No FileMetadata found with id: {}", fileMetadata.getId());
+            log.warn("No FileMetadata found with id: {}", fileMetadata.id());
         } else {
-            log.debug("Updated FileMetadata for rootDirId: {}, relativePath: {}", fileMetadata.getRootDirId(), fileMetadata.getRelativePath());
+            log.debug("Updated FileMetadata for rootDirId: {}, relativePath: {}", fileMetadata.rootDirId(), fileMetadata.relativePath());
         }
+    }
+
+    public List<FileMetadata> findByRootDirIdWithSyncVersionAfter(long rootDirId, long lastSyncVersion) {
+        String sql = "SELECT * FROM file_metadata WHERE root_dir_id = ? AND sync_version IS NOT NULL AND sync_version > ?";
+        return jdbcTemplate.query(sql, rowMapper, rootDirId, lastSyncVersion);
+    }
+
+    public void updateSyncVersion(long rootDirId, String relativePath, long syncVersion) {
+        jdbcTemplate.update(
+                "UPDATE file_metadata SET sync_version = MAX(COALESCE(sync_version, 0), ?) WHERE root_dir_id = ? AND relative_path = ?",
+                syncVersion, rootDirId, relativePath);
     }
 
     public void delete(Long rootDirId, String relativePath) {
@@ -108,6 +126,11 @@ public class FileMetadataRepository {
         } else {
             log.warn("No FileMetadata found for deletion with rootDirId: {}, relativePath: {}", rootDirId, relativePath);
         }
+    }
+
+    public void deleteAllByRootDirId(long rootDirId) {
+        jdbcTemplate.update("DELETE FROM file_metadata WHERE root_dir_id = ?", rootDirId);
+        log.debug("Deleted all FileMetadata for rootDirId: {}", rootDirId);
     }
 
 
