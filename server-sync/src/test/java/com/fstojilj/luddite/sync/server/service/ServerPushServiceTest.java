@@ -341,9 +341,9 @@ class ServerPushServiceTest {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(baos);
 
-        Method method = ServerPushService.class.getDeclaredMethod("sendCatchUp", List.class, DataOutputStream.class);
+        Method method = ServerPushService.class.getDeclaredMethod("sendCatchUp", List.class, ServerPushService.ClientSession.class);
         method.setAccessible(true);
-        method.invoke(serverPushService, List.of(new SyncHandshakeEntry("photos", 0L)), out);
+        method.invoke(serverPushService, List.of(new SyncHandshakeEntry("photos", 0L)), ServerPushService.ClientSession.builder().out(out).build());
 
         DataInputStream in = new DataInputStream(new ByteArrayInputStream(baos.toByteArray()));
         // First message: EVENT_WRITE for img.jpg
@@ -357,9 +357,9 @@ class ServerPushServiceTest {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(baos);
 
-        Method method = ServerPushService.class.getDeclaredMethod("sendCatchUp", List.class, DataOutputStream.class);
+        Method method = ServerPushService.class.getDeclaredMethod("sendCatchUp", List.class, ServerPushService.ClientSession.class);
         method.setAccessible(true);
-        method.invoke(serverPushService, List.of(new SyncHandshakeEntry("unknown", 0L)), out);
+        method.invoke(serverPushService, List.of(new SyncHandshakeEntry("unknown", 0L)), ServerPushService.ClientSession.builder().out(out).build());
 
         // Nothing written
         assertThat(baos.size()).isEqualTo(0);
@@ -377,9 +377,9 @@ class ServerPushServiceTest {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(baos);
 
-        Method method = ServerPushService.class.getDeclaredMethod("sendCatchUp", List.class, DataOutputStream.class);
+        Method method = ServerPushService.class.getDeclaredMethod("sendCatchUp", List.class, ServerPushService.ClientSession.class);
         method.setAccessible(true);
-        method.invoke(serverPushService, List.of(new SyncHandshakeEntry("photos", 0L)), out);
+        method.invoke(serverPushService, List.of(new SyncHandshakeEntry("photos", 0L)), ServerPushService.ClientSession.builder().out(out).build());
 
         DataInputStream in = new DataInputStream(new ByteArrayInputStream(baos.toByteArray()));
         assertThat(in.readByte()).isEqualTo(ServerPushService.EVENT_DELETE);
@@ -428,9 +428,9 @@ class ServerPushServiceTest {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         DataOutputStream out = new DataOutputStream(baos);
 
-        Method method = ServerPushService.class.getDeclaredMethod("sendCatchUp", List.class, DataOutputStream.class);
+        Method method = ServerPushService.class.getDeclaredMethod("sendCatchUp", List.class, ServerPushService.ClientSession.class);
         method.setAccessible(true);
-        method.invoke(serverPushService, List.of(new SyncHandshakeEntry("photos", 0L)), out);
+        method.invoke(serverPushService, List.of(new SyncHandshakeEntry("photos", 0L)), ServerPushService.ClientSession.builder().out(out).build());
 
         assertThat(baos.size()).isEqualTo(0);
     }

@@ -37,6 +37,7 @@ class FileMetadataRepositoryTest {
     private FileMetadata sampleMetadata() {
         return FileMetadata.builder()
                 .id(1L).filename("img.jpg").rootDirId(1L)
+                .syncVersion(5L)
                 .relativePath("/img.jpg").checksum("abc").fileSize(100L)
                 .build();
     }
@@ -70,7 +71,7 @@ class FileMetadataRepositoryTest {
 
         FileMetadata result = fileMetadataRepository.findByRootDirIdAndRelativePath(1L, "/img.jpg");
 
-        assertThat(result.getFilename()).isEqualTo("img.jpg");
+        assertThat(result.filename()).isEqualTo("img.jpg");
     }
 
     @Test
@@ -105,7 +106,6 @@ class FileMetadataRepositoryTest {
     @Test
     void update_shouldExecuteUpdateSql() {
         FileMetadata meta = sampleMetadata();
-        meta.setSyncVersion(5L);
 
         fileMetadataRepository.update(meta);
 

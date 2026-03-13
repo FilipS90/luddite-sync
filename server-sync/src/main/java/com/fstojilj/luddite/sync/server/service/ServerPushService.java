@@ -5,6 +5,7 @@ import com.fstojilj.luddite.sync.server.event.FileChangeEvent;
 import com.fstojilj.luddite.sync.server.repository.SyncVersionRepository;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import lombok.Builder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -69,7 +70,8 @@ public class ServerPushService {
      * One entry per connected client.
      * Holds the output stream, the remote address, and the set of rootDirIds the client subscribed to.
      */
-    private record ClientSession(DataOutputStream out, String address, Set<Long> subscribedRootDirIds) {
+    @Builder
+    protected record ClientSession(DataOutputStream out, String address, Set<Long> subscribedRootDirIds) {
     }
 
     /**
@@ -369,20 +371,20 @@ public class ServerPushService {
             var files = fileMetadataService.findFilesNewerThan(rootDirId, entry.lastSyncVersion());
             log.info("Sending {} catch-up file(s) for dir '{}'", files.size(), entry.dirName());
             for (var file : files) {
-                String absPath = Path.of(rootAbsPath).resolve(file.getRelativePath()).toString();
-                String qualifiedPath = entry.dirName() + "/" + file.getRelativePath();
+                String absPath = Path.of(rootAbsPath).resolve(file.relativePath()).toString();
+                String qualifiedPath = entry.dirName() + "/" + file.relativePath();
                 byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
                 byte[] fileBytes = Files.readAllBytes(Path.of(absPath));
                 synchronized (session.out()) {
                     session.out().writeByte(EVENT_WRITE);
                     session.out().writeInt(pathBytes.length);
                     session.out().write(pathBytes);
-                    session.out().writeLong(file.getSyncVersion());
+                    session.out().writeLong(file.syncVersion());
                     session.out().writeLong(fileBytes.length);
                     session.out().write(fileBytes);
                     session.out().flush();
                 }
-                log.debug("Catch-up WRITE (v{}) {}", file.getSyncVersion(), qualifiedPath);
+                log.debug("Catch-up WRITE (v{}) {}", file.syncVersion(), qualifiedPath);
             }
 
             // Send deletes that happened since lastSyncVersion
