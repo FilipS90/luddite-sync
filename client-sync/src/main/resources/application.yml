@@ -16,10 +16,6 @@ sync:
     port: 8888
   client:
     mirror-dir: ${user.home}/.luddite
-    # List of dir names to sync from the server.
-    # If empty, no directories are synced — use the CLI 'add <name>' command to subscribe.
-    # Dir names must match the server-side root dir names (last component of the path).
-    dirs: [ ]
   socket:
     keystore: classpath:client-keystore.p12
     truststore: classpath:truststore.p12

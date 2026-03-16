@@ -37,6 +37,18 @@ public class SyncStateRepository {
     }
 
     /**
+     * Remove the directory if present
+     *
+     * @param dirName directory name
+     */
+    public void remove(String dirName) {
+        jdbcTemplate.update("""
+                DELETE FROM sync_state
+                WHERE dir_name = ?
+                """, dirName);
+    }
+
+    /**
      * Resets the last sync version for a dir back to -1, forcing a full re-sync
      * on the next handshake with the server.
      */
@@ -50,7 +62,7 @@ public class SyncStateRepository {
      * Inserts or advances the last sync version for a given dir.
      * Never regresses — if the stored version is already higher, it is kept.
      */
-    public void upsert(String dirName, long lastSyncVersion) {
+    public void updateSyncVersion(String dirName, long lastSyncVersion) {
         jdbcTemplate.update("""
                 INSERT INTO sync_state (dir_name, last_sync_version)
                 VALUES (?, ?)

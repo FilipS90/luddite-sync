@@ -1,11 +1,12 @@
 package com.fstojilj.luddite.sync.client.cli;
 
-import com.fstojilj.luddite.sync.client.config.SyncClientProperties;
-import com.fstojilj.luddite.sync.client.repository.SyncStateRepository;
 import com.fstojilj.luddite.sync.client.service.ClientSyncService;
+import com.fstojilj.luddite.sync.client.service.SyncStateService;
+import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
@@ -29,9 +30,11 @@ import java.io.InputStreamReader;
 @Slf4j
 public class ClientCli {
 
-    private final SyncClientProperties clientProperties;
-    private final SyncStateRepository syncStateRepository;
+    private final SyncStateService syncStateService;
     private final ClientSyncService clientSyncService;
+
+    @Value("${sync.client.mirror-dir}")
+    private String mirrorDir;
 
     @PostConstruct
     public void start() {
@@ -57,30 +60,22 @@ public class ClientCli {
         String command = parts[0].toLowerCase();
         String arg = parts.length > 1 ? parts[1] : "";
 
+        var entries = syncStateService.findAll();
+        var dirNames = entries.stream().map(SyncHandshakeEntry::dirName).toList();
+
         switch (command) {
             case "list" -> {
-                var entries = syncStateRepository.findAll();
-                var subscribedDirs = clientProperties.getDirs();
-
-                if (entries.isEmpty() && subscribedDirs.isEmpty()) {
+                if (entries.isEmpty()) {
                     System.out.println("  (no directories configured)");
                     return;
                 }
 
-                System.out.println("  Dir Name             | Last Sync Version | Subscribed");
-                System.out.println("  ---------------------|-------------------|----------");
+                System.out.println("  Dir Name             | Last Sync Version |");
+                System.out.println("  ---------------------|-------------------|");
 
                 for (var entry : entries) {
-                    boolean subscribed = subscribedDirs.isEmpty() || subscribedDirs.contains(entry.dirName());
                     System.out.printf("  %-20s | %-17d | %s%n",
-                            entry.dirName(), entry.lastSyncVersion(), subscribed ? "yes" : "no");
-                }
-
-                for (String dir : subscribedDirs) {
-                    boolean alreadyListed = entries.stream().anyMatch(e -> e.dirName().equals(dir));
-                    if (!alreadyListed) {
-                        System.out.printf("  %-20s | %-17d | %s%n", dir, -1L, "yes (pending)");
-                    }
+                            entry.dirName(), entry.lastSyncVersion());
                 }
             }
             case "add" -> {
@@ -88,12 +83,11 @@ public class ClientCli {
                     System.out.println("  Usage: add <dir-name>");
                     return;
                 }
-                if (clientProperties.getDirs().contains(arg)) {
+                if (dirNames.contains(arg)) {
                     System.out.printf("  Already subscribed to: %s%n", arg);
                     return;
                 }
-                clientProperties.getDirs().add(arg);
-                syncStateRepository.registerIfAbsent(arg);
+                syncStateService.registerIfAbsent(arg);
                 System.out.printf("  Subscribed to: %s%n", arg);
             }
             case "remove" -> {
@@ -101,12 +95,13 @@ public class ClientCli {
                     System.out.println("  Usage: remove <dir-name>");
                     return;
                 }
-                boolean removed = clientProperties.getDirs().remove(arg);
-                if (removed) {
-                    System.out.printf("  Unsubscribed from: %s%n", arg);
-                } else {
-                    System.out.printf("  Not subscribed to: %s%n", arg);
+                if (!dirNames.contains(arg)) {
+                    System.out.println("No such directory found");
+                    return;
                 }
+
+                syncStateService.removeDirectory(arg);
+                System.out.printf("  Unsubscribed from: %s%n", arg);
             }
             case "refresh" -> {
                 System.out.println("  Reconnecting to server to re-poll available directories...");
@@ -116,7 +111,7 @@ public class ClientCli {
                 System.out.println("  Sending shutdown signal to server...");
                 clientSyncService.sendShutdown();
             }
-            case "mirror" -> System.out.printf("  Mirror directory: %s%n", clientProperties.getMirrorDir());
+            case "mirror" -> System.out.printf("  Mirror directory: %s%n", mirrorDir);
             case "help" -> printHelp();
             case "exit" -> {
                 System.out.println("  Shutting down...");

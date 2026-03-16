@@ -1,7 +1,5 @@
 package com.fstojilj.luddite.sync.client.service;
 
-import com.fstojilj.luddite.sync.client.config.SyncClientProperties;
-import com.fstojilj.luddite.sync.client.repository.SyncStateRepository;
 import com.fstojilj.luddite.sync.client.repository.SyncedFileRepository;
 import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
 import jakarta.annotation.PostConstruct;
@@ -39,9 +37,8 @@ public class ClientSyncService {
     private static final byte SHUTDOWN = 4;
     private static final byte RESUME_SERVER_MODE = 5;
 
-    private final SyncStateRepository syncStateRepository;
+    private final SyncStateService syncStateService;
     private final SyncedFileRepository syncedFileRepository;
-    private final SyncClientProperties clientProperties;
 
     @Value("${sync.server.host:localhost}")
     private String serverHost;
@@ -49,6 +46,8 @@ public class ClientSyncService {
     @Value("${sync.server.port:8888}")
     private int serverPort;
 
+    @Value("${sync.client.mirror-dir}")
+    private String mirrorDir;
 
     @Value("${sync.socket.keystore:classpath:client-keystore.p12}")
     private Resource keystoreResource;
@@ -65,7 +64,7 @@ public class ClientSyncService {
     @PostConstruct
     public void start() {
         running = true;
-        Thread.ofVirtual().name("server-sync-receiver").start(this::connectAndReceive);
+        Thread.ofVirtual().name("server-sync-receiver").start(this::connectAndSync);
     }
 
     @PreDestroy
@@ -80,6 +79,7 @@ public class ClientSyncService {
      */
     public void reconnect() {
         log.info("Reconnect requested — dropping current connection to re-poll server dirs");
+        running = false;
         closeSocket();
     }
 
@@ -113,7 +113,7 @@ public class ClientSyncService {
         }
     }
 
-    private void connectAndReceive() {
+    private void connectAndSync() {
         while (running) {
             try {
                 socket = buildSslSocket();
@@ -129,14 +129,21 @@ public class ClientSyncService {
                 // Step 2: decide which dirs to subscribe to.
                 // If client has no dirs configured, print what the server offers and wait
                 // for the user to subscribe via CLI — without dropping the connection.
-                List<String> configuredDirs = clientProperties.getDirs();
+                List<String> configuredDirs = syncStateService.retrieveAllInSyncDirs();
                 if (configuredDirs.isEmpty()) {
                     printAvailableDirs(availableDirs);
-                    while (running && clientProperties.getDirs().isEmpty()) {
-                        sleep(2_000);
+                    while (running) {
+                        sleep(7_000);
+
+                        configuredDirs = syncStateService.retrieveAllInSyncDirs();
+                        if (!configuredDirs.isEmpty()) {
+                            break;
+                        }
                     }
-                    configuredDirs = clientProperties.getDirs();
                 }
+
+                List<String> staleDirs = getStaleDirs(availableDirs, configuredDirs);
+                syncStateService.removeStaleDirs(staleDirs);
 
                 List<String> dirsToSync = availableDirs.stream()
                         .filter(configuredDirs::contains)
@@ -203,7 +210,7 @@ public class ClientSyncService {
      */
     private void registerDirs(List<String> dirs) {
         for (String dirName : dirs) {
-            syncStateRepository.registerIfAbsent(dirName);
+            syncStateService.registerIfAbsent(dirName);
         }
     }
 
@@ -214,7 +221,7 @@ public class ClientSyncService {
      * are removed — files still on disk keep their records.
      */
     private void auditMissingFiles(List<String> dirs) {
-        Path mirrorRoot = Path.of(clientProperties.getMirrorDir());
+        Path mirrorRoot = Path.of(mirrorDir);
         for (String dirName : dirs) {
             List<String> recorded = syncedFileRepository.findAllByDir(dirName);
             List<String> missing = recorded.stream()
@@ -223,7 +230,7 @@ public class ClientSyncService {
             if (!missing.isEmpty()) {
                 log.warn("Dir '{}': {} file(s) missing from disk — resetting sync version to force re-sync: {}",
                         dirName, missing.size(), missing);
-                syncStateRepository.reset(dirName);
+                syncStateService.resetSyncVersionForDir(dirName);
                 missing.forEach(rel -> syncedFileRepository.delete(dirName, rel));
             }
         }
@@ -239,7 +246,7 @@ public class ClientSyncService {
      */
     private void sendHandshake(DataOutputStream out, List<String> dirsToSync) throws IOException {
         Set<String> syncSet = new HashSet<>(dirsToSync);
-        List<SyncHandshakeEntry> entries = syncStateRepository.findAll().stream()
+        List<SyncHandshakeEntry> entries = syncStateService.findAll().stream()
                 .filter(e -> syncSet.contains(e.dirName()))
                 .toList();
 
@@ -268,7 +275,7 @@ public class ClientSyncService {
             long syncVersion = in.readLong();
             long fileSize = in.readLong();
 
-            Path target = Path.of(clientProperties.getMirrorDir()).resolve(relPath).normalize();
+            Path target = Path.of(mirrorDir).resolve(relPath).normalize();
             // first component of relPath is the dir name (e.g. "photos" from "photos/img.jpg")
             String dirName = Path.of(relPath).getName(0).toString();
 
@@ -285,7 +292,7 @@ public class ClientSyncService {
             }
 
             // Persist local state first, then ACK the server
-            syncStateRepository.upsert(dirName, syncVersion);
+            syncStateService.updateSyncVersion(dirName, syncVersion);
 
             out.writeByte(ACK);
             out.writeLong(syncVersion);
@@ -324,5 +331,11 @@ public class ClientSyncService {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    private List<String> getStaleDirs(List<String> availableServerDirs, List<String> clientListeningDirs) {
+        return clientListeningDirs.stream()
+                .filter(dir -> !availableServerDirs.contains(dir))
+                .toList();
     }
 }
