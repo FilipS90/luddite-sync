@@ -357,7 +357,10 @@ public class ServerPushService {
 
     /**
      * For each requested dir, sends all files whose sync_version is newer
-     * than what the client reported.
+     * than what the client reported (including files with sync_version IS NULL,
+     * which means they were added but never successfully delivered to any client).
+     * A fresh syncVersion is minted for each file so that the ACK path can
+     * call stampSyncVersion / markSynced exactly as the live drain loop does.
      */
     private void sendCatchUp(List<SyncHandshakeEntry> handshake, ClientSession session) throws IOException {
         for (SyncHandshakeEntry entry : handshake) {
@@ -371,20 +374,26 @@ public class ServerPushService {
             var files = fileMetadataService.findFilesNewerThan(rootDirId, entry.lastSyncVersion());
             log.info("Sending {} catch-up file(s) for dir '{}'", files.size(), entry.dirName());
             for (var file : files) {
-                String absPath = Path.of(rootAbsPath).resolve(file.relativePath()).toString();
-                String qualifiedPath = entry.dirName() + "/" + file.relativePath();
+                // relativePath may be stored with a leading separator (e.g. "/foo.txt") — strip it
+                String relativePathNormalized = file.relativePath().replaceAll("^[/\\\\]+", "");
+                String absPath = Path.of(rootAbsPath).resolve(relativePathNormalized).toString();
+                String qualifiedPath = entry.dirName() + "/" + relativePathNormalized;
                 byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
                 byte[] fileBytes = Files.readAllBytes(Path.of(absPath));
+                // Mint a new syncVersion so the ACK is tracked and stampSyncVersion is called
+                long syncVersion = syncVersionRepository.next();
+                pendingAcks.put(syncVersion, new PendingAck(
+                        rootDirId, file.relativePath(), EVENT_WRITE, System.currentTimeMillis()));
                 synchronized (session.out()) {
                     session.out().writeByte(EVENT_WRITE);
                     session.out().writeInt(pathBytes.length);
                     session.out().write(pathBytes);
-                    session.out().writeLong(file.syncVersion());
+                    session.out().writeLong(syncVersion);
                     session.out().writeLong(fileBytes.length);
                     session.out().write(fileBytes);
                     session.out().flush();
                 }
-                log.debug("Catch-up WRITE (v{}) {}", file.syncVersion(), qualifiedPath);
+                log.debug("Catch-up WRITE (v{}) {}", syncVersion, qualifiedPath);
             }
 
             // Send deletes that happened since lastSyncVersion
@@ -392,9 +401,11 @@ public class ServerPushService {
             log.info("Sending {} catch-up delete(s) for dir '{}'", deletes.size(), entry.dirName());
             for (var delete : deletes) {
                 String relativePath = (String) delete.get("relative_path");
-                long syncVersion = ((Number) delete.get("sync_version")).longValue();
                 String qualifiedPath = entry.dirName() + "/" + relativePath;
                 byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
+                long syncVersion = syncVersionRepository.next();
+                pendingAcks.put(syncVersion, new PendingAck(
+                        rootDirId, relativePath, EVENT_DELETE, System.currentTimeMillis()));
                 synchronized (session.out()) {
                     session.out().writeByte(EVENT_DELETE);
                     session.out().writeInt(pathBytes.length);
