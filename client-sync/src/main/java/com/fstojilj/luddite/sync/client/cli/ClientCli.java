@@ -74,7 +74,7 @@ public class ClientCli {
                 System.out.println("  ---------------------|-------------------|");
 
                 for (var entry : entries) {
-                    System.out.printf("  %-20s | %-17d | %s%n",
+                    System.out.printf("  %-20s | %-17d |",
                             entry.dirName(), entry.lastSyncVersion());
                 }
             }
