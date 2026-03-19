@@ -45,8 +45,7 @@ while true; do
             echo "[luddite] Switch-mode complete — restarting as CLIENT (connecting to $REMOTE_HOST)"
             MODE=client
         else
-            echo "[luddite] Server exited with code $EXIT_CODE — restarting in server mode in 5s..."
-            sleep 5
+             break
         fi
     else
         echo "[luddite] Starting in CLIENT mode (connecting to $REMOTE_HOST)..."
@@ -56,9 +55,9 @@ while true; do
         EXIT_CODE=$?
         if [ $EXIT_CODE -eq 2 ]; then
             echo "[luddite] Resume-server-mode signal received — switching back to SERVER mode"
+            MODE=server
         else
-            echo "[luddite] Client exited with code $EXIT_CODE — switching back to SERVER mode"
+             break
         fi
-        MODE=server
     fi
 done
