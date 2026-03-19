@@ -8,6 +8,8 @@ import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import java.nio.file.Paths;
+
 /**
  * Creates the SQLite schema on startup using CREATE TABLE IF NOT EXISTS.
  * Runs before WatcherStartupRunner thanks to @Order(1).
@@ -19,6 +21,8 @@ import org.springframework.stereotype.Component;
 public class SchemaInitializer implements ApplicationRunner {
 
     private final JdbcTemplate jdbcTemplate;
+
+    private final RootDirs rootDirs;
 
     @Override
     public void run(ApplicationArguments args) {
@@ -90,6 +94,14 @@ public class SchemaInitializer implements ApplicationRunner {
                     UPDATE file_metadata SET modified_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
                 END
                 """);
+
+        for (String rootDirAbsolutePath : rootDirs.rootDirAbsolutePaths()) {
+            String name = Paths.get(rootDirAbsolutePath).getFileName().toString();
+            jdbcTemplate.update(
+                    "INSERT OR IGNORE INTO root_dir (name, absolute_path) VALUES (?, ?)",
+                    name, rootDirAbsolutePath
+            );
+        }
 
         log.info("SQLite schema initialized successfully");
     }

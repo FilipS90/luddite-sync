@@ -13,7 +13,7 @@ spring:
 
 sync:
   server:
-    root-dirs: [ ]
+    root-dirs: [ /home/filips90/nature_photos ]
   dns:
     # Your DuckDNS subdomain (without .duckdns.org) — e.g. "luddite-sync" for luddite-sync.duckdns.org
     domain: luddite-sync

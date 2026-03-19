@@ -37,7 +37,6 @@ public class DirWatcherService {
 
     private void startWatching(Path pathToWatch, Path rootDirPath, long rootDirId) {
         if (activeWatchers.containsKey(pathToWatch.toString())) {
-            log.warn("Already watching: {}", pathToWatch);
             return;
         }
         executor.execute(() -> watch(pathToWatch, rootDirPath, rootDirId));
