@@ -108,7 +108,7 @@ public class FileMetadataRepository {
     }
 
     public List<FileMetadata> findByRootDirIdWithSyncVersionAfter(long rootDirId, long lastSyncVersion) {
-        String sql = "SELECT * FROM file_metadata WHERE root_dir_id = ? AND sync_version IS NOT NULL AND sync_version > ?";
+        String sql = "SELECT * FROM file_metadata WHERE root_dir_id = ? AND (sync_version IS NULL OR sync_version > ?)";
         return jdbcTemplate.query(sql, rowMapper, rootDirId, lastSyncVersion);
     }
 

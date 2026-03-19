@@ -32,6 +32,34 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 
+/**
+ * Accepts inbound mTLS connections from sync clients and pushes file-change events
+ * to all subscribed clients in real time.
+ *
+ * <p>On startup three virtual threads are launched:
+ * <ul>
+ *   <li><b>client-acceptor</b> — accepts new SSL connections and spawns a per-client thread.</li>
+ *   <li><b>buffer-drain</b> — polls {@link FileEventService} every 50 ms and fans out
+ *       pending {@link FileChangeEvent}s to every subscribed {@link ClientSession}.</li>
+ *   <li><b>pending-ack-cleanup</b> — periodically removes {@link PendingAck} entries that
+ *       have not been acknowledged within the configured TTL, so memory does not grow
+ *       unboundedly if a client disappears without sending ACKs.</li>
+ * </ul>
+ *
+ * <p>Each connected client goes through a handshake sequence:
+ * <ol>
+ *   <li>Server advertises all known root directories.</li>
+ *   <li>Client sends back a subscription list with its last known sync version per directory.</li>
+ *   <li>Server performs a catch-up send for each subscribed directory, replaying all
+ *       writes and deletes that occurred since the client's last sync version.</li>
+ *   <li>The client enters a live event stream, ACKing each event with its sync version.</li>
+ * </ol>
+ *
+ * <p>For every event sent to a client a unique {@code syncVersion} is minted via
+ * {@link SyncVersionRepository}. The version is stamped on the file metadata record (or the
+ * deleted-files record) only after the client's ACK is received, ensuring the version
+ * accurately reflects what has actually been delivered.
+ */
 @Service
 @Slf4j
 @RequiredArgsConstructor
@@ -67,17 +95,22 @@ public class ServerPushService {
     private volatile boolean running = false;
 
     /**
-     * One entry per connected client.
-     * Holds the output stream, the remote address, and the set of rootDirIds the client subscribed to.
+     * Holds the state for a single connected client: the output stream used to push events,
+     * the remote address (for logging and CLI display), and the set of root-directory IDs
+     * the client has subscribed to.
      */
     @Builder
     protected record ClientSession(DataOutputStream out, String address, Set<Long> subscribedRootDirIds) {
     }
 
     /**
-     * Tracks an event sent to one specific client, waiting for its ACK.
-     * Each client gets its own syncVersion per event, so this entry belongs
-     * to exactly one client — no cross-client ACK collisions.
+     * Tracks a single in-flight event sent to one specific client that is still waiting for
+     * an ACK. Keyed by the unique {@code syncVersion} minted for that (client, event) pair.
+     *
+     * @param rootDirId    the root directory the file belongs to
+     * @param relativePath the file path relative to the root directory
+     * @param eventType    either {@link #EVENT_WRITE} or {@link #EVENT_DELETE}
+     * @param sentAt       wall-clock timestamp (ms) when the event was sent, used for TTL eviction
      */
     private record PendingAck(long rootDirId, String relativePath, byte eventType, long sentAt) {
     }
@@ -91,15 +124,23 @@ public class ServerPushService {
     private final ConcurrentHashMap<Long, PendingAck> pendingAcks = new ConcurrentHashMap<>();
 
     /**
-     * Returns addresses of all currently connected clients — used by the CLI to show who is connected.
+     * Returns the remote addresses of all currently connected clients.
+     * Used by the CLI to display connection status.
+     *
+     * @return list of address strings (e.g. {@code /192.168.1.10:54321})
      */
     public List<String> listConnectedClients() {
         return sessions.stream().map(ClientSession::address).toList();
     }
 
     /**
-     * Sends a RESUME_SERVER_MODE signal to a specific client identified by address.
-     * The targeted client will exit with code 2, causing its wrapper script to restart it as a server.
+     * Sends a {@code RESUME_SERVER_MODE} signal to the client identified by the given address,
+     * instructing it to exit with code 2 so its wrapper script restarts it in server mode.
+     * After the signal is sent this process also exits with code 3.
+     *
+     * @param address the remote address string as returned by {@link #listConnectedClients()}
+     * @return {@code true} if the signal was sent successfully, {@code false} if no matching
+     * session was found or if writing to the socket failed
      */
     public boolean sendResumeServerMode(String address) {
         return sessions.stream()
@@ -120,6 +161,13 @@ public class ServerPushService {
                 .orElse(false);
     }
 
+    /**
+     * Initialises the SSL server socket and starts the three background virtual threads
+     * (client-acceptor, buffer-drain, pending-ack-cleanup).
+     * Invoked automatically by Spring after dependency injection.
+     *
+     * @throws Exception if the SSL context or server socket cannot be created
+     */
     @PostConstruct
     public void start() throws Exception {
         serverSocket = buildSslServerSocket();
@@ -130,6 +178,10 @@ public class ServerPushService {
         Thread.ofVirtual().name("pending-ack-cleanup").start(this::pendingAckCleanupLoop);
     }
 
+    /**
+     * Signals the service to stop and closes the server socket, causing the accept loop
+     * to exit cleanly. Invoked automatically by Spring during application shutdown.
+     */
     @PreDestroy
     public void stop() {
         running = false;
@@ -142,10 +194,11 @@ public class ServerPushService {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Pending ACK cleanup
-    // -------------------------------------------------------------------------
-
+    /**
+     * Periodically scans {@link #pendingAcks} and removes entries whose age exceeds
+     * {@code sync.socket.pending-ack-ttl-ms}. A warning is logged for each evicted entry;
+     * the affected client will re-receive the file on its next reconnect via the catch-up path.
+     */
     private void pendingAckCleanupLoop() {
         while (running) {
             try {
@@ -165,10 +218,10 @@ public class ServerPushService {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Accept loop
-    // -------------------------------------------------------------------------
-
+    /**
+     * Accepts incoming SSL connections in a loop and spawns a virtual thread for each one.
+     * Stops when {@link #running} is {@code false} or the server socket is closed.
+     */
     private void acceptClients() {
         while (running) {
             try {
@@ -183,10 +236,20 @@ public class ServerPushService {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Per-client handshake + lifetime
-    // -------------------------------------------------------------------------
-
+    /**
+     * Manages the full lifetime of a single client connection:
+     * <ol>
+     *   <li>Advertises available root directories.</li>
+     *   <li>Reads the client's subscription handshake.</li>
+     *   <li>Performs catch-up delivery of missed events.</li>
+     *   <li>Reads incoming ACKs (and an optional SHUTDOWN signal) until the socket closes.</li>
+     * </ol>
+     * When an ACK is received the corresponding {@link PendingAck} entry is removed and
+     * {@link FileMetadataService#stampSyncVersion} or {@link FileMetadataService#recordDeletion}
+     * is called to persist the delivery confirmation.
+     *
+     * @param socket the accepted client SSL socket
+     */
     private void serveClient(SSLSocket socket) {
         try {
             var in = new DataInputStream(socket.getInputStream());
@@ -245,10 +308,12 @@ public class ServerPushService {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Buffer drain loop — polls buffer and pushes to subscribed clients
-    // -------------------------------------------------------------------------
-
+    /**
+     * Continuously drains the {@link FileEventService} event buffer (every 50 ms) and
+     * pushes each event to all {@link ClientSession}s subscribed to the affected root directory.
+     * A unique {@code syncVersion} is minted per (client, event) pair and a {@link PendingAck}
+     * entry is registered before the event is written to the wire.
+     */
     private void drainLoop() {
         while (running) {
             try {
@@ -294,17 +359,20 @@ public class ServerPushService {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
-
     /**
-     * Sends all available root dir names to the client so it can decide what to subscribe to.
-     * Wire format:
+     * Sends the list of all known root directory names to the client so it can decide
+     * which directories to subscribe to.
+     *
+     * <p>Wire format:
+     * <pre>
      * [4 bytes] number of dirs (int)
      * per dir:
-     * [4 bytes] name length (int)
-     * [N bytes] name (UTF-8)
+     *   [4 bytes] name length (int)
+     *   [N bytes] name (UTF-8)
+     * </pre>
+     *
+     * @param out the client's output stream
+     * @throws IOException if writing to the stream fails
      */
     private void sendAvailableDirs(DataOutputStream out) throws IOException {
         List<String> dirNames = rootDirService.findAll().stream()
@@ -321,12 +389,20 @@ public class ServerPushService {
     }
 
     /**
-     * Reads the handshake sent by the client:
-     * [4 bytes] number of entries
+     * Reads the subscription handshake sent by the client.
+     *
+     * <p>Wire format:
+     * <pre>
+     * [4 bytes] number of entries (int)
      * per entry:
-     * [4 bytes] dir name length
-     * [N bytes] dir name (UTF-8)
-     * [8 bytes] lastSyncVersion
+     *   [4 bytes] dir name length (int)
+     *   [N bytes] dir name (UTF-8)
+     *   [8 bytes] lastSyncVersion (long)
+     * </pre>
+     *
+     * @param in the client's input stream
+     * @return list of {@link SyncHandshakeEntry} records, one per requested directory
+     * @throws IOException if reading from the stream fails
      */
     private List<SyncHandshakeEntry> readHandshake(DataInputStream in) throws IOException {
         int count = in.readInt();
@@ -341,7 +417,11 @@ public class ServerPushService {
     }
 
     /**
-     * Maps dir names from the handshake to their server-side rootDirIds, skipping unknown ones.
+     * Resolves the client-supplied directory names from the handshake to their server-side
+     * {@code rootDirId} values. Unknown directory names are skipped with a warning.
+     *
+     * @param handshake the entries received from the client
+     * @return set of {@code rootDirId} values the client is authorised to receive
      */
     private Set<Long> resolveSubscribedIds(List<SyncHandshakeEntry> handshake) {
         Set<Long> ids = new HashSet<>();
@@ -356,8 +436,17 @@ public class ServerPushService {
     }
 
     /**
-     * For each requested dir, sends all files whose sync_version is newer
-     * than what the client reported.
+     * Replays all writes and deletes that occurred since each directory's
+     * {@code lastSyncVersion} reported in the handshake, including files that were added
+     * but have never been delivered to any client (i.e. those with {@code sync_version IS NULL}).
+     *
+     * <p>A fresh {@code syncVersion} is minted for every event sent during catch-up and a
+     * {@link PendingAck} entry is registered so the normal ACK path stamps the file and marks
+     * the version as {@code SYNCED} once the client confirms receipt.
+     *
+     * @param handshake the entries received from the client, containing dir names and last versions
+     * @param session   the client session to write events to
+     * @throws IOException if writing to the client's output stream fails
      */
     private void sendCatchUp(List<SyncHandshakeEntry> handshake, ClientSession session) throws IOException {
         for (SyncHandshakeEntry entry : handshake) {
@@ -371,20 +460,26 @@ public class ServerPushService {
             var files = fileMetadataService.findFilesNewerThan(rootDirId, entry.lastSyncVersion());
             log.info("Sending {} catch-up file(s) for dir '{}'", files.size(), entry.dirName());
             for (var file : files) {
-                String absPath = Path.of(rootAbsPath).resolve(file.relativePath()).toString();
-                String qualifiedPath = entry.dirName() + "/" + file.relativePath();
+                // relativePath may be stored with a leading separator (e.g. "/foo.txt") — strip it
+                String relativePathNormalized = file.relativePath().replaceAll("^[/\\\\]+", "");
+                String absPath = Path.of(rootAbsPath).resolve(relativePathNormalized).toString();
+                String qualifiedPath = entry.dirName() + "/" + relativePathNormalized;
                 byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
                 byte[] fileBytes = Files.readAllBytes(Path.of(absPath));
+                // Mint a new syncVersion so the ACK is tracked and stampSyncVersion is called
+                long syncVersion = syncVersionRepository.next();
+                pendingAcks.put(syncVersion, new PendingAck(
+                        rootDirId, file.relativePath(), EVENT_WRITE, System.currentTimeMillis()));
                 synchronized (session.out()) {
                     session.out().writeByte(EVENT_WRITE);
                     session.out().writeInt(pathBytes.length);
                     session.out().write(pathBytes);
-                    session.out().writeLong(file.syncVersion());
+                    session.out().writeLong(syncVersion);
                     session.out().writeLong(fileBytes.length);
                     session.out().write(fileBytes);
                     session.out().flush();
                 }
-                log.debug("Catch-up WRITE (v{}) {}", file.syncVersion(), qualifiedPath);
+                log.debug("Catch-up WRITE (v{}) {}", syncVersion, qualifiedPath);
             }
 
             // Send deletes that happened since lastSyncVersion
@@ -392,9 +487,11 @@ public class ServerPushService {
             log.info("Sending {} catch-up delete(s) for dir '{}'", deletes.size(), entry.dirName());
             for (var delete : deletes) {
                 String relativePath = (String) delete.get("relative_path");
-                long syncVersion = ((Number) delete.get("sync_version")).longValue();
                 String qualifiedPath = entry.dirName() + "/" + relativePath;
                 byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
+                long syncVersion = syncVersionRepository.next();
+                pendingAcks.put(syncVersion, new PendingAck(
+                        rootDirId, relativePath, EVENT_DELETE, System.currentTimeMillis()));
                 synchronized (session.out()) {
                     session.out().writeByte(EVENT_DELETE);
                     session.out().writeInt(pathBytes.length);
@@ -408,6 +505,29 @@ public class ServerPushService {
         }
     }
 
+    /**
+     * Writes a single file-change event to a client session.
+     * For {@link #EVENT_WRITE} events the file bytes are read from disk and included in the
+     * payload. For {@link #EVENT_DELETE} events a zero-length body is sent.
+     *
+     * <p>Wire format:
+     * <pre>
+     * [1 byte]  event type (EVENT_WRITE or EVENT_DELETE)
+     * [4 bytes] path length (int)
+     * [N bytes] qualified path (UTF-8, "dirName/relativePath")
+     * [8 bytes] syncVersion (long)
+     * [8 bytes] file size in bytes (long; 0 for deletes)
+     * [M bytes] file content (omitted for deletes)
+     * </pre>
+     *
+     * @param session      the target client session
+     * @param eventType    {@link #EVENT_WRITE} or {@link #EVENT_DELETE}
+     * @param pathBytes    UTF-8-encoded qualified path
+     * @param absolutePath absolute file path on the server (used to read bytes for writes)
+     * @param relativePath relative path for logging
+     * @param kindName     event kind name for logging
+     * @param syncVersion  the unique sync version assigned to this (client, event) pair
+     */
     private void writeToClient(ClientSession session, byte eventType, byte[] pathBytes,
                                String absolutePath, String relativePath, String kindName,
                                long syncVersion) {
@@ -436,6 +556,14 @@ public class ServerPushService {
         }
     }
 
+    /**
+     * Builds a mutually-authenticated TLS server socket bound to the configured port.
+     * Loads the server keystore (for server-auth) and the truststore (for client verification)
+     * and enables mandatory client authentication ({@code setNeedClientAuth(true)}).
+     *
+     * @return a bound and listening {@link SSLServerSocket}
+     * @throws Exception if the SSL context or socket cannot be created
+     */
     private SSLServerSocket buildSslServerSocket() throws Exception {
         char[] password = keystorePassword.toCharArray();
 
@@ -463,4 +591,3 @@ public class ServerPushService {
         return socket;
     }
 }
-
