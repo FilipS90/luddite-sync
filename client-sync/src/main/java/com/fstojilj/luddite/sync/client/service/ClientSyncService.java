@@ -58,6 +58,8 @@ public class ClientSyncService {
     private final SyncStateService syncStateService;
     private final SyncedFileRepository syncedFileRepository;
 
+    public static List<String> serverDirs = new ArrayList<>();
+
     @Value("${sync.server.host:localhost}")
     private String serverHost;
 
@@ -217,17 +219,21 @@ public class ClientSyncService {
      *
      * @param availableDirs directory names advertised by the server
      */
-    private void printAvailableDirs(List<String> availableDirs) {
+    private static void printAvailableDirs(List<String> availableDirs) {
         System.out.println();
         System.out.println("  Server has the following directories available:");
         System.out.println("  -----------------------------------------------");
         if (availableDirs.isEmpty()) {
             System.out.println("  (none)");
         } else {
-            availableDirs.forEach(d -> System.out.println("  - " + d));
+            for (int i = 1; i <= availableDirs.size(); i++) {
+                System.out.printf("  %d. %s%n", i, availableDirs.get(i - 1));
+            }
+            serverDirs = availableDirs;
         }
         System.out.println();
-        System.out.println("  Use 'add <name>' in the CLI to subscribe, then sync will begin automatically.");
+        System.out.println("  Use add command with dir indices");
+        System.out.println("  e.g. 'add 1' or 'add 2,3' to subscribe to the first dir, or the second and third dirs.");
         System.out.println();
     }
 
