@@ -11,6 +11,10 @@ import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.util.Arrays;
+import java.util.List;
+
+import static com.fstojilj.luddite.sync.client.service.ClientSyncService.serverDirs;
 
 /**
  * Interactive CLI for managing client directory subscriptions at runtime.
@@ -32,6 +36,8 @@ public class ClientCli {
 
     private final SyncStateService syncStateService;
     private final ClientSyncService clientSyncService;
+
+    private List<String> dirNames;
 
     @Value("${sync.client.mirror-dir}")
     private String mirrorDir;
@@ -60,8 +66,11 @@ public class ClientCli {
         String command = parts[0].toLowerCase();
         String arg = parts.length > 1 ? parts[1] : "";
 
+        System.out.println(command);
+        System.out.println(arg);
+
         var entries = syncStateService.findAll();
-        var dirNames = entries.stream().map(SyncHandshakeEntry::dirName).toList();
+        dirNames = entries.stream().map(SyncHandshakeEntry::dirName).toList();
 
         switch (command) {
             case "list" -> {
@@ -74,21 +83,21 @@ public class ClientCli {
                 System.out.println("  ---------------------|-------------------|");
 
                 for (var entry : entries) {
-                    System.out.printf("  %-20s | %-17d |",
+                    System.out.printf("%-20s   | %-17d                 |%n",
                             entry.dirName(), entry.lastSyncVersion());
                 }
             }
             case "add" -> {
                 if (arg.isEmpty()) {
-                    System.out.println("  Usage: add <dir-name>");
+                    System.out.println("  Usage: add directory index (use comma to separate if adding multiple)");
                     return;
                 }
                 if (dirNames.contains(arg)) {
                     System.out.printf("  Already subscribed to: %s%n", arg);
                     return;
                 }
-                syncStateService.registerIfAbsent(arg);
-                System.out.printf("  Subscribed to: %s%n", arg);
+                List<String> dirs = registerDirs(arg);
+                System.out.printf("  Subscribed to: %s%n", dirs);
             }
             case "remove" -> {
                 if (arg.isEmpty()) {
@@ -134,5 +143,25 @@ public class ClientCli {
         System.out.println("  help                show this message");
         System.out.println("  exit                shut down the client");
         System.out.println();
+    }
+
+    private List<String> registerDirs(String directoryIndices) {
+        List<Integer> indices = Arrays.stream(directoryIndices.split(","))
+                .map(String::trim)
+                .map(Integer::parseInt)
+                .toList();
+
+        List<String> names = indices.stream().map(i -> serverDirs.get(i - 1)).toList();
+
+        names.forEach(name -> {
+            if (dirNames.contains(name)) {
+                System.out.printf("  Already subscribed to: %s%n", name);
+            } else {
+                syncStateService.registerIfAbsent(name);
+                System.out.printf("  Subscribed to: %s%n", name);
+            }
+        });
+
+        return names;
     }
 }

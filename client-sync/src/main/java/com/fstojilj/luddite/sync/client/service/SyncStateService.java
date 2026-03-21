@@ -110,7 +110,7 @@ public class SyncStateService {
      * Registers a directory in the local sync state with a starting sync version of
      * {@code -1} if it is not already present. Safe to call multiple times.
      *
-     * @param dirName the directory name to register
+     * @param dirName the directories name to register
      */
     public void registerIfAbsent(String dirName) {
         syncStateRepository.registerIfAbsent(dirName);
