@@ -2,7 +2,6 @@ package com.fstojilj.luddite.sync.server.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -34,12 +33,6 @@ import java.util.concurrent.Executors;
 public class DirWatcherService {
 
     private final FileMetadataService fileMetadataService;
-    /**
-     * Injected lazily to break the circular dependency:
-     * SyncPollService → FileMetadataService → (none) and
-     * SyncPollService is also created after DirWatcherService.
-     */
-    @Lazy
     private final SyncPollService syncPollService;
 
     private final Executor executor = Executors.newVirtualThreadPerTaskExecutor();

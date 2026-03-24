@@ -1,7 +1,9 @@
 package com.fstojilj.luddite.sync.server.service;
 
 import com.fstojilj.luddite.sync.common.model.FileMetadata;
+import com.fstojilj.luddite.sync.common.model.RootDir;
 import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
+import com.fstojilj.luddite.sync.server.repository.RootDirRepository;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
@@ -79,7 +81,7 @@ public class SyncPollService {
 
     // ── Dependencies ─────────────────────────────────────────────────────────
     private final FileMetadataService fileMetadataService;
-    private final RootDirService rootDirService;
+    private final RootDirRepository rootDirRepository;
 
     // ── Config ────────────────────────────────────────────────────────────────
     @Value("${sync.socket.port:8888}")
@@ -326,7 +328,7 @@ public class SyncPollService {
                             long lastSyncVersion, String hardwareId) throws IOException {
         pollLock.lock();
         try {
-            var rootDirOpt = rootDirService.findByName(dirName);
+            var rootDirOpt = rootDirRepository.findByName(dirName);
             if (rootDirOpt.isEmpty()) {
                 log.warn("Poll from '{}' for unknown dir '{}', sending empty response", hardwareId, dirName);
                 synchronized (out) {
@@ -429,7 +431,7 @@ public class SyncPollService {
         String dirName = qualifiedPath.substring(0, slash);
         String relativePath = qualifiedPath.substring(slash + 1);
 
-        rootDirService.findByName(dirName).ifPresentOrElse(
+        rootDirRepository.findByName(dirName).ifPresentOrElse(
                 rootDir -> {
                     fileMetadataService.acknowledgeDelete(rootDir.getId(), relativePath, hardwareId);
                     log.debug("Delete-ACK from '{}' for '{}'", hardwareId, qualifiedPath);
@@ -455,8 +457,8 @@ public class SyncPollService {
      * @throws IOException if writing fails
      */
     private void sendAvailableDirs(DataOutputStream out) throws IOException {
-        List<String> dirNames = rootDirService.findAll().stream()
-                .map(d -> d.getName())
+        List<String> dirNames = rootDirRepository.findAll().stream()
+                .map(RootDir::getName)
                 .toList();
         out.writeInt(dirNames.size());
         for (String name : dirNames) {
@@ -506,7 +508,7 @@ public class SyncPollService {
     private Set<Long> resolveSubscribedIds(List<SyncHandshakeEntry> handshake) {
         Set<Long> ids = new HashSet<>();
         for (SyncHandshakeEntry entry : handshake) {
-            rootDirService.findByName(entry.dirName()).ifPresentOrElse(
+            rootDirRepository.findByName(entry.dirName()).ifPresentOrElse(
                     dir -> ids.add(dir.getId()),
                     () -> log.warn("Client requested unknown dir '{}', skipping", entry.dirName())
             );
