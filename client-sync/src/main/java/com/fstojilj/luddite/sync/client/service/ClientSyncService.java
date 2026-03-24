@@ -134,6 +134,8 @@ public class ClientSyncService {
      */
     public void reconnect() {
         log.info("Reconnect requested — dropping current connection to re-poll server dirs");
+        // Do NOT set running=false — that exits the loop entirely.
+        // Closing the socket causes an IOException in connectAndSync which triggers a reconnect.
         closeSocket();
     }
 
@@ -295,7 +297,8 @@ public class ClientSyncService {
                 log.warn("Dir '{}': {} file(s) missing from disk — resetting sync version: {}",
                         dirName, missing.size(), missing);
                 rootDirService.resetSyncVersionForDir(dirName);
-                missing.forEach(rel -> fileMetadataService.removeRecord(dirName, rel));
+                // File is already gone from disk — only purge the DB record, do not attempt disk delete
+                missing.forEach(rel -> fileMetadataService.purgeRecord(dirName, rel));
             }
         }
     }
@@ -387,8 +390,10 @@ public class ClientSyncService {
                     String dir = Path.of(relPath).getName(0).toString();
 
                     if (deleted) {
+                        // Delete from disk first, then purge DB record (disk-only delete already done here,
+                        // so use purgeRecord not removeRecord to avoid a second disk delete attempt)
                         Files.deleteIfExists(target);
-                        fileMetadataService.removeRecord(dir, relPath);
+                        fileMetadataService.purgeRecord(dir, relPath);
                         log.info("Deleted: {}", relPath);
 
                         // ACK the delete so server can remove from client_ids

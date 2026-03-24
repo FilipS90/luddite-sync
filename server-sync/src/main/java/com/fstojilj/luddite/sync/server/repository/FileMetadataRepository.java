@@ -14,7 +14,6 @@ import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 
 @Repository
 @RequiredArgsConstructor
@@ -77,37 +76,6 @@ public class FileMetadataRepository {
         return results.getFirst();
     }
 
-    public Optional<FileMetadata> findOptionalByRootDirIdAndRelativePath(Long rootDirId, String relativePath) {
-        String sql = "SELECT * FROM file_metadata WHERE root_dir_id = ? AND relative_path = ?";
-        List<FileMetadata> results = jdbcTemplate.query(sql, rowMapper, rootDirId, relativePath);
-        return results.isEmpty() ? Optional.empty() : Optional.of(results.getFirst());
-    }
-
-    public void update(FileMetadata fileMetadata) {
-        String sql = """
-                UPDATE file_metadata
-                SET filename = ?, root_dir_id = ?, relative_path = ?, checksum = ?,
-                    file_size = ?, modified_at = ?, sync_version = ?
-                WHERE id = ?
-                """;
-
-        int rowsAffected = jdbcTemplate.update(sql,
-                fileMetadata.filename(),
-                fileMetadata.rootDirId(),
-                fileMetadata.relativePath(),
-                fileMetadata.checksum(),
-                fileMetadata.fileSize(),
-                Timestamp.from(Instant.now()),
-                fileMetadata.syncVersion(),
-                fileMetadata.id()
-        );
-
-        if (rowsAffected == 0) {
-            log.warn("No FileMetadata found with id: {}", fileMetadata.id());
-        } else {
-            log.debug("Updated FileMetadata for rootDirId: {}, relativePath: {}", fileMetadata.rootDirId(), fileMetadata.relativePath());
-        }
-    }
 
     public List<FileMetadata> findByRootDirIdWithSyncVersionAfter(long rootDirId, long lastSyncVersion) {
         String sql = "SELECT * FROM file_metadata WHERE root_dir_id = ? AND deleted = FALSE AND (sync_version IS NULL OR sync_version > ?)";
@@ -179,21 +147,6 @@ public class FileMetadataRepository {
         } else {
             log.debug("Soft-deleted (v{}) rootDirId={} '{}'", syncVersion, rootDirId, relativePath);
         }
-    }
-
-    /**
-     * Sets {@code client_ids} on a soft-deleted row so that all currently connected
-     * clients are tracked. Called when a new client connects and there are pending
-     * soft-deleted rows it hasn't seen yet.
-     *
-     * @param rootDirId    root directory ID
-     * @param relativePath relative file path
-     * @param clientIds    comma-separated hardware IDs
-     */
-    public void setClientIds(long rootDirId, String relativePath, String clientIds) {
-        jdbcTemplate.update("""
-                UPDATE file_metadata SET client_ids = ? WHERE root_dir_id = ? AND relative_path = ?
-                """, clientIds, rootDirId, relativePath);
     }
 
     /**
