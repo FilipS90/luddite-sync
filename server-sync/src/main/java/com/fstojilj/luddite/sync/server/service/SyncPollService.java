@@ -111,6 +111,13 @@ public class SyncPollService {
      */
     private final ReentrantLock pollLock = new ReentrantLock();
 
+    /**
+     * A single record to be sent in a poll response: the original metadata row,
+     * the sync version assigned to this delivery, and the file bytes (empty for deletes).
+     */
+    private record PollRecord(FileMetadata meta, long syncVersion, byte[] bytes) {
+    }
+
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     /**
@@ -317,18 +324,18 @@ public class SyncPollService {
      */
     private void handlePoll(DataOutputStream out, String dirName,
                             long lastSyncVersion, String hardwareId) throws IOException {
-        var rootDirOpt = rootDirService.findByName(dirName);
-        if (rootDirOpt.isEmpty()) {
-            log.warn("Poll from '{}' for unknown dir '{}', sending empty response", hardwareId, dirName);
-            synchronized (out) {
-                out.writeInt(0);
-                out.flush();
-            }
-            return;
-        }
-
         pollLock.lock();
         try {
+            var rootDirOpt = rootDirService.findByName(dirName);
+            if (rootDirOpt.isEmpty()) {
+                log.warn("Poll from '{}' for unknown dir '{}', sending empty response", hardwareId, dirName);
+                synchronized (out) {
+                    out.writeInt(0);
+                    out.flush();
+                }
+                return;
+            }
+
             long rootDirId = rootDirOpt.get().getId();
             String rootAbsPath = rootDirOpt.get().getAbsolutePath();
 
@@ -340,8 +347,6 @@ public class SyncPollService {
             // Versions are NOT stamped on the DB until the response has been fully written
             // to the wire — a client crash mid-transfer leaves sync_version = null so the
             // file is re-sent on the next poll.
-            record PollRecord(FileMetadata meta, long syncVersion, byte[] bytes) {
-            }
             List<PollRecord> payload = new ArrayList<>();
 
             for (FileMetadata meta : changed) {
