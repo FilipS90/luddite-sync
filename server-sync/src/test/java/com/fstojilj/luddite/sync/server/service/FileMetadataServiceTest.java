@@ -1,7 +1,6 @@
 package com.fstojilj.luddite.sync.server.service;
 
 import com.fstojilj.luddite.sync.common.model.FileMetadata;
-import com.fstojilj.luddite.sync.server.repository.DeletedFilesRepository;
 import com.fstojilj.luddite.sync.server.repository.FileMetadataRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -9,12 +8,12 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -31,7 +30,7 @@ class FileMetadataServiceTest {
     private FileMetadataRepository fileMetadataRepository;
 
     @Mock
-    private DeletedFilesRepository deletedFilesRepository;
+    private JdbcTemplate jdbcTemplate;
 
     @InjectMocks
     private FileMetadataService fileMetadataService;
@@ -90,18 +89,18 @@ class FileMetadataServiceTest {
     }
 
     @Test
-    void deleteFileMetadata_shouldDelegateToRepository() {
-        fileMetadataService.deleteFileMetadata(1L, "/img.jpg");
+    void softDeleteFileMetadata_shouldDelegateToRepository() {
+        // nextSyncVersion uses the AtomicLong (seeded at 0), so first call returns 1
+        fileMetadataService.softDeleteFileMetadata(1L, "/img.jpg", "hw-abc,hw-def");
 
-        verify(fileMetadataRepository).delete(1L, "/img.jpg");
+        verify(fileMetadataRepository).softDelete(1L, "/img.jpg", 1L, "hw-abc,hw-def");
     }
 
     @Test
-    void deleteAllForRootDir_shouldDeleteMetadataAndDeletedFiles() {
+    void deleteAllForRootDir_shouldDeleteMetadata() {
         fileMetadataService.deleteAllForRootDir(1L);
 
         verify(fileMetadataRepository).deleteAllByRootDirId(1L);
-        verify(deletedFilesRepository).deleteAllByRootDirId(1L);
     }
 
     @Test
@@ -112,32 +111,20 @@ class FileMetadataServiceTest {
     }
 
     @Test
-    void recordDeletion_shouldInsertIntoDeletedFiles() {
-        fileMetadataService.recordDeletion(1L, "/img.jpg", 99L);
+    void acknowledgeDelete_shouldDelegateToRepository() {
+        fileMetadataService.acknowledgeDelete(1L, "/img.jpg", "hw-abc");
 
-        verify(deletedFilesRepository).insert(1L, "/img.jpg", 99L);
+        verify(fileMetadataRepository).acknowledgeDelete(1L, "/img.jpg", "hw-abc");
     }
 
     @Test
-    void findFilesNewerThan_shouldDelegateToRepository() {
+    void findChangedSince_shouldDelegateToRepository() {
         List<FileMetadata> expected = List.of(FileMetadata.builder().id(1L).build());
-        when(fileMetadataRepository.findByRootDirIdWithSyncVersionAfter(1L, 10L)).thenReturn(expected);
+        when(fileMetadataRepository.findChangedSince(1L, 10L)).thenReturn(expected);
 
-        List<FileMetadata> result = fileMetadataService.findFilesNewerThan(1L, 10L);
-
-        assertThat(result).hasSize(1);
-        verify(fileMetadataRepository).findByRootDirIdWithSyncVersionAfter(1L, 10L);
-    }
-
-    @Test
-    void findDeletesNewerThan_shouldDelegateToRepository() {
-        List<Map<String, Object>> expected = List.of(Map.of("relative_path", "/img.jpg", "sync_version", 5L));
-        when(deletedFilesRepository.findByRootDirIdWithSyncVersionAfter(1L, 3L)).thenReturn(expected);
-
-        List<Map<String, Object>> result = fileMetadataService.findDeletesNewerThan(1L, 3L);
+        List<FileMetadata> result = fileMetadataService.findChangedSince(1L, 10L);
 
         assertThat(result).hasSize(1);
-        verify(deletedFilesRepository).findByRootDirIdWithSyncVersionAfter(1L, 3L);
+        verify(fileMetadataRepository).findChangedSince(1L, 10L);
     }
 }
-

@@ -14,6 +14,8 @@ public record FileMetadata(
         String checksum,
         Instant createdAt,
         Instant modifiedAt,
-        Long syncVersion
+        Long syncVersion,
+        boolean deleted,
+        String clientIds
 ) {
 }
