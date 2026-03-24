@@ -2,7 +2,6 @@ package com.fstojilj.luddite.sync.server.service;
 
 import com.fstojilj.luddite.sync.common.model.FileMetadata;
 import com.fstojilj.luddite.sync.server.repository.FileMetadataRepository;
-import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -20,10 +19,9 @@ import static com.fstojilj.luddite.sync.server.utils.FileSystemUtils.listAllFile
 /**
  * Business logic for file metadata lifecycle on the server.
  *
- * <p>Owns the monotonically increasing {@code syncVersion} counter — seeded from
- * {@code MAX(sync_version)} in the database on startup so versions survive restarts.
- * Every write or soft-delete that should be replicated to clients must go through
- * {@link #nextSyncVersion()} to obtain a new version number.
+ * <p>Owns the monotonically increasing {@code syncVersion} counter — seeded lazily
+ * from {@code MAX(sync_version)} on the very first call to {@link #nextSyncVersion()},
+ * which guarantees the schema already exists at that point.
  */
 @Service
 @RequiredArgsConstructor
@@ -34,29 +32,24 @@ public class FileMetadataService {
     private final JdbcTemplate jdbcTemplate;
 
     /**
-     * Monotonic counter seeded from the DB max on startup.
+     * Sentinel value meaning "not yet seeded from the database".
      */
-    private final AtomicLong syncVersionCounter = new AtomicLong(0);
+    private static final long UNSEEDED = Long.MIN_VALUE;
 
-    /**
-     * Seeds {@link #syncVersionCounter} from the highest {@code sync_version} currently
-     * stored in the database so that version numbers never go backwards after a restart.
-     */
-    @PostConstruct
-    public void initSyncVersionCounter() {
-        Long max = jdbcTemplate.queryForObject(
-                "SELECT MAX(sync_version) FROM file_metadata", Long.class);
-        long seed = (max != null) ? max : 0L;
-        syncVersionCounter.set(seed);
-        log.info("Sync-version counter seeded at {}", seed);
-    }
+    private final AtomicLong syncVersionCounter = new AtomicLong(UNSEEDED);
 
     /**
      * Mints the next monotonically increasing sync version.
-     *
-     * @return a version number guaranteed to be greater than all previously issued versions
+     * Seeds from {@code MAX(sync_version)} on the very first invocation.
      */
     public long nextSyncVersion() {
+        if (syncVersionCounter.get() == UNSEEDED) {
+            Long max = jdbcTemplate.queryForObject(
+                    "SELECT MAX(sync_version) FROM file_metadata", Long.class);
+            long seed = (max != null) ? max : 0L;
+            syncVersionCounter.compareAndSet(UNSEEDED, seed);
+            log.info("Sync-version counter seeded at {}", seed);
+        }
         return syncVersionCounter.incrementAndGet();
     }
 
