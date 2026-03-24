@@ -8,7 +8,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -29,38 +28,67 @@ import java.util.List;
 public class RootDirService {
 
     private final RootDirRepository rootDirRepository;
+    private final FileMetadataService fileMetadataService;
 
     @Value("${sync.client.mirror-dir}")
     private String mirrorDirPath;
 
     /**
      * Removes directories that are no longer offered by the server.
-     * Both the on-disk mirror subtree and the local sync-state record are deleted.
+     * For each stale directory:
+     * <ol>
+     *   <li>Every file inside the on-disk mirror subtree is deleted.</li>
+     *   <li>The now-empty directory tree is removed.</li>
+     *   <li>All {@code file_metadata} records for that directory are purged.</li>
+     *   <li>The {@code root_dirs} entry is removed.</li>
+     * </ol>
+     * If the mirror sub-directory does not exist on disk (e.g. the client never fully
+     * synced it) the disk-cleanup step is skipped and only the DB records are removed.
      *
      * @param staleDirs list of directory names that should be purged
      */
     public void removeStaleDirs(List<String> staleDirs) {
-        staleDirs.forEach(dir -> {
-            Path dirPath = Path.of(mirrorDirPath, dir);
-            try {
-                Files.walkFileTree(dirPath, new SimpleFileVisitor<>() {
-                    @Override
-                    public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                        Files.delete(file);
-                        return FileVisitResult.CONTINUE;
-                    }
+        for (String dir : staleDirs) {
+            Path dirPath = Path.of(mirrorDirPath).resolve(dir);
 
-                    @Override
-                    public FileVisitResult postVisitDirectory(Path d, IOException exc) throws IOException {
-                        Files.delete(d);
-                        return FileVisitResult.CONTINUE;
-                    }
-                });
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
+            if (Files.exists(dirPath)) {
+                try {
+                    Files.walkFileTree(dirPath, new SimpleFileVisitor<>() {
+                        @Override
+                        public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                            Files.delete(file);
+                            log.info("Deleted stale file: {}", file);
+                            return FileVisitResult.CONTINUE;
+                        }
+
+                        @Override
+                        public FileVisitResult visitFileFailed(Path file, IOException exc) {
+                            log.warn("Could not delete stale file '{}': {}", file, exc.getMessage());
+                            return FileVisitResult.CONTINUE;
+                        }
+
+                        @Override
+                        public FileVisitResult postVisitDirectory(Path d, IOException exc) throws IOException {
+                            Files.delete(d);
+                            log.debug("Deleted stale directory: {}", d);
+                            return FileVisitResult.CONTINUE;
+                        }
+                    });
+                } catch (IOException e) {
+                    log.error("Error while removing stale dir '{}' from disk: {}", dirPath, e.getMessage(), e);
+                }
+            } else {
+                log.warn("Stale dir '{}' not found on disk — skipping disk cleanup", dirPath);
             }
+
+            // Clean up all local file_metadata records for this directory
+            fileMetadataService.findAllByDir(dir)
+                    .forEach(rel -> fileMetadataService.removeRecord(dir, rel));
+
+            // Remove the root_dirs entry
             removeDirectory(dir);
-        });
+            log.info("Removed stale dir from sync state: '{}'", dir);
+        }
     }
 
     /**
