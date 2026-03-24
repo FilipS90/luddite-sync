@@ -67,20 +67,6 @@ public class FileMetadataRepository {
         return key.longValue();
     }
 
-    public FileMetadata findByRootDirIdAndRelativePath(Long rootDirId, String relativePath) {
-        String sql = "SELECT * FROM file_metadata WHERE root_dir_id = ? AND relative_path = ?";
-        List<FileMetadata> results = jdbcTemplate.query(sql, rowMapper, rootDirId, relativePath);
-        if (results.isEmpty()) {
-            throw new IllegalArgumentException("No FileMetadata found for rootDirId: " + rootDirId + " and relativePath: " + relativePath);
-        }
-        return results.getFirst();
-    }
-
-
-    public List<FileMetadata> findByRootDirIdWithSyncVersionAfter(long rootDirId, long lastSyncVersion) {
-        String sql = "SELECT * FROM file_metadata WHERE root_dir_id = ? AND deleted = FALSE AND (sync_version IS NULL OR sync_version > ?)";
-        return jdbcTemplate.query(sql, rowMapper, rootDirId, lastSyncVersion);
-    }
 
     public void updateSyncVersion(long rootDirId, String relativePath, long syncVersion) {
         jdbcTemplate.update(
