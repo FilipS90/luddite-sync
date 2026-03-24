@@ -86,6 +86,19 @@ public class FileMetadataService {
     }
 
     /**
+     * Removes the DB record for a file without touching the disk.
+     * Use this when the file is already known to be gone from disk (e.g. startup audit).
+     * For server-driven deletes use {@link #removeRecord} which also deletes from disk.
+     *
+     * @param dirName      server-side directory name
+     * @param relativePath qualified relative path
+     */
+    public void purgeRecord(String dirName, String relativePath) {
+        fileMetadataRepository.delete(dirName, relativePath);
+        log.debug("Purged DB record (disk untouched): {}/{}", dirName, relativePath);
+    }
+
+    /**
      * Returns all relative paths that were previously confirmed as synced for a given
      * directory. Used during the startup audit to detect files missing from disk.
      *

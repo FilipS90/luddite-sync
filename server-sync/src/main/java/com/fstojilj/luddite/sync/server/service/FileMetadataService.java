@@ -103,21 +103,11 @@ public class FileMetadataService {
             throw new IllegalArgumentException("Path must point to an existing file");
         }
 
-        var existing = fileMetadataRepository.findOptionalByRootDirIdAndRelativePath(rootDirId, relativeFilePath);
-        if (existing.isEmpty()) {
-            // ENTRY_MODIFY can race ahead of ENTRY_CREATE - treat as add
-            log.warn("ENTRY_MODIFY for unknown file, inserting instead: {}", relativeFilePath);
-            fileMetadataRepository.add(buildFileMetadata(file, rootDirId, relativeFilePath));
-            return;
-        }
-
-        var fileMetadata = existing.get().toBuilder()
-                .fileSize(file.length())
-                .checksum(calculateFileChecksum(absoluteFilePath))
-                .syncVersion(null)
-                .build();
-
-        fileMetadataRepository.update(fileMetadata);
+        // Delete existing row (if any) and re-insert as a fresh record.
+        // Resets sync_version to NULL so the next poll re-delivers the updated file.
+        fileMetadataRepository.delete(rootDirId, relativeFilePath);
+        fileMetadataRepository.add(buildFileMetadata(file, rootDirId, relativeFilePath));
+        log.debug("Re-created FileMetadata for rootDirId: {}, relativePath: {}", rootDirId, relativeFilePath);
     }
 
     // ── Delete path ───────────────────────────────────────────────────────────
@@ -136,11 +126,17 @@ public class FileMetadataService {
     @Transactional
     public void softDeleteFileMetadata(long rootDirId, String relativeFilePath, String connectedClientIds) {
         long version = nextSyncVersion();
-        fileMetadataRepository.softDelete(rootDirId, relativeFilePath, version, connectedClientIds);
-        log.info("Soft-deleted (v{}) rootDirId={} '{}', pending clients: [{}]",
-                version, rootDirId, relativeFilePath,
-                connectedClientIds.isEmpty() ? "none" : connectedClientIds);
+        if (connectedClientIds.isBlank()) {
+            // No clients connected — hard-delete immediately, nothing to replicate
+            fileMetadataRepository.delete(rootDirId, relativeFilePath);
+            log.info("Hard-deleted (no clients connected) rootDirId={} '{}'", rootDirId, relativeFilePath);
+        } else {
+            fileMetadataRepository.softDelete(rootDirId, relativeFilePath, version, connectedClientIds);
+            log.info("Soft-deleted (v{}) rootDirId={} '{}', pending clients: [{}]",
+                    version, rootDirId, relativeFilePath, connectedClientIds);
+        }
     }
+
 
     /**
      * Removes {@code hardwareId} from the {@code client_ids} of a soft-deleted row.
