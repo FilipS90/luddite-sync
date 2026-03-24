@@ -186,16 +186,6 @@ public class FileMetadataService {
         return fileMetadataRepository.findChangedSince(rootDirId, lastSyncVersion);
     }
 
-    /**
-     * @deprecated Use {@link #findChangedSince} for the poll-based architecture.
-     */
-    @Deprecated
-    public List<FileMetadata> findFilesNewerThan(long rootDirId, long lastSyncVersion) {
-        return fileMetadataRepository.findByRootDirIdWithSyncVersionAfter(rootDirId, lastSyncVersion);
-    }
-
-    // ── Internal helpers ──────────────────────────────────────────────────────
-
     private FileMetadata buildFileMetadata(File file, long rootDirId, String relativePath) {
         return FileMetadata.builder()
                 .filename(file.getName())

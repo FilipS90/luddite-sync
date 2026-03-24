@@ -10,10 +10,8 @@ import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
 import java.sql.Statement;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -56,19 +54,6 @@ public class RootDirRepository {
         return key.longValue();
     }
 
-    public void update(RootDir rootDir) {
-        String sql = """
-                UPDATE root_dir
-                SET name = ?, absolute_path = ?
-                WHERE id = ?
-                """;
-
-        jdbcTemplate.update(sql,
-                rootDir.getName(),
-                rootDir.getAbsolutePath(),
-                rootDir.getId()
-        );
-    }
 
     public Set<RootDir> findAll() {
         String sql = "SELECT * FROM root_dir";
@@ -81,10 +66,6 @@ public class RootDirRepository {
         return rowsAffected > 0;
     }
 
-    public Long getRootDirIdByAbsolutePath(String absolutePath) {
-        String sql = "SELECT * FROM root_dir WHERE absolute_path = ?";
-        return Objects.requireNonNull(jdbcTemplate.queryForObject(sql, rowMapper, absolutePath)).getId();
-    }
 
     public Optional<RootDir> getRootDirById(long rootDirId) {
         String sql = "SELECT * FROM root_dir WHERE id = ?";
