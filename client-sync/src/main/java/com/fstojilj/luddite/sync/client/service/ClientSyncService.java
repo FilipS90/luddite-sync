@@ -1,6 +1,5 @@
 package com.fstojilj.luddite.sync.client.service;
 
-import com.fstojilj.luddite.sync.client.repository.SyncedFileRepository;
 import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -22,44 +21,68 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyStore;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 /**
  * Establishes and maintains a persistent mTLS connection to the sync server,
- * receiving file-change events and applying them to the local mirror directory.
+ * polling for file-change events every 2 seconds and applying them to the local
+ * mirror directory.
  *
- * <p>On startup the service:
+ * <h2>Connection lifecycle</h2>
  * <ol>
  *   <li>Reads the list of root directories advertised by the server.</li>
- *   <li>Waits (polling every 7 s) for the user to subscribe to at least one dir via the CLI
- *       if no dirs are configured yet.</li>
- *   <li>Purges stale local dirs, registers new ones, audits the mirror for missing files,
- *       and sends the handshake with the last-known sync versions.</li>
- *   <li>Enters a receive loop that processes {@code EVENT_WRITE} and {@code EVENT_DELETE}
- *       events, writes files to disk, and ACKs each event back to the server.</li>
+ *   <li>Waits (polling every 7 s) for the user to subscribe to at least one dir
+ *       via the CLI if no dirs are configured yet.</li>
+ *   <li>Purges stale local dirs, registers new ones, audits the mirror for missing
+ *       files, then sends the stable {@code hardwareId} followed by the subscription
+ *       handshake with last-known sync versions.</li>
+ *   <li>Enters a poll loop that every 2 s sends a {@code POLL} request per subscribed
+ *       directory, reads the response, writes/deletes files on disk, and sends a
+ *       {@code DELETE_ACK} for each soft-deleted file received.</li>
  * </ol>
  *
  * <p>If the connection is lost the service automatically reconnects after a 5-second
  * back-off, resuming from the last persisted sync version.
+ *
+ * <h2>Poll response wire format</h2>
+ * <pre>
+ * [4 bytes] record count (int)
+ * per record:
+ *   [1 byte]  flags  — bit 0 = deleted
+ *   [4 bytes] path length (int)
+ *   [N bytes] qualified path (UTF-8, "dirName/relativePath")
+ *   [8 bytes] syncVersion (long)
+ *   [8 bytes] file size in bytes (long; 0 for deletes)
+ *   [M bytes] file content (absent for deletes)
+ * </pre>
  */
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class ClientSyncService {
 
-    private static final byte EVENT_WRITE = 1;
-    private static final byte EVENT_DELETE = 2;
-    private static final byte ACK = 3;
-    private static final byte SHUTDOWN = 4;
-    private static final byte RESUME_SERVER_MODE = 5;
+    // ── Wire protocol bytes ───────────────────────────────────────────────────
+    private static final byte POLL = 1;
+    private static final byte DELETE_ACK = 2;
+    private static final byte SHUTDOWN = 3;
+    private static final byte RESUME_SERVER_MODE = 4;
 
-    private final SyncStateService syncStateService;
-    private final SyncedFileRepository syncedFileRepository;
+    private static final byte FLAG_DELETED = 0x01;
 
+    // ── Poll interval ─────────────────────────────────────────────────────────
+    private static final long POLL_INTERVAL_MS = 2_000;
+
+    // ── Dependencies ─────────────────────────────────────────────────────────
+    private final RootDirService rootDirService;
+    private final FileMetadataService fileMetadataService;
+    private final HardwareIdService hardwareIdService;
+
+    /**
+     * Dirs currently advertised by the server — exposed for the CLI {@code add} command.
+     */
     public static List<String> serverDirs = new ArrayList<>();
 
+    // ── Config ────────────────────────────────────────────────────────────────
     @Value("${sync.server.host:localhost}")
     private String serverHost;
 
@@ -78,8 +101,11 @@ public class ClientSyncService {
     @Value("${sync.socket.password}")
     private String keystorePassword;
 
+    // ── State ─────────────────────────────────────────────────────────────────
     private volatile boolean running = false;
     private SSLSocket socket;
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     /**
      * Starts the virtual thread that drives the connect-and-sync loop.
@@ -92,7 +118,7 @@ public class ClientSyncService {
     }
 
     /**
-     * Signals the receive loop to stop and closes the underlying SSL socket.
+     * Signals the poll loop to stop and closes the underlying SSL socket.
      * Invoked automatically by Spring during application shutdown.
      */
     @PreDestroy
@@ -108,14 +134,12 @@ public class ClientSyncService {
      */
     public void reconnect() {
         log.info("Reconnect requested — dropping current connection to re-poll server dirs");
-        running = false;
         closeSocket();
     }
 
     /**
      * Sends a {@code SHUTDOWN} signal to the server over the existing mTLS socket,
-     * asking it to terminate. Use this from the client site when you need to remotely
-     * stop the server process.
+     * asking it to terminate.
      *
      * <p>If the socket is not currently connected, the call is a no-op and a warning
      * is logged.
@@ -135,24 +159,12 @@ public class ClientSyncService {
         }
     }
 
-    /**
-     * Closes the SSL socket, suppressing any {@link IOException} that may occur
-     * during the close operation.
-     */
-    private void closeSocket() {
-        try {
-            if (socket != null && !socket.isClosed()) {
-                socket.close();
-            }
-        } catch (IOException e) {
-            log.warn("Error closing socket", e);
-        }
-    }
+    // ── Connect-and-sync loop ─────────────────────────────────────────────────
 
     /**
      * Main sync loop: connects to the server, performs the handshake, and then
-     * delegates to {@link #receiveLoop} to process incoming events.
-     * Reconnects automatically on {@link IOException} with a 5-second back-off.
+     * enters the poll loop. Reconnects automatically on {@link IOException} with
+     * a 5-second back-off.
      */
     private void connectAndSync() {
         while (running) {
@@ -163,43 +175,41 @@ public class ClientSyncService {
                 var out = new DataOutputStream(socket.getOutputStream());
                 var in = new DataInputStream(socket.getInputStream());
 
-                // Step 1: read available dirs advertised by the server
+                // 1 — read available dirs advertised by the server
                 List<String> availableDirs = readAvailableDirs(in);
                 log.info("Server advertises {} dir(s): {}", availableDirs.size(), availableDirs);
 
-                // Step 2: decide which dirs to subscribe to.
-                // If client has no dirs configured, print what the server offers and wait
-                // for the user to subscribe via CLI — without dropping the connection.
-                List<String> configuredDirs = syncStateService.retrieveAllInSyncDirs();
+                // 2 — wait for the user to subscribe if nothing is configured yet
+                List<String> configuredDirs = rootDirService.retrieveAllInSyncDirs();
                 if (configuredDirs.isEmpty()) {
                     printAvailableDirs(availableDirs);
                     while (running) {
                         sleep(7_000);
-
-                        configuredDirs = syncStateService.retrieveAllInSyncDirs();
-                        if (!configuredDirs.isEmpty()) {
-                            break;
-                        }
+                        configuredDirs = rootDirService.retrieveAllInSyncDirs();
+                        if (!configuredDirs.isEmpty()) break;
                     }
                 }
 
                 List<String> staleDirs = getStaleDirs(availableDirs, configuredDirs);
-                syncStateService.removeStaleDirs(staleDirs);
+                rootDirService.removeStaleDirs(staleDirs);
 
                 List<String> dirsToSync = availableDirs.stream()
                         .filter(configuredDirs::contains)
                         .toList();
 
                 if (dirsToSync.isEmpty()) {
-                    log.warn("No matching dirs between server and client config. Server has: {}, client wants: {}",
+                    log.warn("No matching dirs between server and client config. Server: {}, client wants: {}",
                             availableDirs, configuredDirs);
                 }
 
-                // Step 3: register dirs locally, audit for missing files, then send handshake
+                // 3 — register dirs, audit disk, send hardwareId + handshake
                 registerDirs(dirsToSync);
                 auditMissingFiles(dirsToSync);
+                sendHardwareId(out);
                 sendHandshake(out, dirsToSync);
-                receiveLoop(in, out);
+
+                // 4 — poll loop
+                pollLoop(in, out, dirsToSync);
 
             } catch (IOException e) {
                 if (running) {
@@ -212,6 +222,213 @@ public class ClientSyncService {
             }
         }
     }
+
+    // ── Handshake helpers ─────────────────────────────────────────────────────
+
+    /**
+     * Reads the list of root directory names advertised by the server.
+     *
+     * <p>Wire format:
+     * <pre>
+     * [4 bytes] count
+     * per dir:
+     *   [4 bytes] name length
+     *   [N bytes] name (UTF-8)
+     * </pre>
+     *
+     * @param in the server input stream
+     * @return list of directory names
+     * @throws IOException if reading fails
+     */
+    private List<String> readAvailableDirs(DataInputStream in) throws IOException {
+        int count = in.readInt();
+        List<String> dirs = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            int len = in.readInt();
+            dirs.add(new String(in.readNBytes(len), StandardCharsets.UTF_8));
+        }
+        return dirs;
+    }
+
+    /**
+     * Sends the client's stable hardware ID to the server immediately after the
+     * available-dirs advertisement.
+     *
+     * <p>Wire format: {@code [4 bytes] id length, [N bytes] id (UTF-8)}
+     *
+     * @param out the server output stream
+     * @throws IOException if writing fails
+     */
+    private void sendHardwareId(DataOutputStream out) throws IOException {
+        byte[] idBytes = hardwareIdService.getHardwareId().getBytes(StandardCharsets.UTF_8);
+        out.writeInt(idBytes.length);
+        out.write(idBytes);
+        out.flush();
+        log.info("Sent hardwareId to server: {}", hardwareIdService.getHardwareId());
+    }
+
+    /**
+     * Registers each directory in the local sync state with a {@code -1} starting version
+     * if it is not already present. Safe to call on every connect.
+     *
+     * @param dirs list of directory names to register
+     */
+    private void registerDirs(List<String> dirs) {
+        dirs.forEach(rootDirService::registerIfAbsent);
+    }
+
+    /**
+     * Audits the local mirror against the database of synced-file records.
+     * Any file previously acknowledged but no longer present on disk causes the
+     * directory's sync version to be reset to {@code -1} so the server re-sends it.
+     *
+     * @param dirs list of directory names to audit
+     */
+    private void auditMissingFiles(List<String> dirs) {
+        Path mirrorRoot = Path.of(mirrorDir);
+        for (String dirName : dirs) {
+            List<String> recorded = fileMetadataService.findAllByDir(dirName);
+            List<String> missing = recorded.stream()
+                    .filter(rel -> !Files.exists(mirrorRoot.resolve(rel)))
+                    .toList();
+            if (!missing.isEmpty()) {
+                log.warn("Dir '{}': {} file(s) missing from disk — resetting sync version: {}",
+                        dirName, missing.size(), missing);
+                rootDirService.resetSyncVersionForDir(dirName);
+                missing.forEach(rel -> fileMetadataService.removeRecord(dirName, rel));
+            }
+        }
+    }
+
+    /**
+     * Sends the subscription handshake to the server.
+     *
+     * <p>Wire format:
+     * <pre>
+     * [4 bytes] count
+     * per entry:
+     *   [4 bytes] name length
+     *   [N bytes] name (UTF-8)
+     *   [8 bytes] lastSyncVersion (long)
+     * </pre>
+     *
+     * @param out        the server output stream
+     * @param dirsToSync directories to subscribe to
+     * @throws IOException if writing fails
+     */
+    private void sendHandshake(DataOutputStream out, List<String> dirsToSync) throws IOException {
+        var syncSet = new java.util.HashSet<>(dirsToSync);
+        List<SyncHandshakeEntry> entries = rootDirService.findAll().stream()
+                .filter(e -> syncSet.contains(e.dirName()))
+                .toList();
+
+        out.writeInt(entries.size());
+        for (SyncHandshakeEntry entry : entries) {
+            byte[] nameBytes = entry.dirName().getBytes(StandardCharsets.UTF_8);
+            out.writeInt(nameBytes.length);
+            out.write(nameBytes);
+            out.writeLong(entry.lastSyncVersion());
+        }
+        out.flush();
+        log.info("Handshake sent: {} dir(s): {}", entries.size(), dirsToSync);
+    }
+
+    // ── Poll loop ─────────────────────────────────────────────────────────────
+
+    /**
+     * Polls the server every {@value #POLL_INTERVAL_MS} ms for each subscribed directory.
+     * For each directory:
+     * <ol>
+     *   <li>Sends a {@code POLL} request with the last known sync version.</li>
+     *   <li>Reads the response records.</li>
+     *   <li>Writes live files to disk or deletes soft-deleted files.</li>
+     *   <li>Sends a {@code DELETE_ACK} for each deleted file.</li>
+     *   <li>Persists the highest received {@code syncVersion}.</li>
+     * </ol>
+     *
+     * @param in         the server input stream
+     * @param out        the server output stream
+     * @param dirsToSync the directories to poll
+     * @throws IOException if reading or writing fails (triggers reconnect)
+     */
+    private void pollLoop(DataInputStream in, DataOutputStream out,
+                          List<String> dirsToSync) throws IOException {
+        while (running) {
+            for (String dirName : dirsToSync) {
+                long lastVersion = rootDirService.findAll().stream()
+                        .filter(e -> e.dirName().equals(dirName))
+                        .mapToLong(SyncHandshakeEntry::lastSyncVersion)
+                        .findFirst()
+                        .orElse(-1L);
+
+                // Send poll request
+                byte[] nameBytes = dirName.getBytes(StandardCharsets.UTF_8);
+                out.writeByte(POLL);
+                out.writeInt(nameBytes.length);
+                out.write(nameBytes);
+                out.writeLong(lastVersion);
+                out.flush();
+
+                // Read response
+                int count = in.readInt();
+                long highestVersion = lastVersion;
+
+                for (int i = 0; i < count; i++) {
+                    byte flags = in.readByte();
+                    int pathLen = in.readInt();
+                    String relPath = new String(in.readNBytes(pathLen), StandardCharsets.UTF_8);
+                    long syncVersion = in.readLong();
+                    long fileSize = in.readLong();
+
+                    boolean deleted = (flags & FLAG_DELETED) != 0;
+                    // relPath = "dirName/rest/of/path" — resolve under mirror
+                    Path target = Path.of(mirrorDir).resolve(relPath).normalize();
+                    // dirName is the first component of relPath
+                    String dir = Path.of(relPath).getName(0).toString();
+
+                    if (deleted) {
+                        Files.deleteIfExists(target);
+                        fileMetadataService.removeRecord(dir, relPath);
+                        log.info("Deleted: {}", relPath);
+
+                        // ACK the delete so server can remove from client_ids
+                        byte[] ackPathBytes = relPath.getBytes(StandardCharsets.UTF_8);
+                        out.writeByte(DELETE_ACK);
+                        out.writeInt(ackPathBytes.length);
+                        out.write(ackPathBytes);
+                        out.flush();
+                    } else {
+                        byte[] fileBytes = in.readNBytes((int) fileSize);
+                        Files.createDirectories(target.getParent());
+                        Files.write(target, fileBytes);
+                        fileMetadataService.recordSynced(dir, relPath);
+                        log.info("Written: {} ({} bytes, v{})", relPath, fileSize, syncVersion);
+                    }
+
+                    if (syncVersion > highestVersion) highestVersion = syncVersion;
+                }
+
+                if (highestVersion > lastVersion) {
+                    rootDirService.updateSyncVersion(dirName, highestVersion);
+                }
+            }
+
+            // Check for server-initiated signals (non-blocking: peek at available bytes)
+            if (in.available() > 0) {
+                byte signal = in.readByte();
+                if (signal == RESUME_SERVER_MODE) {
+                    log.info("RESUME_SERVER_MODE received — exiting with code 2 to restart as server");
+                    System.exit(2);
+                } else {
+                    log.warn("Unexpected byte from server outside poll: {}", signal);
+                }
+            }
+
+            sleep(POLL_INTERVAL_MS);
+        }
+    }
+
+    // ── Utility ───────────────────────────────────────────────────────────────
 
     /**
      * Prints the list of directories available on the server to stdout, along with
@@ -232,165 +449,37 @@ public class ClientSyncService {
             serverDirs = availableDirs;
         }
         System.out.println();
-        System.out.println("  Use add command with dir indices");
-        System.out.println("  e.g. 'add 1' or 'add 2,3' to subscribe to the first dir, or the second and third dirs.");
+        System.out.println("  Use the 'add' command with dir indices, e.g. 'add 1' or 'add 2,3'");
         System.out.println();
     }
 
     /**
-     * Reads the list of available root directory names advertised by the server.
+     * Returns directories the client is tracking that are no longer offered by the server.
      *
-     * <p>Wire format:
-     * <pre>
-     * [4 bytes] number of dirs (int)
-     * per dir:
-     *   [4 bytes] name length (int)
-     *   [N bytes] name (UTF-8)
-     * </pre>
-     *
-     * @param in the data input stream connected to the server
-     * @return list of directory names
-     * @throws IOException if reading from the stream fails
+     * @param availableServerDirs directories currently advertised by the server
+     * @param clientListeningDirs directories the client is currently tracking
+     * @return list of directory names to purge
      */
-    private List<String> readAvailableDirs(DataInputStream in) throws IOException {
-        int count = in.readInt();
-        List<String> dirs = new ArrayList<>(count);
-        for (int i = 0; i < count; i++) {
-            int len = in.readInt();
-            dirs.add(new String(in.readNBytes(len), StandardCharsets.UTF_8));
-        }
-        return dirs;
-    }
-
-    /**
-     * Registers each directory in the local sync state (with a {@code -1} starting version)
-     * if it is not already present. Safe to call on every connect.
-     *
-     * @param dirs list of directory names to register
-     */
-    private void registerDirs(List<String> dirs) {
-        for (String dirName : dirs) {
-            syncStateService.registerIfAbsent(dirName);
-        }
-    }
-
-    /**
-     * Audits the local mirror against the database of synced-file records.
-     * Any file that was previously acknowledged but is no longer present on disk causes the
-     * entire directory's sync version to be reset to {@code -1}, so the server re-sends the
-     * missing files on the next connection. The stale DB records for the missing files are
-     * also removed.
-     *
-     * @param dirs list of directory names to audit
-     */
-    private void auditMissingFiles(List<String> dirs) {
-        Path mirrorRoot = Path.of(mirrorDir);
-        for (String dirName : dirs) {
-            List<String> recorded = syncedFileRepository.findAllByDir(dirName);
-            List<String> missing = recorded.stream()
-                    .filter(rel -> !Files.exists(mirrorRoot.resolve(rel)))
-                    .toList();
-            if (!missing.isEmpty()) {
-                log.warn("Dir '{}': {} file(s) missing from disk — resetting sync version to force re-sync: {}",
-                        dirName, missing.size(), missing);
-                syncStateService.resetSyncVersionForDir(dirName);
-                missing.forEach(rel -> syncedFileRepository.delete(dirName, rel));
-            }
-        }
-    }
-
-    /**
-     * Sends the subscription handshake to the server.
-     *
-     * <p>Wire format:
-     * <pre>
-     * [4 bytes] number of entries (int)
-     * per entry:
-     *   [4 bytes] dir name length (int)
-     *   [N bytes] dir name (UTF-8)
-     *   [8 bytes] lastSyncVersion (long)
-     * </pre>
-     *
-     * @param out        the data output stream connected to the server
-     * @param dirsToSync the directories the client wants to subscribe to
-     * @throws IOException if writing to the stream fails
-     */
-    private void sendHandshake(DataOutputStream out, List<String> dirsToSync) throws IOException {
-        Set<String> syncSet = new HashSet<>(dirsToSync);
-        List<SyncHandshakeEntry> entries = syncStateService.findAll().stream()
-                .filter(e -> syncSet.contains(e.dirName()))
+    private List<String> getStaleDirs(List<String> availableServerDirs,
+                                      List<String> clientListeningDirs) {
+        return clientListeningDirs.stream()
+                .filter(dir -> !availableServerDirs.contains(dir))
                 .toList();
-
-        out.writeInt(entries.size());
-        for (SyncHandshakeEntry entry : entries) {
-            byte[] nameBytes = entry.dirName().getBytes(StandardCharsets.UTF_8);
-            out.writeInt(nameBytes.length);
-            out.write(nameBytes);
-            out.writeLong(entry.lastSyncVersion());
-        }
-        out.flush();
-        log.info("Handshake sent: {} dir(s): {}", entries.size(), dirsToSync);
     }
 
     /**
-     * Processes incoming events from the server until the connection is lost or
-     * {@link #running} is set to {@code false}.
-     *
-     * <p>For each event the method:
-     * <ol>
-     *   <li>Reads the event type, path, sync version, and file-size header.</li>
-     *   <li>Writes or deletes the file in the mirror directory.</li>
-     *   <li>Persists the new sync version locally.</li>
-     *   <li>Sends an {@code ACK} with the sync version back to the server.</li>
-     * </ol>
-     *
-     * @param in  the data input stream connected to the server
-     * @param out the data output stream connected to the server
-     * @throws IOException if reading from or writing to the stream fails
+     * Closes the SSL socket, suppressing any {@link IOException}.
      */
-    private void receiveLoop(DataInputStream in, DataOutputStream out) throws IOException {
-        while (running) {
-            byte eventType = in.readByte();
-
-            if (eventType == RESUME_SERVER_MODE) {
-                log.info("Resume-server-mode signal received from server — exiting with code 2 to restart as server");
-                System.exit(2);
-            }
-
-            int pathLen = in.readInt();
-            String relPath = new String(in.readNBytes(pathLen), StandardCharsets.UTF_8);
-            long syncVersion = in.readLong();
-            long fileSize = in.readLong();
-
-            Path target = Path.of(mirrorDir).resolve(relPath).normalize();
-            // first component of relPath is the dir name (e.g. "photos" from "photos/img.jpg")
-            String dirName = Path.of(relPath).getName(0).toString();
-
-            if (eventType == EVENT_DELETE) {
-                Files.deleteIfExists(target);
-                syncedFileRepository.delete(dirName, relPath);
-                log.info("Deleted: {}", relPath);
-            } else {
-                byte[] fileBytes = in.readNBytes((int) fileSize);
-                Files.createDirectories(target.getParent());
-                Files.write(target, fileBytes);
-                syncedFileRepository.upsert(dirName, relPath);
-                log.info("Written: {} ({} bytes, v{})", relPath, fileSize, syncVersion);
-            }
-
-            // Persist local state first, then ACK the server
-            syncStateService.updateSyncVersion(dirName, syncVersion);
-
-            out.writeByte(ACK);
-            out.writeLong(syncVersion);
-            out.flush();
+    private void closeSocket() {
+        try {
+            if (socket != null && !socket.isClosed()) socket.close();
+        } catch (IOException e) {
+            log.warn("Error closing socket", e);
         }
     }
 
     /**
-     * Builds a mutually-authenticated TLS socket connected to the configured server host and port.
-     * Loads both the client keystore (for client-auth) and the truststore (for server verification)
-     * from the configured resources.
+     * Builds a mutually-authenticated TLS socket connected to the configured server.
      *
      * @return a connected {@link SSLSocket}
      * @throws Exception if the SSL context cannot be built or the connection fails
@@ -399,13 +488,13 @@ public class ClientSyncService {
         char[] password = keystorePassword.toCharArray();
 
         KeyStore keyStore = KeyStore.getInstance("PKCS12");
-        try (var in = keystoreResource.getInputStream()) {
-            keyStore.load(in, password);
+        try (var is = keystoreResource.getInputStream()) {
+            keyStore.load(is, password);
         }
 
         KeyStore trustStore = KeyStore.getInstance("PKCS12");
-        try (var in = truststoreResource.getInputStream()) {
-            trustStore.load(in, password);
+        try (var is = truststoreResource.getInputStream()) {
+            trustStore.load(is, password);
         }
 
         var kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
@@ -431,19 +520,5 @@ public class ClientSyncService {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
-    }
-
-    /**
-     * Returns the directories that the client is configured to track but that are
-     * no longer offered by the server. These should be purged from the local mirror.
-     *
-     * @param availableServerDirs directories currently advertised by the server
-     * @param clientListeningDirs directories the client is currently tracking
-     * @return list of directory names present on the client but absent from the server
-     */
-    private List<String> getStaleDirs(List<String> availableServerDirs, List<String> clientListeningDirs) {
-        return clientListeningDirs.stream()
-                .filter(dir -> !availableServerDirs.contains(dir))
-                .toList();
     }
 }

@@ -40,42 +40,25 @@ public class SchemaInitializer implements ApplicationRunner {
 
         jdbcTemplate.execute("""
                 CREATE TABLE IF NOT EXISTS file_metadata (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    filename TEXT NOT NULL,
-                    root_dir_id INTEGER NOT NULL REFERENCES root_dir(id) ON DELETE CASCADE,
-                    relative_path TEXT NOT NULL,
-                    checksum TEXT NOT NULL,
-                    file_size INTEGER NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    sync_version INTEGER,
+                    id            INTEGER  PRIMARY KEY AUTOINCREMENT,
+                    filename      TEXT     NOT NULL,
+                    root_dir_id   INTEGER  NOT NULL REFERENCES root_dir(id) ON DELETE CASCADE,
+                    relative_path TEXT     NOT NULL,
+                    checksum      TEXT     NOT NULL,
+                    file_size     INTEGER  NOT NULL,
+                    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    modified_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    sync_version  INTEGER,
+                    deleted       BOOLEAN  NOT NULL DEFAULT FALSE,
+                    client_ids    TEXT,
                     UNIQUE (root_dir_id, relative_path)
                 )
                 """);
 
-        jdbcTemplate.execute("""
-                CREATE TABLE IF NOT EXISTS sync_log (
-                    version INTEGER PRIMARY KEY AUTOINCREMENT,
-                    status TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                """);
-
-        jdbcTemplate.execute("""
-                CREATE TABLE IF NOT EXISTS deleted_files (
-                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                    root_dir_id   INTEGER NOT NULL REFERENCES root_dir(id) ON DELETE CASCADE,
-                    relative_path TEXT    NOT NULL,
-                    sync_version  INTEGER NOT NULL,
-                    deleted_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE (root_dir_id, relative_path)
-                )
-                """);
-
-        jdbcTemplate.execute("""
-                CREATE INDEX IF NOT EXISTS idx_deleted_files_root_dir_sync_version
-                    ON deleted_files (root_dir_id, sync_version)
-                """);
+        // Migrate existing databases — add new columns if they are not present yet.
+        // SQLite does not support IF NOT EXISTS on ALTER TABLE, so we guard via pragma.
+        addColumnIfAbsent("file_metadata", "deleted", "BOOLEAN NOT NULL DEFAULT FALSE");
+        addColumnIfAbsent("file_metadata", "client_ids", "TEXT");
 
         createTriggerIfNotExists("update_root_dir_modified_at", """
                 CREATE TRIGGER update_root_dir_modified_at
@@ -112,6 +95,28 @@ public class SchemaInitializer implements ApplicationRunner {
                 Integer.class, triggerName);
         if (count == null || count == 0) {
             jdbcTemplate.execute(createSql);
+        }
+    }
+
+    /**
+     * Adds a column to an existing table only if it is not already present.
+     * SQLite does not support {@code ALTER TABLE … ADD COLUMN IF NOT EXISTS}, so we
+     * inspect {@code PRAGMA table_info} as a guard.
+     *
+     * @param table      table name
+     * @param column     column name to add
+     * @param definition SQL type + constraints for the new column
+     */
+    private void addColumnIfAbsent(String table, String column, String definition) {
+        var columns = jdbcTemplate.queryForList(
+                "PRAGMA table_info(" + table + ")", String.class);
+        boolean exists = jdbcTemplate.queryForList("PRAGMA table_info(" + table + ")")
+                .stream()
+                .anyMatch(row -> column.equalsIgnoreCase((String) row.get("name")));
+        if (!exists) {
+            jdbcTemplate.execute(
+                    "ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
+            log.info("Migrated {}: added column '{}'", table, column);
         }
     }
 }

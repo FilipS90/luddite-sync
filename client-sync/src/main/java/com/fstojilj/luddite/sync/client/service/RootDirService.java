@@ -1,6 +1,6 @@
 package com.fstojilj.luddite.sync.client.service;
 
-import com.fstojilj.luddite.sync.client.repository.SyncStateRepository;
+import com.fstojilj.luddite.sync.client.repository.RootDirRepository;
 import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,18 +17,18 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.List;
 
 /**
- * Manages the client-side synchronisation state, including which directories are being
- * tracked, their last known sync versions, and the local mirror on disk.
+ * Manages the client-side synchronisation state: which server root directories are being
+ * tracked, and the last acknowledged sync version for each.
  *
- * <p>Sync state is persisted via {@link SyncStateRepository} so that the client can
- * resume an interrupted sync without re-downloading files it already has.
+ * <p>State is persisted via {@link RootDirRepository} (the {@code root_dirs} SQLite table)
+ * so the client can resume an interrupted sync without re-downloading files it already has.
  */
 @RequiredArgsConstructor
 @Slf4j
 @Service
-public class SyncStateService {
+public class RootDirService {
 
-    private final SyncStateRepository syncStateRepository;
+    private final RootDirRepository rootDirRepository;
 
     @Value("${sync.client.mirror-dir}")
     private String mirrorDirPath;
@@ -41,10 +41,9 @@ public class SyncStateService {
      */
     public void removeStaleDirs(List<String> staleDirs) {
         staleDirs.forEach(dir -> {
-            var dirPath = Path.of(mirrorDirPath, dir);
+            Path dirPath = Path.of(mirrorDirPath, dir);
             try {
                 Files.walkFileTree(dirPath, new SimpleFileVisitor<>() {
-
                     @Override
                     public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                         Files.delete(file);
@@ -52,8 +51,8 @@ public class SyncStateService {
                     }
 
                     @Override
-                    public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
-                        Files.delete(dir);
+                    public FileVisitResult postVisitDirectory(Path d, IOException exc) throws IOException {
+                        Files.delete(d);
                         return FileVisitResult.CONTINUE;
                     }
                 });
@@ -62,16 +61,15 @@ public class SyncStateService {
             }
             removeDirectory(dir);
         });
-
     }
 
     /**
      * Returns the names of all directories currently registered in the local sync state.
      *
-     * @return list of directory names that the client is tracking
+     * @return list of directory names the client is tracking
      */
     public List<String> retrieveAllInSyncDirs() {
-        return syncStateRepository.findAll().stream()
+        return rootDirRepository.findAll().stream()
                 .map(SyncHandshakeEntry::dirName)
                 .toList();
     }
@@ -83,17 +81,17 @@ public class SyncStateService {
      * @param directory the directory name to remove
      */
     public void removeDirectory(String directory) {
-        syncStateRepository.remove(directory);
+        rootDirRepository.remove(directory);
     }
 
     /**
-     * Returns all sync-state entries, each containing the directory name and the
-     * last sync version acknowledged by this client.
+     * Returns all sync-state entries, each containing a directory name and the last
+     * sync version acknowledged by this client.
      *
      * @return list of {@link SyncHandshakeEntry} records
      */
     public List<SyncHandshakeEntry> findAll() {
-        return syncStateRepository.findAll();
+        return rootDirRepository.findAll();
     }
 
     /**
@@ -103,17 +101,17 @@ public class SyncStateService {
      * @param dirName the directory whose sync version should be reset
      */
     public void resetSyncVersionForDir(String dirName) {
-        syncStateRepository.reset(dirName);
+        rootDirRepository.reset(dirName);
     }
 
     /**
      * Registers a directory in the local sync state with a starting sync version of
      * {@code -1} if it is not already present. Safe to call multiple times.
      *
-     * @param dirName the directories name to register
+     * @param dirName the directory name to register
      */
     public void registerIfAbsent(String dirName) {
-        syncStateRepository.registerIfAbsent(dirName);
+        rootDirRepository.registerIfAbsent(dirName);
     }
 
     /**
@@ -124,6 +122,7 @@ public class SyncStateService {
      * @param syncVersion the new sync version to persist
      */
     public void updateSyncVersion(String dirName, long syncVersion) {
-        syncStateRepository.updateSyncVersion(dirName, syncVersion);
+        rootDirRepository.updateSyncVersion(dirName, syncVersion);
     }
 }
+
