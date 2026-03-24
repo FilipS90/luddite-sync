@@ -336,15 +336,22 @@ public class SyncPollService {
             log.debug("Poll from '{}' for dir '{}' since v{}: {} record(s)",
                     hardwareId, dirName, lastSyncVersion, changed.size());
 
-            // Build payload list, skipping files that have vanished from disk (Bug 2 fix)
-            record PollRecord(FileMetadata meta, byte[] bytes) {
+            // Build payload: mint a syncVersion for every record that doesn't have one yet.
+            // Versions are NOT stamped on the DB until the response has been fully written
+            // to the wire — a client crash mid-transfer leaves sync_version = null so the
+            // file is re-sent on the next poll.
+            record PollRecord(FileMetadata meta, long syncVersion, byte[] bytes) {
             }
             List<PollRecord> payload = new ArrayList<>();
 
             for (FileMetadata meta : changed) {
+                // Mint once here — used both in the wire write and the post-flush DB stamp
+                long version = meta.syncVersion() != null
+                        ? meta.syncVersion()
+                        : fileMetadataService.nextSyncVersion();
+
                 if (meta.deleted()) {
-                    // Soft-deleted — send tombstone, no bytes needed
-                    payload.add(new PollRecord(meta, new byte[0]));
+                    payload.add(new PollRecord(meta, version, new byte[0]));
                 } else {
                     String relNorm = meta.relativePath().replaceAll("^[/\\\\]+", "");
                     Path absPath = Path.of(rootAbsPath).resolve(relNorm);
@@ -355,16 +362,11 @@ public class SyncPollService {
                         log.warn("Poll: file no longer on disk, skipping '{}': {}", absPath, e.getMessage());
                         continue;
                     }
-                    payload.add(new PollRecord(meta, fileBytes));
-                }
-
-                // Stamp sync version if this record has never been delivered
-                if (meta.syncVersion() == null) {
-                    long v = fileMetadataService.nextSyncVersion();
-                    fileMetadataService.stampSyncVersion(rootDirId, meta.relativePath(), v);
+                    payload.add(new PollRecord(meta, version, fileBytes));
                 }
             }
 
+            // Write the full response to the wire first
             synchronized (out) {
                 out.writeInt(payload.size());
                 for (PollRecord rec : payload) {
@@ -376,15 +378,21 @@ public class SyncPollService {
                     out.writeByte(flags);
                     out.writeInt(pathBytes.length);
                     out.write(pathBytes);
-                    out.writeLong(rec.meta().syncVersion() != null
-                            ? rec.meta().syncVersion()
-                            : fileMetadataService.nextSyncVersion());
+                    out.writeLong(rec.syncVersion());
                     out.writeLong(rec.bytes().length);
                     if (!rec.meta().deleted()) {
                         out.write(rec.bytes());
                     }
                 }
                 out.flush();
+            }
+
+            // Only after the response is on the wire: stamp sync_version on rows that
+            // were null, so future polls skip them.
+            for (PollRecord rec : payload) {
+                if (rec.meta().syncVersion() == null) {
+                    fileMetadataService.stampSyncVersion(rootDirId, rec.meta().relativePath(), rec.syncVersion());
+                }
             }
 
             if (!payload.isEmpty()) {
