@@ -289,15 +289,32 @@ public class ClientSyncService {
     private void auditMissingFiles(List<String> dirs) {
         Path mirrorRoot = Path.of(mirrorDir);
         for (String dirName : dirs) {
+            Path dirPath = mirrorRoot.resolve(dirName);
+
+            // If the entire directory is absent, reset everything for this dir
+            if (!Files.exists(dirPath)) {
+                log.warn("Dir '{}': mirror directory missing entirely — resetting sync version", dirName);
+                rootDirService.resetSyncVersionForDir(dirName);
+                fileMetadataService.findAllByDir(dirName)
+                        .forEach(rel -> fileMetadataService.purgeRecord(dirName, rel));
+                continue;
+            }
+
+            // Walk all recorded paths (includes subdirectory files) and find missing ones
             List<String> recorded = fileMetadataService.findAllByDir(dirName);
             List<String> missing = recorded.stream()
-                    .filter(rel -> !Files.exists(mirrorRoot.resolve(rel)))
+                    .filter(rel -> {
+                        // rel is a qualified path like "dirName/subdir/file.txt"
+                        // resolve it under mirrorRoot to get the full path
+                        Path filePath = mirrorRoot.resolve(rel).normalize();
+                        return !Files.exists(filePath);
+                    })
                     .toList();
+
             if (!missing.isEmpty()) {
-                log.warn("Dir '{}': {} file(s) missing from disk — resetting sync version: {}",
+                log.warn("Dir '{}': {} file(s) missing from disk (including subdirs) — resetting sync version: {}",
                         dirName, missing.size(), missing);
                 rootDirService.resetSyncVersionForDir(dirName);
-                // File is already gone from disk — only purge the DB record, do not attempt disk delete
                 missing.forEach(rel -> fileMetadataService.purgeRecord(dirName, rel));
             }
         }

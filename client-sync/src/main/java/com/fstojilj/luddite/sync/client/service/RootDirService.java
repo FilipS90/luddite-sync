@@ -2,17 +2,13 @@ package com.fstojilj.luddite.sync.client.service;
 
 import com.fstojilj.luddite.sync.client.repository.RootDirRepository;
 import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
+import com.fstojilj.luddite.sync.common.util.FileSystemUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
-import java.nio.file.FileVisitResult;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.util.List;
 
 /**
@@ -50,42 +46,9 @@ public class RootDirService {
     public void removeStaleDirs(List<String> staleDirs) {
         for (String dir : staleDirs) {
             Path dirPath = Path.of(mirrorDirPath).resolve(dir);
-
-            if (Files.exists(dirPath)) {
-                try {
-                    Files.walkFileTree(dirPath, new SimpleFileVisitor<>() {
-                        @Override
-                        public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                            Files.delete(file);
-                            log.info("Deleted stale file: {}", file);
-                            return FileVisitResult.CONTINUE;
-                        }
-
-                        @Override
-                        public FileVisitResult visitFileFailed(Path file, IOException exc) {
-                            log.warn("Could not delete stale file '{}': {}", file, exc.getMessage());
-                            return FileVisitResult.CONTINUE;
-                        }
-
-                        @Override
-                        public FileVisitResult postVisitDirectory(Path d, IOException exc) throws IOException {
-                            Files.delete(d);
-                            log.debug("Deleted stale directory: {}", d);
-                            return FileVisitResult.CONTINUE;
-                        }
-                    });
-                } catch (IOException e) {
-                    log.error("Error while removing stale dir '{}' from disk: {}", dirPath, e.getMessage(), e);
-                }
-            } else {
-                log.warn("Stale dir '{}' not found on disk — skipping disk cleanup", dirPath);
-            }
-
-            // Clean up all local file_metadata records for this directory
+            FileSystemUtils.deleteDirectoryRecursively(dirPath);
             fileMetadataService.findAllByDir(dir)
                     .forEach(rel -> fileMetadataService.removeRecord(dir, rel));
-
-            // Remove the root_dirs entry
             removeDirectory(dir);
             log.info("Removed stale dir from sync state: '{}'", dir);
         }
@@ -103,12 +66,13 @@ public class RootDirService {
     }
 
     /**
-     * Removes a single directory from the local sync state without touching the mirror on disk.
-     * Use {@link #removeStaleDirs} if you also need to delete files from disk.
+     * Removes a single directory from the local sync state and deletes it from disk.
      *
      * @param directory the directory name to remove
      */
     public void removeDirectory(String directory) {
+        Path dirPath = Path.of(mirrorDirPath).resolve(directory);
+        FileSystemUtils.deleteDirectoryRecursively(dirPath);
         rootDirRepository.remove(directory);
     }
 
@@ -153,4 +117,3 @@ public class RootDirService {
         rootDirRepository.updateSyncVersion(dirName, syncVersion);
     }
 }
-
