@@ -27,7 +27,7 @@ public class SchemaInitializer implements ApplicationRunner {
         jdbcTemplate.execute("""
                 CREATE TABLE IF NOT EXISTS root_dirs (
                     dir_name          TEXT    PRIMARY KEY NOT NULL,
-                    last_sync_version INTEGER NOT NULL DEFAULT -1
+                    last_sync_version BIGINT NOT NULL DEFAULT -1
                 )
                 """);
 

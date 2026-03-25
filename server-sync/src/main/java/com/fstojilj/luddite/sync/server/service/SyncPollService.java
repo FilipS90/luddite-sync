@@ -276,7 +276,7 @@ public class SyncPollService {
                     case POLL -> {
                         int nameLen = in.readInt();
                         String dirName = new String(in.readNBytes(nameLen), StandardCharsets.UTF_8);
-                        long lastSyncVersion = in.readLong();
+                        Long lastSyncVersion = in.readLong();
                         handlePoll(finalOut, dirName, lastSyncVersion, finalHardwareId);
                     }
                     case DELETE_ACK -> {
@@ -325,16 +325,14 @@ public class SyncPollService {
      * @throws IOException if writing to the stream fails
      */
     private void handlePoll(DataOutputStream out, String dirName,
-                            long lastSyncVersion, String hardwareId) throws IOException {
+                            Long lastSyncVersion, String hardwareId) throws IOException {
         pollLock.lock();
         try {
             var rootDirOpt = rootDirRepository.findByName(dirName);
             if (rootDirOpt.isEmpty()) {
                 log.warn("Poll from '{}' for unknown dir '{}', sending empty response", hardwareId, dirName);
-                synchronized (out) {
-                    out.writeInt(0);
-                    out.flush();
-                }
+                out.writeInt(0);
+                out.flush();
                 return;
             }
 
@@ -345,10 +343,6 @@ public class SyncPollService {
             log.debug("Poll from '{}' for dir '{}' since v{}: {} record(s)",
                     hardwareId, dirName, lastSyncVersion, changed.size());
 
-            // Build payload: mint a syncVersion for every record that doesn't have one yet.
-            // Versions are NOT stamped on the DB until the response has been fully written
-            // to the wire — a client crash mid-transfer leaves sync_version = null so the
-            // file is re-sent on the next poll.
             List<PollRecord> payload = new ArrayList<>();
 
             for (FileMetadata meta : changed) {
@@ -374,28 +368,24 @@ public class SyncPollService {
             }
 
             // Write the full response to the wire first
-            synchronized (out) {
-                out.writeInt(payload.size());
-                for (PollRecord rec : payload) {
-                    String relNorm = rec.meta().relativePath().replaceAll("^[/\\\\]+", "");
-                    String qualifiedPath = dirName + "/" + relNorm;
-                    byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
+            out.writeInt(payload.size());
+            for (PollRecord rec : payload) {
+                String relNorm = rec.meta().relativePath().replaceAll("^[/\\\\]+", "");
+                String qualifiedPath = dirName + "/" + relNorm;
+                byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
 
-                    byte flags = rec.meta().deleted() ? FLAG_DELETED : 0;
-                    out.writeByte(flags);
-                    out.writeInt(pathBytes.length);
-                    out.write(pathBytes);
-                    out.writeLong(rec.syncVersion());
-                    out.writeLong(rec.bytes().length);
-                    if (!rec.meta().deleted()) {
-                        out.write(rec.bytes());
-                    }
+                byte flags = rec.meta().deleted() ? FLAG_DELETED : 0;
+                out.writeByte(flags);
+                out.writeInt(pathBytes.length);
+                out.write(pathBytes);
+                out.writeLong(rec.syncVersion());
+                out.writeLong(rec.bytes().length);
+                if (!rec.meta().deleted()) {
+                    out.write(rec.bytes());
                 }
-                out.flush();
             }
+            out.flush();
 
-            // Only after the response is on the wire: stamp sync_version on rows that
-            // were null, so future polls skip them.
             for (PollRecord rec : payload) {
                 if (rec.meta().syncVersion() == null) {
                     fileMetadataService.stampSyncVersion(rootDirId, rec.meta().relativePath(), rec.syncVersion());

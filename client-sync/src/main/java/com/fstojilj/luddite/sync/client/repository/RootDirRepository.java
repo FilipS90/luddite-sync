@@ -76,11 +76,10 @@ public class RootDirRepository {
      */
     public void updateSyncVersion(String dirName, long lastSyncVersion) {
         jdbcTemplate.update("""
-                INSERT INTO root_dirs (dir_name, last_sync_version)
-                VALUES (?, ?)
-                ON CONFLICT(dir_name) DO UPDATE
-                    SET last_sync_version = MAX(excluded.last_sync_version, last_sync_version)
-                """, dirName, lastSyncVersion);
+                UPDATE root_dirs
+                SET last_sync_version = ?
+                WHERE dir_name = ?
+                """, lastSyncVersion, dirName);
     }
 }
 

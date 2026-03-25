@@ -178,39 +178,35 @@ public class ClientSyncService {
                 var in = new DataInputStream(socket.getInputStream());
 
                 // 1 — read available dirs advertised by the server
-                List<String> availableDirs = readAvailableDirs(in);
-                log.info("Server advertises {} dir(s): {}", availableDirs.size(), availableDirs);
+                List<String> serverServedDirs = readAvailableDirs(in);
+                log.info("Server advertises {} dir(s): {}", serverServedDirs.size(), serverServedDirs);
 
                 // 2 — wait for the user to subscribe if nothing is configured yet
-                List<String> configuredDirs = rootDirService.retrieveAllInSyncDirs();
-                if (configuredDirs.isEmpty()) {
-                    printAvailableDirs(availableDirs);
+                List<String> clientListeningDirs = rootDirService.retrieveAllInSyncDirs();
+                if (clientListeningDirs.isEmpty()) {
+                    printAvailableDirs(serverServedDirs);
                     while (running) {
                         sleep(7_000);
-                        configuredDirs = rootDirService.retrieveAllInSyncDirs();
-                        if (!configuredDirs.isEmpty()) break;
+                        clientListeningDirs = rootDirService.retrieveAllInSyncDirs();
+                        if (!clientListeningDirs.isEmpty()) break;
                     }
                 }
 
-                List<String> staleDirs = getStaleDirs(availableDirs, configuredDirs);
-                rootDirService.removeStaleDirs(staleDirs);
-
-                List<String> dirsToSync = availableDirs.stream()
-                        .filter(configuredDirs::contains)
+                removeStaleDirectories(serverServedDirs, clientListeningDirs);
+                List<String> dirsToSync = serverServedDirs.stream()
+                        .filter(clientListeningDirs::contains)
                         .toList();
 
                 if (dirsToSync.isEmpty()) {
                     log.warn("No matching dirs between server and client config. Server: {}, client wants: {}",
-                            availableDirs, configuredDirs);
+                            serverServedDirs, clientListeningDirs);
+                    continue;
                 }
-
-                // 3 — register dirs, audit disk, send hardwareId + handshake
+                
                 registerDirs(dirsToSync);
                 auditMissingFiles(dirsToSync);
                 sendHardwareId(out);
                 sendHandshake(out, dirsToSync);
-
-                // 4 — poll loop
                 pollLoop(in, out, dirsToSync);
 
             } catch (IOException e) {
@@ -250,6 +246,11 @@ public class ClientSyncService {
             dirs.add(new String(in.readNBytes(len), StandardCharsets.UTF_8));
         }
         return dirs;
+    }
+
+    private void removeStaleDirectories(List<String> serverServedDirs, List<String> clientListeningDirs) {
+        List<String> staleDirs = getStaleDirs(serverServedDirs, clientListeningDirs);
+        rootDirService.removeStaleDirs(staleDirs);
     }
 
     /**
