@@ -31,7 +31,7 @@ public class FileMetadataRepository {
             .fileSize(rs.getLong("file_size"))
             .createdAt(rs.getTimestamp("created_at") != null ? rs.getTimestamp("created_at").toInstant() : null)
             .modifiedAt(rs.getTimestamp("modified_at") != null ? rs.getTimestamp("modified_at").toInstant() : null)
-            .syncVersion(rs.getObject("sync_version", Long.class))
+            .syncVersion(rs.getObject("sync_version") instanceof Number n ? n.longValue() : null)
             .deleted(rs.getBoolean("deleted"))
             .clientIds(rs.getString("client_ids"))
             .build();
@@ -102,13 +102,13 @@ public class FileMetadataRepository {
      * @param lastSyncVersion last version the client acknowledged
      * @return list of changed/deleted records since that version
      */
-    public List<FileMetadata> findChangedSince(long rootDirId, long lastSyncVersion) {
-        String sql = """
-                SELECT * FROM file_metadata
-                WHERE root_dir_id = ?
-                  AND (sync_version IS NULL OR sync_version > ?)
-                """;
-        return jdbcTemplate.query(sql, rowMapper, rootDirId, lastSyncVersion);
+    public List<FileMetadata> findChangedSince(long rootDirId, Long lastSyncVersion) {
+        return jdbcTemplate.query("""
+                        SELECT * FROM file_metadata
+                        WHERE root_dir_id = ?
+                          AND (sync_version IS NULL OR sync_version > ?)
+                        """,
+                rowMapper, rootDirId, lastSyncVersion);
     }
 
     /**

@@ -175,7 +175,7 @@ public class FileMetadataService {
      * @param lastSyncVersion last version the client has acknowledged
      * @return list of changed records
      */
-    public List<FileMetadata> findChangedSince(long rootDirId, long lastSyncVersion) {
+    public List<FileMetadata> findChangedSince(long rootDirId, Long lastSyncVersion) {
         return fileMetadataRepository.findChangedSince(rootDirId, lastSyncVersion);
     }
 

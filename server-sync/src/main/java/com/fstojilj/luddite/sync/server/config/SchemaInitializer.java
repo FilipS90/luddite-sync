@@ -48,10 +48,10 @@ public class SchemaInitializer implements ApplicationRunner {
                     file_size     INTEGER  NOT NULL,
                     created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     modified_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    sync_version  INTEGER,
+                    sync_version  BIGINT,
                     deleted       BOOLEAN  NOT NULL DEFAULT FALSE,
                     client_ids    TEXT,
-                    UNIQUE (root_dir_id, relative_path)
+                    UNIQUE (root_dir_id, relative_path, filename)
                 )
                 """);
 
