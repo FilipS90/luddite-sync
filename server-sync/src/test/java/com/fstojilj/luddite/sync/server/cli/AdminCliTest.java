@@ -3,7 +3,7 @@ package com.fstojilj.luddite.sync.server.cli;
 import com.fstojilj.luddite.sync.common.model.RootDir;
 import com.fstojilj.luddite.sync.server.dns.DuckDNSUpdateJob;
 import com.fstojilj.luddite.sync.server.service.RootDirService;
-import com.fstojilj.luddite.sync.server.service.ServerPushService;
+import com.fstojilj.luddite.sync.server.service.SyncPollService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -30,7 +30,7 @@ class AdminCliTest {
     @Mock
     private DuckDNSUpdateJob duckDNSUpdateJob;
     @Mock
-    private ServerPushService serverPushService;
+    private SyncPollService syncPollService;
 
     @InjectMocks
     private AdminCli adminCli;
@@ -78,16 +78,16 @@ class AdminCliTest {
 
     @Test
     void handle_listc_noClients_shouldPrintNone() throws Exception {
-        when(serverPushService.listConnectedClients()).thenReturn(List.of());
+        when(syncPollService.listConnectedClients()).thenReturn(List.of());
         handle("listc");
         assertThat(output()).contains("no clients");
     }
 
     @Test
     void handle_listc_withClients_shouldPrintClients() throws Exception {
-        when(serverPushService.listConnectedClients()).thenReturn(List.of("/192.168.1.10:54321"));
+        when(syncPollService.listConnectedClients()).thenReturn(List.of("hw-id-abc123"));
         handle("listc");
-        assertThat(output()).contains("/192.168.1.10:54321");
+        assertThat(output()).contains("hw-id-abc123");
     }
 
     @Test
@@ -190,15 +190,15 @@ class AdminCliTest {
 
     @Test
     void handle_switchMode_clientFound_shouldConfirm() throws Exception {
-        when(serverPushService.sendResumeServerMode("/192.168.1.10:9000")).thenReturn(true);
-        handle("switch-mode /192.168.1.10:9000");
+        when(syncPollService.sendResumeServerMode("hw-id-abc123")).thenReturn(true);
+        handle("switch-mode hw-id-abc123");
         assertThat(output()).contains("Switch-mode signal sent");
     }
 
     @Test
     void handle_switchMode_clientNotFound_shouldPrintNotFound() throws Exception {
-        when(serverPushService.sendResumeServerMode("/1.2.3.4:9000")).thenReturn(false);
-        handle("switch-mode /1.2.3.4:9000");
+        when(syncPollService.sendResumeServerMode("hw-id-unknown")).thenReturn(false);
+        handle("switch-mode hw-id-unknown");
         assertThat(output()).contains("No connected client");
     }
 

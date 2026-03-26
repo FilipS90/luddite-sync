@@ -1,6 +1,7 @@
 package com.fstojilj.luddite.sync.server.service;
 
 import com.fstojilj.luddite.sync.common.model.RootDir;
+import com.fstojilj.luddite.sync.common.util.FileSystemUtils;
 import com.fstojilj.luddite.sync.server.repository.RootDirRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,13 +38,6 @@ public class RootDirService {
         dirWatcherService.startWatching(absolutePath, roodDirId);
     }
 
-    public Long getRootDirIdByAbsolutePath(String absolutePath) {
-        return rootDirRepository.getRootDirIdByAbsolutePath(absolutePath);
-    }
-
-    public boolean removeRootDirById(long id) {
-        return rootDirRepository.deleteRootDirById(id);
-    }
 
     @Transactional
     public boolean removeRootDir(long id) {
@@ -51,24 +45,15 @@ public class RootDirService {
         if (rootDir.isEmpty()) {
             return false;
         }
-        dirWatcherService.stopWatching(rootDir.get().getAbsolutePath());
+        String absolutePath = rootDir.get().getAbsolutePath();
+        dirWatcherService.stopWatching(absolutePath);
         fileMetadataService.deleteAllForRootDir(id);
         rootDirRepository.deleteRootDirById(id);
-        log.info("Removed root dir: {} (id={})", rootDir.get().getAbsolutePath(), id);
+        FileSystemUtils.deleteDirectoryRecursively(java.nio.file.Path.of(absolutePath));
+        log.info("Removed root dir: {} (id={})", absolutePath, id);
         return true;
     }
 
-    public String getRootDirPathById(long rootDirId) {
-        var rootDir = rootDirRepository.getRootDirById(rootDirId)
-                .orElseThrow(() -> new IllegalArgumentException("Root directory not found for ID: " + rootDirId));
-        return rootDir.getAbsolutePath();
-    }
-
-    public String getRootDirNameById(long rootDirId) {
-        return rootDirRepository.getRootDirById(rootDirId)
-                .orElseThrow(() -> new IllegalArgumentException("Root directory not found for ID: " + rootDirId))
-                .getName();
-    }
 
     public Optional<RootDir> findByName(String name) {
         return rootDirRepository.findByName(name);

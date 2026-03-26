@@ -1,28 +1,59 @@
 package com.fstojilj.luddite.sync.server.service;
 
 import com.fstojilj.luddite.sync.common.model.FileMetadata;
-import com.fstojilj.luddite.sync.server.repository.DeletedFilesRepository;
 import com.fstojilj.luddite.sync.server.repository.FileMetadataRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.File;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static com.fstojilj.luddite.sync.server.utils.FileChecksumUtils.calculateFileChecksum;
 import static com.fstojilj.luddite.sync.server.utils.FileSystemUtils.listAllFilesForDir;
 
+/**
+ * Business logic for file metadata lifecycle on the server.
+ *
+ * <p>Owns the monotonically increasing {@code syncVersion} counter — seeded lazily
+ * from {@code MAX(sync_version)} on the very first call to {@link #nextSyncVersion()},
+ * which guarantees the schema already exists at that point.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class FileMetadataService {
 
     private final FileMetadataRepository fileMetadataRepository;
-    private final DeletedFilesRepository deletedFilesRepository;
+    private final JdbcTemplate jdbcTemplate;
+
+    /**
+     * Sentinel value meaning "not yet seeded from the database".
+     */
+    private static final long UNSEEDED = Long.MIN_VALUE;
+
+    private final AtomicLong syncVersionCounter = new AtomicLong(UNSEEDED);
+
+    /**
+     * Mints the next monotonically increasing sync version.
+     * Seeds from {@code MAX(sync_version)} on the very first invocation.
+     */
+    public long nextSyncVersion() {
+        if (syncVersionCounter.get() == UNSEEDED) {
+            Long max = jdbcTemplate.queryForObject(
+                    "SELECT MAX(sync_version) FROM file_metadata", Long.class);
+            long seed = (max != null) ? max : 0L;
+            syncVersionCounter.compareAndSet(UNSEEDED, seed);
+            log.info("Sync-version counter seeded at {}", seed);
+        }
+        return syncVersionCounter.incrementAndGet();
+    }
+
+    // ── Write path ────────────────────────────────────────────────────────────
 
     /**
      * Returns the new syncVersion assigned to this file.
@@ -65,57 +96,87 @@ public class FileMetadataService {
             throw new IllegalArgumentException("Path must point to an existing file");
         }
 
-        var existing = fileMetadataRepository.findOptionalByRootDirIdAndRelativePath(rootDirId, relativeFilePath);
-        if (existing.isEmpty()) {
-            // ENTRY_MODIFY can race ahead of ENTRY_CREATE - treat as add
-            log.warn("ENTRY_MODIFY for unknown file, inserting instead: {}", relativeFilePath);
-            fileMetadataRepository.add(buildFileMetadata(file, rootDirId, relativeFilePath));
-            return;
-        }
-
-        var fileMetadata = existing.get().toBuilder()
-                .fileSize(file.length())
-                .checksum(calculateFileChecksum(absoluteFilePath))
-                .syncVersion(null)
-                .build();
-
-        fileMetadataRepository.update(fileMetadata);
+        // Delete existing row (if any) and re-insert as a fresh record.
+        // Resets sync_version to NULL so the next poll re-delivers the updated file.
+        fileMetadataRepository.delete(rootDirId, relativeFilePath);
+        fileMetadataRepository.add(buildFileMetadata(file, rootDirId, relativeFilePath));
+        log.debug("Re-created FileMetadata for rootDirId: {}, relativePath: {}", rootDirId, relativeFilePath);
     }
 
+    // ── Delete path ───────────────────────────────────────────────────────────
+
+    /**
+     * Soft-deletes a file: marks it as deleted, bumps its {@code sync_version}, and sets
+     * {@code client_ids} to the comma-separated hardware IDs of every currently connected
+     * client. The row stays in the database until every client has acknowledged the delete.
+     *
+     * @param rootDirId          root directory ID
+     * @param relativeFilePath   relative path of the deleted file
+     * @param connectedClientIds comma-separated hardware IDs of all connected clients;
+     *                           pass an empty string if no clients are connected (row is
+     *                           hard-deleted immediately in {@link #acknowledgeDelete})
+     */
     @Transactional
-    public void deleteFileMetadata(long rootDirId, String relativeFilePath) {
-        fileMetadataRepository.delete(rootDirId, relativeFilePath);
+    public void softDeleteFileMetadata(long rootDirId, String relativeFilePath, String connectedClientIds) {
+        long version = nextSyncVersion();
+        if (connectedClientIds.isBlank()) {
+            // No clients connected — hard-delete immediately, nothing to replicate
+            fileMetadataRepository.delete(rootDirId, relativeFilePath);
+            log.info("Hard-deleted (no clients connected) rootDirId={} '{}'", rootDirId, relativeFilePath);
+        } else {
+            fileMetadataRepository.softDelete(rootDirId, relativeFilePath, version, connectedClientIds);
+            log.info("Soft-deleted (v{}) rootDirId={} '{}', pending clients: [{}]",
+                    version, rootDirId, relativeFilePath, connectedClientIds);
+        }
+    }
+
+
+    /**
+     * Removes {@code hardwareId} from the {@code client_ids} of a soft-deleted row.
+     * When all clients have acknowledged, the row is hard-deleted.
+     *
+     * @param rootDirId    root directory ID
+     * @param relativePath relative file path
+     * @param hardwareId   the acknowledging client's stable hardware ID
+     */
+    @Transactional
+    public void acknowledgeDelete(long rootDirId, String relativePath, String hardwareId) {
+        fileMetadataRepository.acknowledgeDelete(rootDirId, relativePath, hardwareId);
     }
 
     @Transactional
     public void deleteAllForRootDir(long rootDirId) {
         fileMetadataRepository.deleteAllByRootDirId(rootDirId);
-        deletedFilesRepository.deleteAllByRootDirId(rootDirId);
     }
 
-    /**
-     * Records a deletion event with the given syncVersion for catch-up replay.
-     */
-    @Transactional
-    public void recordDeletion(long rootDirId, String relativePath, long syncVersion) {
-        deletedFilesRepository.insert(rootDirId, relativePath, syncVersion);
-    }
+    // ── Sync-version stamping ─────────────────────────────────────────────────
 
     /**
-     * Called after a file has been successfully sent to at least one client.
-     * Sets the sync_version so future clients know they already have this version.
+     * Stamps the {@code sync_version} on a file record after a client confirms receipt.
+     * Uses {@code MAX} so the version never regresses.
+     *
+     * @param rootDirId    root directory ID
+     * @param relativePath relative file path
+     * @param syncVersion  the version to stamp
      */
     @Transactional
     public void stampSyncVersion(long rootDirId, String relativePath, long syncVersion) {
         fileMetadataRepository.updateSyncVersion(rootDirId, relativePath, syncVersion);
     }
 
-    public List<FileMetadata> findFilesNewerThan(long rootDirId, long lastSyncVersion) {
-        return fileMetadataRepository.findByRootDirIdWithSyncVersionAfter(rootDirId, lastSyncVersion);
-    }
+    // ── Query path ────────────────────────────────────────────────────────────
 
-    public List<Map<String, Object>> findDeletesNewerThan(long rootDirId, long lastSyncVersion) {
-        return deletedFilesRepository.findByRootDirIdWithSyncVersionAfter(rootDirId, lastSyncVersion);
+    /**
+     * Returns all file metadata rows (live and soft-deleted) whose {@code sync_version}
+     * is greater than {@code lastSyncVersion}, or that have never been delivered
+     * ({@code sync_version IS NULL}). This is the primary feed for the poll response.
+     *
+     * @param rootDirId       root directory ID
+     * @param lastSyncVersion last version the client has acknowledged
+     * @return list of changed records
+     */
+    public List<FileMetadata> findChangedSince(long rootDirId, Long lastSyncVersion) {
+        return fileMetadataRepository.findChangedSince(rootDirId, lastSyncVersion);
     }
 
     private FileMetadata buildFileMetadata(File file, long rootDirId, String relativePath) {
@@ -126,6 +187,8 @@ public class FileMetadataService {
                 .fileSize(file.length())
                 .checksum(calculateFileChecksum(file.toPath()))
                 .syncVersion(null)
+                .deleted(false)
+                .clientIds(null)
                 .build();
     }
 }

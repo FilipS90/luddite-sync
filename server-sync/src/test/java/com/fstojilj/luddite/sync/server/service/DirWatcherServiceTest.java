@@ -1,14 +1,11 @@
 package com.fstojilj.luddite.sync.server.service;
 
-import com.fstojilj.luddite.sync.server.event.FileChangeEvent;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
-import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.nio.file.Files;
@@ -17,7 +14,6 @@ import java.nio.file.WatchService;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
@@ -25,7 +21,10 @@ import static org.mockito.Mockito.verify;
 class DirWatcherServiceTest {
 
     @Mock
-    private ApplicationEventPublisher eventPublisher;
+    private FileMetadataService fileMetadataService;
+
+    @Mock
+    private SyncPollService syncPollService;
 
     @InjectMocks
     private DirWatcherService dirWatcherService;
@@ -84,7 +83,7 @@ class DirWatcherServiceTest {
     }
 
     @Test
-    void startWatching_andFileCreated_shouldPublishEvent() throws Exception {
+    void startWatching_andFileCreated_shouldCallAddFileMetadata() throws Exception {
         String path = tempDir.toAbsolutePath().toString();
 
         dirWatcherService.startWatching(path, 1L);
@@ -97,11 +96,10 @@ class DirWatcherServiceTest {
 
         // Create a file to trigger an event
         Files.writeString(tempDir.resolve("test.jpg"), "data");
-        Thread.sleep(200); // Give the watch loop time to fire
+        Thread.sleep(300); // Give the watch loop time to fire
 
-        ArgumentCaptor<FileChangeEvent> captor = ArgumentCaptor.forClass(FileChangeEvent.class);
-        verify(eventPublisher, atLeastOnce()).publishEvent(captor.capture());
-        assertThat(captor.getAllValues()).anyMatch(e -> e.getRelativePath().equals("test.jpg"));
+        verify(fileMetadataService).addFileMetadata(
+                tempDir.resolve("test.jpg"), 1L, "test.jpg");
 
         dirWatcherService.stopWatching(path);
     }
@@ -127,5 +125,4 @@ class DirWatcherServiceTest {
         dirWatcherService.stopWatching(subPath);
     }
 }
-
 

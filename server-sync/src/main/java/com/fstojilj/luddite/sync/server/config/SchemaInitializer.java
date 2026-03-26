@@ -40,41 +40,19 @@ public class SchemaInitializer implements ApplicationRunner {
 
         jdbcTemplate.execute("""
                 CREATE TABLE IF NOT EXISTS file_metadata (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    filename TEXT NOT NULL,
-                    root_dir_id INTEGER NOT NULL REFERENCES root_dir(id) ON DELETE CASCADE,
-                    relative_path TEXT NOT NULL,
-                    checksum TEXT NOT NULL,
-                    file_size INTEGER NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    sync_version INTEGER,
-                    UNIQUE (root_dir_id, relative_path)
+                    id            INTEGER  PRIMARY KEY AUTOINCREMENT,
+                    filename      TEXT     NOT NULL,
+                    root_dir_id   INTEGER  NOT NULL REFERENCES root_dir(id) ON DELETE CASCADE,
+                    relative_path TEXT     NOT NULL,
+                    checksum      TEXT     NOT NULL,
+                    file_size     INTEGER  NOT NULL,
+                    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    modified_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    sync_version  BIGINT,
+                    deleted       BOOLEAN  NOT NULL DEFAULT FALSE,
+                    client_ids    TEXT,
+                    UNIQUE (root_dir_id, relative_path, filename)
                 )
-                """);
-
-        jdbcTemplate.execute("""
-                CREATE TABLE IF NOT EXISTS sync_log (
-                    version INTEGER PRIMARY KEY AUTOINCREMENT,
-                    status TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                """);
-
-        jdbcTemplate.execute("""
-                CREATE TABLE IF NOT EXISTS deleted_files (
-                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                    root_dir_id   INTEGER NOT NULL REFERENCES root_dir(id) ON DELETE CASCADE,
-                    relative_path TEXT    NOT NULL,
-                    sync_version  INTEGER NOT NULL,
-                    deleted_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE (root_dir_id, relative_path)
-                )
-                """);
-
-        jdbcTemplate.execute("""
-                CREATE INDEX IF NOT EXISTS idx_deleted_files_root_dir_sync_version
-                    ON deleted_files (root_dir_id, sync_version)
                 """);
 
         createTriggerIfNotExists("update_root_dir_modified_at", """

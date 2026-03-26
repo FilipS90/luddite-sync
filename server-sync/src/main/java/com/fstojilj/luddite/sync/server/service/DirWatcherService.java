@@ -1,9 +1,7 @@
 package com.fstojilj.luddite.sync.server.service;
 
-import com.fstojilj.luddite.sync.server.event.FileChangeEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -21,12 +19,22 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
+/**
+ * Watches one or more filesystem directories for changes and forwards each event
+ * to {@link FileMetadataService} (to update the database) and to
+ * {@link SyncPollService} (to notify the poll handler that new data is available).
+ *
+ * <p>A dedicated virtual thread is spawned for each watched directory.
+ * Sub-directories created at runtime are registered automatically.
+ */
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class DirWatcherService {
 
-    private final ApplicationEventPublisher eventPublisher;
+    private final FileMetadataService fileMetadataService;
+    private final SyncPollService syncPollService;
+
     private final Executor executor = Executors.newVirtualThreadPerTaskExecutor();
     private final ConcurrentHashMap<String, WatchService> activeWatchers = new ConcurrentHashMap<>();
 
@@ -86,19 +94,13 @@ public class DirWatcherService {
                             .toString().replace('\\', '/');
                     log.info("{} trigger for file {}", kind.name(), absoluteFilePath);
 
-                    // If a new directory is created, start watching it too
+                    // If a new sub-directory is created, start watching it too
                     if (kind == StandardWatchEventKinds.ENTRY_CREATE && absoluteFilePath.toFile().isDirectory()) {
                         startWatching(absoluteFilePath, rootDirPath, rootDirId);
                         continue;
                     }
 
-                    FileChangeEvent fileChangeEvent = FileChangeEvent.builder()
-                            .rootDirId(rootDirId)
-                            .absoluteFilePath(absoluteFilePath.toString())
-                            .relativePath(relativePath)
-                            .eventKind(kind)
-                            .build();
-                    eventPublisher.publishEvent(fileChangeEvent);
+                    handleFileEvent(kind, absoluteFilePath, rootDirId, relativePath);
                 }
 
                 if (!key.reset()) {
@@ -119,6 +121,31 @@ public class DirWatcherService {
             }
             activeWatchers.remove(watchedDir.toString());
             log.info("Watch service removed for dir: {}", watchedDir);
+        }
+    }
+
+    /**
+     * Dispatches a single filesystem event to {@link FileMetadataService} and then
+     * signals {@link SyncPollService} that fresh data is available for this root dir.
+     *
+     * @param kind             the event kind (CREATE / MODIFY / DELETE)
+     * @param absoluteFilePath absolute path of the affected file
+     * @param rootDirId        root directory database ID
+     * @param relativePath     path relative to the root directory
+     */
+    private void handleFileEvent(WatchEvent.Kind<?> kind, Path absoluteFilePath,
+                                 long rootDirId, String relativePath) {
+        try {
+            if (kind == StandardWatchEventKinds.ENTRY_CREATE) {
+                fileMetadataService.addFileMetadata(absoluteFilePath, rootDirId, relativePath);
+            } else if (kind == StandardWatchEventKinds.ENTRY_MODIFY) {
+                fileMetadataService.updateFileMetadata(absoluteFilePath, rootDirId, relativePath);
+            } else if (kind == StandardWatchEventKinds.ENTRY_DELETE) {
+                String connectedClientIds = syncPollService.getConnectedClientIds();
+                fileMetadataService.softDeleteFileMetadata(rootDirId, relativePath, connectedClientIds);
+            }
+        } catch (Exception e) {
+            log.error("Error handling {} event for '{}': {}", kind.name(), absoluteFilePath, e.getMessage(), e);
         }
     }
 

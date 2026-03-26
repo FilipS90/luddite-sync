@@ -1,7 +1,7 @@
 package com.fstojilj.luddite.sync.client.cli;
 
 import com.fstojilj.luddite.sync.client.service.ClientSyncService;
-import com.fstojilj.luddite.sync.client.service.SyncStateService;
+import com.fstojilj.luddite.sync.client.service.RootDirService;
 import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -34,7 +34,7 @@ import static com.fstojilj.luddite.sync.client.service.ClientSyncService.serverD
 @Slf4j
 public class ClientCli {
 
-    private final SyncStateService syncStateService;
+    private final RootDirService rootDirService;
     private final ClientSyncService clientSyncService;
 
     private List<String> dirNames;
@@ -69,7 +69,7 @@ public class ClientCli {
         System.out.println(command);
         System.out.println(arg);
 
-        var entries = syncStateService.findAll();
+        var entries = rootDirService.findAll();
         dirNames = entries.stream().map(SyncHandshakeEntry::dirName).toList();
 
         switch (command) {
@@ -109,7 +109,7 @@ public class ClientCli {
                     return;
                 }
 
-                syncStateService.removeDirectory(arg);
+                rootDirService.removeDirectory(arg);
                 System.out.printf("  Unsubscribed from: %s%n", arg);
             }
             case "refresh" -> {
@@ -157,7 +157,7 @@ public class ClientCli {
             if (dirNames.contains(name)) {
                 System.out.printf("  Already subscribed to: %s%n", name);
             } else {
-                syncStateService.registerIfAbsent(name);
+                rootDirService.registerIfAbsent(name);
                 System.out.printf("  Subscribed to: %s%n", name);
             }
         });

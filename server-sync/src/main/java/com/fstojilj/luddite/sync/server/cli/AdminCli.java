@@ -2,7 +2,7 @@ package com.fstojilj.luddite.sync.server.cli;
 
 import com.fstojilj.luddite.sync.server.dns.DuckDNSUpdateJob;
 import com.fstojilj.luddite.sync.server.service.RootDirService;
-import com.fstojilj.luddite.sync.server.service.ServerPushService;
+import com.fstojilj.luddite.sync.server.service.SyncPollService;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,7 +34,7 @@ public class AdminCli {
 
     private final RootDirService rootDirService;
     private final DuckDNSUpdateJob duckDNSUpdateJob;
-    private final ServerPushService serverPushService;
+    private final SyncPollService syncPollService;
 
     @PostConstruct
     public void start() {
@@ -72,7 +72,7 @@ public class AdminCli {
                 }
             }
             case "listc" -> {
-                var clients = serverPushService.listConnectedClients();
+                var clients = syncPollService.listConnectedClients();
                 if (clients.isEmpty()) {
                     System.out.println("  (no clients connected)");
                 } else {
@@ -112,15 +112,15 @@ public class AdminCli {
             case "dns" -> handleDns(arg);
             case "switch-mode" -> {
                 if (arg.isEmpty()) {
-                    System.out.println("  Usage: switch-mode <client-address>");
-                    System.out.println("  Use 'listc' to see connected client addresses.");
+                    System.out.println("  Usage: switch-mode <hardware-id>");
+                    System.out.println("  Use 'listc' to see connected client hardware IDs.");
                     return;
                 }
-                boolean sent = serverPushService.sendResumeServerMode(arg);
+                boolean sent = syncPollService.sendResumeServerMode(arg);
                 if (sent) {
                     System.out.printf("  Switch-mode signal sent to %s%n", arg);
                 } else {
-                    System.out.printf("  No connected client found with address: %s%n", arg);
+                    System.out.printf("  No connected client found with hardware ID: %s%n", arg);
                 }
             }
             case "help" -> printHelp();
@@ -181,7 +181,7 @@ public class AdminCli {
         System.out.println("  dns domain <d>      change DuckDNS domain");
         System.out.println("  dns token <t>       change DuckDNS token");
         System.out.println("  dns update          trigger an immediate DuckDNS update");
-        System.out.println("  switch-mode <addr>  signal a specific client to restart as a server (use 'listc' for addresses)");
+        System.out.println("  switch-mode <id>    signal a specific client to restart as a server (use 'listc' for hardware IDs)");
         System.out.println("  help                show this message");
         System.out.println("  exit                shut down the server");
         System.out.println();
