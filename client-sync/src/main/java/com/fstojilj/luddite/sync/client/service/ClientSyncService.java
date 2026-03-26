@@ -1,4 +1,4 @@
-﻿package com.fstojilj.luddite.sync.client.service;
+package com.fstojilj.luddite.sync.client.service;
 
 import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
 import jakarta.annotation.PostConstruct;
@@ -69,6 +69,7 @@ public class ClientSyncService {
     private static final byte FLAG_DELETED = 0x01;
 
     private static final long POLL_INTERVAL_MS = 2_000;
+    private static final long MAX_FILE_SIZE = Integer.MAX_VALUE; // ~2 GB
 
     private final RootDirService rootDirService;
     private final FileMetadataService fileMetadataService;
@@ -421,6 +422,9 @@ public class ClientSyncService {
                         out.write(ackPathBytes);
                         out.flush();
                     } else {
+                        if (fileSize < 0 || fileSize > MAX_FILE_SIZE) {
+                            throw new IOException("Unreasonable file size from server (" + fileSize + " bytes) for: " + relPath);
+                        }
                         byte[] fileBytes = in.readNBytes((int) fileSize);
                         Files.createDirectories(target.getParent());
                         Files.write(target, fileBytes);
