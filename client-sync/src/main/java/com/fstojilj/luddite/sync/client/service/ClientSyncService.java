@@ -1,4 +1,4 @@
-package com.fstojilj.luddite.sync.client.service;
+﻿package com.fstojilj.luddite.sync.client.service;
 
 import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
 import jakarta.annotation.PostConstruct;
@@ -61,7 +61,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ClientSyncService {
 
-    // ── Wire protocol bytes ───────────────────────────────────────────────────
     private static final byte POLL = 1;
     private static final byte DELETE_ACK = 2;
     private static final byte SHUTDOWN = 3;
@@ -69,10 +68,8 @@ public class ClientSyncService {
 
     private static final byte FLAG_DELETED = 0x01;
 
-    // ── Poll interval ─────────────────────────────────────────────────────────
     private static final long POLL_INTERVAL_MS = 2_000;
 
-    // ── Dependencies ─────────────────────────────────────────────────────────
     private final RootDirService rootDirService;
     private final FileMetadataService fileMetadataService;
     private final HardwareIdService hardwareIdService;
@@ -82,7 +79,6 @@ public class ClientSyncService {
      */
     public static List<String> serverDirs = new ArrayList<>();
 
-    // ── Config ────────────────────────────────────────────────────────────────
     @Value("${sync.server.host:localhost}")
     private String serverHost;
 
@@ -101,11 +97,8 @@ public class ClientSyncService {
     @Value("${sync.socket.password}")
     private String keystorePassword;
 
-    // ── State ─────────────────────────────────────────────────────────────────
     private volatile boolean running = false;
     private SSLSocket socket;
-
-    // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     /**
      * Starts the virtual thread that drives the connect-and-sync loop.
@@ -161,8 +154,6 @@ public class ClientSyncService {
         }
     }
 
-    // ── Connect-and-sync loop ─────────────────────────────────────────────────
-
     /**
      * Main sync loop: connects to the server, performs the handshake, and then
      * enters the poll loop. Reconnects automatically on {@link IOException} with
@@ -202,7 +193,7 @@ public class ClientSyncService {
                             serverServedDirs, clientListeningDirs);
                     continue;
                 }
-                
+
                 registerDirs(dirsToSync);
                 auditMissingFiles(dirsToSync);
                 sendHardwareId(out);
@@ -220,8 +211,6 @@ public class ClientSyncService {
             }
         }
     }
-
-    // ── Handshake helpers ─────────────────────────────────────────────────────
 
     /**
      * Reads the list of root directory names advertised by the server.
@@ -354,8 +343,6 @@ public class ClientSyncService {
         log.info("Handshake sent: {} dir(s): {}", entries.size(), dirsToSync);
     }
 
-    // ── Poll loop ─────────────────────────────────────────────────────────────
-
     /**
      * Polls the server every {@value #POLL_INTERVAL_MS} ms for each subscribed directory.
      * For each directory:
@@ -394,6 +381,8 @@ public class ClientSyncService {
                 int count = in.readInt();
                 long highestVersion = lastVersion;
 
+                Path mirrorRoot = Path.of(mirrorDir).toAbsolutePath().normalize();
+
                 for (int i = 0; i < count; i++) {
                     byte flags = in.readByte();
                     int pathLen = in.readInt();
@@ -402,8 +391,19 @@ public class ClientSyncService {
                     long fileSize = in.readLong();
 
                     boolean deleted = (flags & FLAG_DELETED) != 0;
-                    // relPath = "dirName/rest/of/path" — resolve under mirror
-                    Path target = Path.of(mirrorDir).resolve(relPath).normalize();
+
+                    Path target = mirrorRoot.resolve(relPath).normalize();
+
+                    // Reject any path whose canonical form is not a descendant of mirrorRoot.
+                    if (!target.startsWith(mirrorRoot)) {
+                        log.error("Path traversal blocked — server sent path outside mirror dir: '{}'", relPath);
+                        // Must drain bytes from stream to keep it in sync before continuing
+                        if (!deleted && fileSize > 0) {
+                            in.skipNBytes(fileSize);
+                        }
+                        continue;
+                    }
+
                     // dirName is the first component of relPath
                     String dir = Path.of(relPath).getName(0).toString();
 
@@ -450,8 +450,6 @@ public class ClientSyncService {
             sleep(POLL_INTERVAL_MS);
         }
     }
-
-    // ── Utility ───────────────────────────────────────────────────────────────
 
     /**
      * Prints the list of directories available on the server to stdout, along with
