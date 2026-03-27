@@ -25,14 +25,14 @@ class SchemaInitializerTest {
     private JdbcTemplate jdbcTemplate;
 
     @Mock
-    private RootDirs rootDirs;
+    private SyncServerProperties properties;
 
     @InjectMocks
     private SchemaInitializer schemaInitializer;
 
     @Test
     void run_shouldExecuteAllCreateTableStatements() throws Exception {
-        when(rootDirs.rootDirAbsolutePaths()).thenReturn(Set.of());
+        when(properties.getRootDirs()).thenReturn(Set.of());
         when(jdbcTemplate.queryForObject(anyString(), eq(Integer.class), anyString())).thenReturn(1);
         lenient().when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of());
 
@@ -43,7 +43,7 @@ class SchemaInitializerTest {
 
     @Test
     void run_triggerNotExists_shouldCreateTrigger() throws Exception {
-        when(rootDirs.rootDirAbsolutePaths()).thenReturn(Set.of());
+        when(properties.getRootDirs()).thenReturn(Set.of());
         when(jdbcTemplate.queryForObject(anyString(), eq(Integer.class), anyString())).thenReturn(0);
         lenient().when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of());
 

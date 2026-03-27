@@ -22,7 +22,7 @@ public class SchemaInitializer implements ApplicationRunner {
 
     private final JdbcTemplate jdbcTemplate;
 
-    private final RootDirs rootDirs;
+    private final SyncServerProperties serverProperties;
 
     @Override
     public void run(ApplicationArguments args) {
@@ -73,7 +73,7 @@ public class SchemaInitializer implements ApplicationRunner {
                 END
                 """);
 
-        for (String rootDirAbsolutePath : rootDirs.rootDirAbsolutePaths()) {
+        for (String rootDirAbsolutePath : serverProperties.getRootDirs()) {
             String name = Paths.get(rootDirAbsolutePath).getFileName().toString();
             jdbcTemplate.update(
                     "INSERT OR IGNORE INTO root_dir (name, absolute_path) VALUES (?, ?)",

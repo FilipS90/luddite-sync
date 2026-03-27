@@ -5,8 +5,8 @@ import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * Holds the list of absolute paths the server should watch and serve to clients.
@@ -25,6 +25,6 @@ import java.util.List;
 @Setter
 public class SyncServerProperties {
 
-    private List<String> rootDirs = new ArrayList<>();
+    private Set<String> rootDirs = new HashSet<>();
 }
 
