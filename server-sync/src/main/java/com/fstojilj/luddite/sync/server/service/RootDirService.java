@@ -1,7 +1,6 @@
 package com.fstojilj.luddite.sync.server.service;
 
 import com.fstojilj.luddite.sync.common.model.RootDir;
-import com.fstojilj.luddite.sync.common.util.FileSystemUtils;
 import com.fstojilj.luddite.sync.server.repository.RootDirRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -49,7 +48,6 @@ public class RootDirService {
         dirWatcherService.stopWatching(absolutePath);
         fileMetadataService.deleteAllForRootDir(id);
         rootDirRepository.deleteRootDirById(id);
-        FileSystemUtils.deleteDirectoryRecursively(java.nio.file.Path.of(absolutePath));
         log.info("Removed root dir: {} (id={})", absolutePath, id);
         return true;
     }
