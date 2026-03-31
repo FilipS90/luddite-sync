@@ -36,7 +36,7 @@ REMOTE_HOST=${2:-localhost}
 while true; do
     if [ "$MODE" = "server" ]; then
         echo "[luddite] Starting in SERVER mode..."
-        java -Djava.net.preferIPv4Stack=true -DKEYSTORE_PASSWORD="$KEYSTORE_PASSWORD" -jar "$SERVER_JAR"
+        java -Djava.net.preferIPv4Stack=true -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -Dstdin.encoding=UTF-8 -DKEYSTORE_PASSWORD="$KEYSTORE_PASSWORD" -jar "$SERVER_JAR"
         EXIT_CODE=$?
         if [ $EXIT_CODE -eq 2 ]; then
             echo "[luddite] Shutdown signal received — switching to CLIENT mode (connecting to $REMOTE_HOST)"
@@ -49,7 +49,7 @@ while true; do
         fi
     else
         echo "[luddite] Starting in CLIENT mode (connecting to $REMOTE_HOST)..."
-        java -Djava.net.preferIPv4Stack=true -DKEYSTORE_PASSWORD="$KEYSTORE_PASSWORD" -jar "$CLIENT_JAR" \
+        java -Djava.net.preferIPv4Stack=true -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -Dstdin.encoding=UTF-8 -DKEYSTORE_PASSWORD="$KEYSTORE_PASSWORD" -jar "$CLIENT_JAR" \
             --sync.server.host="$REMOTE_HOST" \
             --sync.socket.keystore=classpath:client-keystore.p12
         EXIT_CODE=$?
