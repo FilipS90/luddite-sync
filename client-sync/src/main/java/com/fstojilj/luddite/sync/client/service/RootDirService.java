@@ -29,24 +29,15 @@ public class RootDirService {
     @Value("${sync.client.mirror-dir}")
     private String mirrorDirPath;
 
-    /**
-     * Removes directories that are no longer offered by the server.
-     * For each stale directory:
-     * <ol>
-     *   <li>Every file inside the on-disk mirror subtree is deleted.</li>
-     *   <li>The now-empty directory tree is removed.</li>
-     *   <li>All {@code file_metadata} records for that directory are purged.</li>
-     *   <li>The {@code root_dirs} entry is removed.</li>
-     * </ol>
-     * If the mirror sub-directory does not exist on disk (e.g. the client never fully
-     * synced it) the disk-cleanup step is skipped and only the DB records are removed.
-     *
-     * @param staleDirs list of directory names that should be purged
-     */
+    @Value("${sync.client.retain-local-directory}")
+    private boolean retainLocalDirectory;
+    
     public void removeStaleDirs(List<String> staleDirs) {
         for (String dir : staleDirs) {
             Path dirPath = Path.of(mirrorDirPath).resolve(dir);
-            FileSystemUtils.deleteDirectoryRecursively(dirPath);
+            if (!retainLocalDirectory) {
+                FileSystemUtils.deleteDirectoryRecursively(dirPath);
+            }
             fileMetadataService.findAllByDir(dir)
                     .forEach(rel -> fileMetadataService.removeRecord(dir, rel));
             removeDirectory(dir);
