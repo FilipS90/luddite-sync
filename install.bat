@@ -15,16 +15,6 @@ echo.
 
 rem ── Prompt for values ────────────────────────────────────────────────────────
 
-set /p DUCK_DOMAIN="  DuckDNS subdomain (without .duckdns.org) [luddite-sync]: "
-if "%DUCK_DOMAIN%"=="" set DUCK_DOMAIN=luddite-sync
-
-:token_prompt
-set /p DUCK_TOKEN="  DuckDNS token: "
-if "%DUCK_TOKEN%"=="" (
-    echo   Token cannot be empty.
-    goto token_prompt
-)
-
 :password_prompt
 set /p KEYSTORE_PASSWORD="  Keystore password: "
 if "%KEYSTORE_PASSWORD%"=="" (
@@ -61,8 +51,6 @@ rem ── Update server application.yml ─────────────
 echo.
 echo   Updating server configuration...
 
-powershell -Command "(Get-Content '%SERVER_YML%') -replace 'domain:.*', 'domain: %DUCK_DOMAIN%' | Set-Content '%SERVER_YML%'"
-powershell -Command "(Get-Content '%SERVER_YML%') -replace 'token:.*', 'token: %DUCK_TOKEN%' | Set-Content '%SERVER_YML%'"
 powershell -Command "(Get-Content '%SERVER_YML%') -replace 'password:.*', 'password: %KEYSTORE_PASSWORD%' | Set-Content '%SERVER_YML%'"
 
 echo   Server configuration updated
@@ -72,7 +60,6 @@ rem ── Update client application.yml ─────────────
 echo.
 echo   Updating client configuration...
 
-powershell -Command "(Get-Content '%CLIENT_YML%') -replace 'host:.*', 'host: %DUCK_DOMAIN%.duckdns.org' | Set-Content '%CLIENT_YML%'"
 powershell -Command "(Get-Content '%CLIENT_YML%') -replace 'password:.*', 'password: %KEYSTORE_PASSWORD%' | Set-Content '%CLIENT_YML%'"
 
 echo   Client configuration updated

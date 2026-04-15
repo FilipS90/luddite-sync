@@ -4,8 +4,6 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-SERVER_YML="$SCRIPT_DIR/server-sync/src/main/resources/application.yml"
-CLIENT_YML="$SCRIPT_DIR/client-sync/src/main/resources/application.yml"
 CERT_SCRIPT="$SCRIPT_DIR/common-sync/certs_setup.sh"
 CERT_CHECK="$SCRIPT_DIR/server-sync/src/main/resources/server-keystore.p12"
 
@@ -16,15 +14,6 @@ echo "======================================="
 echo ""
 
 # ── Prompt for values ────────────────────────────────────────────────────────
-
-read -p "  DuckDNS subdomain (without .duckdns.org) [luddite-sync]: " DUCK_DOMAIN
-DUCK_DOMAIN="${DUCK_DOMAIN:-luddite-sync}"
-
-read -p "  DuckDNS token: " DUCK_TOKEN
-while [ -z "$DUCK_TOKEN" ]; do
-    echo "  Token cannot be empty."
-    read -p "  DuckDNS token: " DUCK_TOKEN
-done
 
 read -s -p "  Keystore password: " KEYSTORE_PASSWORD
 echo ""
@@ -61,12 +50,6 @@ fi
 echo ""
 echo "  Updating server configuration..."
 
-# DuckDNS domain
-sed -i "s|domain:.*|domain: $DUCK_DOMAIN|" "$SERVER_YML"
-
-# DuckDNS token — write literal value, not env var reference
-sed -i "s|token:.*|token: $DUCK_TOKEN|" "$SERVER_YML"
-
 # Keystore password
 sed -i "s|password:.*|password: $KEYSTORE_PASSWORD|" "$SERVER_YML"
 
@@ -76,9 +59,6 @@ echo "  ✓ Server configuration updated"
 
 echo ""
 echo "  Updating client configuration..."
-
-# Server host — point at the DuckDNS hostname
-sed -i "s|host:.*|host: $DUCK_DOMAIN.duckdns.org|" "$CLIENT_YML"
 
 # Keystore password
 sed -i "s|password:.*|password: $KEYSTORE_PASSWORD|" "$CLIENT_YML"

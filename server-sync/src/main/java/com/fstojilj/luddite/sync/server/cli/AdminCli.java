@@ -1,10 +1,10 @@
 package com.fstojilj.luddite.sync.server.cli;
 
-import com.fstojilj.luddite.sync.server.dns.DuckDNSUpdateJob;
 import com.fstojilj.luddite.sync.server.service.RootDirService;
 import com.fstojilj.luddite.sync.server.service.SyncPollService;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -12,18 +12,16 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 
+import static java.lang.Thread.sleep;
+
 /**
- * Interactive CLI for managing server root directories and DNS at runtime.
+ * Interactive CLI for managing server root directories at runtime.
  * <p>
  * Commands:
  * list              — list all registered root dirs
  * listc             — list connected clients and their addresses
  * add &lt;path&gt;        — register a new root dir and start watching it
  * remove &lt;id&gt;       — stop watching and unregister a root dir by ID
- * dns               — show current DuckDNS domain and token
- * dns domain &lt;d&gt;    — change DuckDNS domain
- * dns token &lt;t&gt;     — change DuckDNS token
- * dns update        — trigger an immediate DuckDNS update
  * switch-mode &lt;addr&gt; — signal a specific client to restart as a server (use 'listc' for addresses)
  * help              — show available commands
  * exit              — shut down the server
@@ -34,7 +32,6 @@ import java.nio.charset.StandardCharsets;
 public class AdminCli {
 
     private final RootDirService rootDirService;
-    private final DuckDNSUpdateJob duckDNSUpdateJob;
     private final SyncPollService syncPollService;
 
     @PostConstruct
@@ -42,7 +39,9 @@ public class AdminCli {
         Thread.ofVirtual().name("admin-cli").start(this::runLoop);
     }
 
+    @SneakyThrows
     private void runLoop() {
+        sleep(300); // Wait a bit for the server to start up before accepting input
         printHelp();
         try (var reader = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8))) {
             String line;
@@ -110,7 +109,6 @@ public class AdminCli {
                     System.out.println("  Error: id must be a number");
                 }
             }
-            case "dns" -> handleDns(arg);
             case "switch-mode" -> {
                 if (arg.isEmpty()) {
                     System.out.println("  Usage: switch-mode <hardware-id>");
@@ -133,43 +131,6 @@ public class AdminCli {
         }
     }
 
-    private void handleDns(String arg) {
-        if (arg.isEmpty()) {
-            System.out.printf("  Domain: %s%n", duckDNSUpdateJob.getDomain());
-            System.out.printf("  Token:  %s%n", duckDNSUpdateJob.getToken());
-            return;
-        }
-
-        String[] parts = arg.split("\\s+", 2);
-        String subCommand = parts[0].toLowerCase();
-        String value = parts.length > 1 ? parts[1] : "";
-
-        switch (subCommand) {
-            case "domain" -> {
-                if (value.isEmpty()) {
-                    System.out.println("  Usage: dns domain <new-domain>");
-                    return;
-                }
-                duckDNSUpdateJob.setDomain(value);
-                System.out.printf("  DuckDNS domain changed to: %s%n", value);
-            }
-            case "token" -> {
-                if (value.isEmpty()) {
-                    System.out.println("  Usage: dns token <new-token>");
-                    return;
-                }
-                duckDNSUpdateJob.setToken(value);
-                System.out.printf("  DuckDNS token changed to: %s%n", value);
-            }
-            case "update" -> {
-                System.out.println("  Triggering DuckDNS update...");
-                duckDNSUpdateJob.updateDuckDNS();
-            }
-            default ->
-                    System.out.printf("  Unknown dns sub-command: '%s'. Try: dns domain <d> | dns token <t> | dns update%n", subCommand);
-        }
-    }
-
     private void printHelp() {
         System.out.println();
         System.out.println("  Luddite Sync Server — Admin CLI");
@@ -178,10 +139,6 @@ public class AdminCli {
         System.out.println("  listc               list connected clients and their addresses");
         System.out.println("  add <path>          register and watch a new root dir");
         System.out.println("  remove <id>         unregister a root dir by ID");
-        System.out.println("  dns                 show current DuckDNS domain & token");
-        System.out.println("  dns domain <d>      change DuckDNS domain");
-        System.out.println("  dns token <t>       change DuckDNS token");
-        System.out.println("  dns update          trigger an immediate DuckDNS update");
         System.out.println("  switch-mode <id>    signal a specific client to restart as a server (use 'listc' for hardware IDs)");
         System.out.println("  help                show this message");
         System.out.println("  exit                shut down the server");

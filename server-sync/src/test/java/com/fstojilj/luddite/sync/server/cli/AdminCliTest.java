@@ -1,7 +1,6 @@
 package com.fstojilj.luddite.sync.server.cli;
 
 import com.fstojilj.luddite.sync.common.model.RootDir;
-import com.fstojilj.luddite.sync.server.dns.DuckDNSUpdateJob;
 import com.fstojilj.luddite.sync.server.service.RootDirService;
 import com.fstojilj.luddite.sync.server.service.SyncPollService;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,8 +26,6 @@ class AdminCliTest {
 
     @Mock
     private RootDirService rootDirService;
-    @Mock
-    private DuckDNSUpdateJob duckDNSUpdateJob;
     @Mock
     private SyncPollService syncPollService;
 
@@ -134,52 +131,6 @@ class AdminCliTest {
     void handle_remove_invalidId_shouldPrintError() throws Exception {
         handle("remove abc");
         assertThat(output()).contains("id must be a number");
-    }
-
-    @Test
-    void handle_dns_noArg_shouldPrintDomainAndToken() throws Exception {
-        when(duckDNSUpdateJob.getDomain()).thenReturn("my-domain");
-        when(duckDNSUpdateJob.getToken()).thenReturn("my-token");
-        handle("dns");
-        assertThat(output()).contains("my-domain").contains("my-token");
-    }
-
-    @Test
-    void handle_dns_domain_shouldUpdateDomain() throws Exception {
-        handle("dns domain new-domain");
-        verify(duckDNSUpdateJob).setDomain("new-domain");
-        assertThat(output()).contains("new-domain");
-    }
-
-    @Test
-    void handle_dns_domain_noArg_shouldPrintUsage() throws Exception {
-        handle("dns domain");
-        assertThat(output()).contains("Usage: dns domain");
-    }
-
-    @Test
-    void handle_dns_token_shouldUpdateToken() throws Exception {
-        handle("dns token new-token");
-        verify(duckDNSUpdateJob).setToken("new-token");
-        assertThat(output()).contains("new-token");
-    }
-
-    @Test
-    void handle_dns_token_noArg_shouldPrintUsage() throws Exception {
-        handle("dns token");
-        assertThat(output()).contains("Usage: dns token");
-    }
-
-    @Test
-    void handle_dns_update_shouldTriggerUpdate() throws Exception {
-        handle("dns update");
-        verify(duckDNSUpdateJob).updateDuckDNS();
-    }
-
-    @Test
-    void handle_dns_unknownSubcommand_shouldPrintUnknown() throws Exception {
-        handle("dns foobar");
-        assertThat(output()).contains("Unknown dns sub-command");
     }
 
     @Test

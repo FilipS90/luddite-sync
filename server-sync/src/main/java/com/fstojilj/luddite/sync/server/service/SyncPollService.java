@@ -133,7 +133,7 @@ public class SyncPollService {
         serverSocket = buildSslServerSocket();
         running = true;
         log.info("Listening for clients on port {} (mTLS)", port);
-        Thread.ofVirtual().name("client-acceptor").start(this::acceptClients);
+        Thread.ofPlatform().name("client-acceptor").daemon(false).start(this::acceptClients);
     }
 
     /**

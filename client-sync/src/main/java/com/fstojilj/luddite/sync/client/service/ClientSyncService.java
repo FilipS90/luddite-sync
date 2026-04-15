@@ -21,6 +21,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyStore;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 
 /**
@@ -80,7 +81,7 @@ public class ClientSyncService {
      */
     public static List<String> serverDirs = new ArrayList<>();
 
-    @Value("${sync.server.host:localhost}")
+    @Value("${sync.server.host}")
     private String serverHost;
 
     @Value("${sync.server.port:8888}")
@@ -328,7 +329,7 @@ public class ClientSyncService {
      * @throws IOException if writing fails
      */
     private void sendHandshake(DataOutputStream out, List<String> dirsToSync) throws IOException {
-        var syncSet = new java.util.HashSet<>(dirsToSync);
+        var syncSet = new HashSet<>(dirsToSync);
         List<SyncHandshakeEntry> entries = rootDirService.findAll().stream()
                 .filter(e -> syncSet.contains(e.dirName()))
                 .toList();
