@@ -25,12 +25,7 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-jdbc</artifactId>
         </dependency>
-
-        <!-- Scheduling for periodic sync -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-quartz</artifactId>
-        </dependency>
+        
         <!-- Actuator — exposes /actuator/refresh to reload @ConfigurationProperties at runtime -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
