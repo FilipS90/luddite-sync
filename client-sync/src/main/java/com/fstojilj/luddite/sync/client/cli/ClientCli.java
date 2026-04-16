@@ -5,6 +5,7 @@ import com.fstojilj.luddite.sync.client.service.RootDirService;
 import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -16,6 +17,7 @@ import java.util.Arrays;
 import java.util.List;
 
 import static com.fstojilj.luddite.sync.client.service.ClientSyncService.serverDirs;
+import static java.lang.Thread.sleep;
 
 /**
  * Interactive CLI for managing client directory subscriptions at runtime.
@@ -48,7 +50,9 @@ public class ClientCli {
         Thread.ofVirtual().name("client-cli").start(this::runLoop);
     }
 
+    @SneakyThrows
     private void runLoop() {
+        sleep(400);
         printHelp();
         try (var reader = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8))) {
             String line;
