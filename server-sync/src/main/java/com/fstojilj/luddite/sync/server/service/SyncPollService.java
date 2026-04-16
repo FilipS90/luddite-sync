@@ -93,7 +93,7 @@ public class SyncPollService {
     @Value("${sync.socket.truststore:classpath:truststore.p12}")
     private Resource truststoreResource;
 
-    @Value("${sync.socket.password:changeit}")
+    @Value("${sync.socket.password}")
     private String keystorePassword;
 
     // ── State ─────────────────────────────────────────────────────────────────
