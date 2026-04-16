@@ -45,26 +45,6 @@ else
     echo "  ✓ Certificates generated"
 fi
 
-# ── Update server application.yml ────────────────────────────────────────────
-
-echo ""
-echo "  Updating server configuration..."
-
-# Keystore password
-sed -i "s|password:.*|password: $KEYSTORE_PASSWORD|" "$SERVER_YML"
-
-echo "  ✓ Server configuration updated"
-
-# ── Update client application.yml ────────────────────────────────────────────
-
-echo ""
-echo "  Updating client configuration..."
-
-# Keystore password
-sed -i "s|password:.*|password: $KEYSTORE_PASSWORD|" "$CLIENT_YML"
-
-echo "  ✓ Client configuration updated"
-
 # ── Done ─────────────────────────────────────────────────────────────────────
 
 echo ""
