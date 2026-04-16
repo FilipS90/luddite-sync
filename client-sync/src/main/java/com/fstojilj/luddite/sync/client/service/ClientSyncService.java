@@ -109,7 +109,7 @@ public class ClientSyncService {
     @PostConstruct
     public void start() {
         running = true;
-        Thread.ofVirtual().name("server-sync-receiver").start(this::connectAndSync);
+        Thread.ofPlatform().name("server-sync-receiver").daemon(false).start(this::connectAndSync);
     }
 
     /**

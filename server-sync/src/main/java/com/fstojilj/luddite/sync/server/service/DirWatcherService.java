@@ -94,10 +94,8 @@ public class DirWatcherService {
                             .toString().replace('\\', '/');
                     log.info("{} trigger for file {}", kind.name(), absoluteFilePath);
 
-                    // If a new sub-directory is created, start watching it too
                     if (kind == StandardWatchEventKinds.ENTRY_CREATE && absoluteFilePath.toFile().isDirectory()) {
                         startWatching(absoluteFilePath, rootDirPath, rootDirId);
-                        continue;
                     }
 
                     handleFileEvent(kind, absoluteFilePath, rootDirId, relativePath);
