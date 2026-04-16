@@ -17,3 +17,7 @@ Thumbs.db
 
 # Generated certificates — never commit these
 common-sync/certs-temp/
+
+server-keystore.p12
+client-keystore.p12
+truststore.p12
