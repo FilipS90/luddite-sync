@@ -102,13 +102,14 @@ public class FileMetadataRepository {
      * @param lastSyncVersion last version the client acknowledged
      * @return list of changed/deleted records since that version
      */
-    public List<FileMetadata> findChangedSince(long rootDirId, Long lastSyncVersion) {
+    public List<FileMetadata> findChangedSince(long rootDirId, Long lastSyncVersion, long limit) {
         return jdbcTemplate.query("""
-                        SELECT * FROM file_metadata
-                        WHERE root_dir_id = ?
-                          AND (sync_version IS NULL OR sync_version > ?)
-                        """,
-                rowMapper, rootDirId, lastSyncVersion);
+                SELECT * FROM file_metadata
+                WHERE root_dir_id = ?
+                  AND (sync_version IS NULL OR sync_version > ?)
+                LIMIT ?
+                """,
+                rowMapper, rootDirId, lastSyncVersion, limit);
     }
 
     /**

@@ -339,7 +339,8 @@ public class PushService {
             long rootDirId = rootDirOpt.get().getId();
             String rootAbsPath = rootDirOpt.get().getAbsolutePath();
 
-            List<FileMetadata> changed = fileMetadataService.findChangedSince(rootDirId, lastSyncVersion);
+            long limit = 100;
+            List<FileMetadata> changed = fileMetadataService.findChangedSince(rootDirId, lastSyncVersion, limit);
             log.debug("Poll from '{}' for dir '{}' since v{}: {} record(s)",
                     hardwareId, dirName, lastSyncVersion, changed.size());
 
