@@ -389,6 +389,7 @@ public class ClientSyncService {
                     byte flags = in.readByte();
                     int pathLen = in.readInt();
                     String relPath = new String(in.readNBytes(pathLen), StandardCharsets.UTF_8);
+                    relPath = adjustFilePathToClientOS(relPath);
                     long syncVersion = in.readLong();
                     long fileSize = in.readLong();
 
@@ -546,5 +547,14 @@ public class ClientSyncService {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    private String adjustFilePathToClientOS(String relativePath) {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        if (os.contains("windows")) {
+            return relativePath.replace("/", "\\");
+        }
+
+        return relativePath.replace("\\", "/");
     }
 }
