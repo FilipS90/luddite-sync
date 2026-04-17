@@ -68,7 +68,7 @@ import java.util.concurrent.locks.ReentrantLock;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-public class SyncPollService {
+public class PushService {
 
     // ── Wire protocol bytes ───────────────────────────────────────────────────
     public static final byte POLL = 1;

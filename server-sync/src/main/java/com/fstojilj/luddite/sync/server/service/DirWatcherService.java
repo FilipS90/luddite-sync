@@ -22,7 +22,7 @@ import java.util.concurrent.Executors;
 /**
  * Watches one or more filesystem directories for changes and forwards each event
  * to {@link FileMetadataService} (to update the database) and to
- * {@link SyncPollService} (to notify the poll handler that new data is available).
+ * {@link PushService} (to notify the poll handler that new data is available).
  *
  * <p>A dedicated virtual thread is spawned for each watched directory.
  * Sub-directories created at runtime are registered automatically.
@@ -33,7 +33,7 @@ import java.util.concurrent.Executors;
 public class DirWatcherService {
 
     private final FileMetadataService fileMetadataService;
-    private final SyncPollService syncPollService;
+    private final PushService pushService;
 
     private final Executor executor = Executors.newVirtualThreadPerTaskExecutor();
     private final ConcurrentHashMap<String, WatchService> activeWatchers = new ConcurrentHashMap<>();
@@ -124,7 +124,7 @@ public class DirWatcherService {
 
     /**
      * Dispatches a single filesystem event to {@link FileMetadataService} and then
-     * signals {@link SyncPollService} that fresh data is available for this root dir.
+     * signals {@link PushService} that fresh data is available for this root dir.
      *
      * @param kind             the event kind (CREATE / MODIFY / DELETE)
      * @param absoluteFilePath absolute path of the affected file
@@ -139,7 +139,7 @@ public class DirWatcherService {
             } else if (kind == StandardWatchEventKinds.ENTRY_MODIFY) {
                 fileMetadataService.updateFileMetadata(absoluteFilePath, rootDirId, relativePath);
             } else if (kind == StandardWatchEventKinds.ENTRY_DELETE) {
-                String connectedClientIds = syncPollService.getConnectedClientIds();
+                String connectedClientIds = pushService.getConnectedClientIds();
                 fileMetadataService.softDeleteFileMetadata(rootDirId, relativePath, connectedClientIds);
             }
         } catch (Exception e) {

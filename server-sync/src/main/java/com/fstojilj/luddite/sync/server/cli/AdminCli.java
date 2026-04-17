@@ -1,7 +1,7 @@
 package com.fstojilj.luddite.sync.server.cli;
 
 import com.fstojilj.luddite.sync.server.service.RootDirService;
-import com.fstojilj.luddite.sync.server.service.SyncPollService;
+import com.fstojilj.luddite.sync.server.service.PushService;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
@@ -32,7 +32,7 @@ import static java.lang.Thread.sleep;
 public class AdminCli {
 
     private final RootDirService rootDirService;
-    private final SyncPollService syncPollService;
+    private final PushService pushService;
 
     @PostConstruct
     public void start() {
@@ -72,7 +72,7 @@ public class AdminCli {
                 }
             }
             case "listc" -> {
-                var clients = syncPollService.listConnectedClients();
+                var clients = pushService.listConnectedClients();
                 if (clients.isEmpty()) {
                     System.out.println("  (no clients connected)");
                 } else {
@@ -115,7 +115,7 @@ public class AdminCli {
                     System.out.println("  Use 'listc' to see connected client hardware IDs.");
                     return;
                 }
-                boolean sent = syncPollService.sendResumeServerMode(arg);
+                boolean sent = pushService.sendResumeServerMode(arg);
                 if (sent) {
                     System.out.printf("  Switch-mode signal sent to %s%n", arg);
                 } else {
