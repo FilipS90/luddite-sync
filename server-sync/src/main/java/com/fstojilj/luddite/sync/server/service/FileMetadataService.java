@@ -60,7 +60,7 @@ public class FileMetadataService {
      */
     @Transactional
     public void addFileMetadata(Path filePath, long rootDirId, String relativePath) {
-        if (relativePath.endsWith("Thumbs.db")) {
+        if (relativePath.contains("Thumbs.db")) {
             return;
         }
 

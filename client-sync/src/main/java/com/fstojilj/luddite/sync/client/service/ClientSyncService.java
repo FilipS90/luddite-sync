@@ -176,8 +176,8 @@ public class ClientSyncService {
 
                 // 2 — wait for the user to subscribe if nothing is configured yet
                 List<String> clientListeningDirs = rootDirService.retrieveAllInSyncDirs();
+                printAvailableDirs(serverServedDirs);
                 if (clientListeningDirs.isEmpty()) {
-                    printAvailableDirs(serverServedDirs);
                     while (running) {
                         sleep(7_000);
                         clientListeningDirs = rootDirService.retrieveAllInSyncDirs();
@@ -391,7 +391,7 @@ public class ClientSyncService {
                     String relPath = new String(in.readNBytes(pathLen), StandardCharsets.UTF_8);
                     relPath = adjustFilePathToClientOS(relPath);
                     long syncVersion = in.readLong();
-                    long fileSize = in.readLong();
+                    long fileSizeBytes = in.readLong();
 
                     boolean deleted = (flags & FLAG_DELETED) != 0;
 
@@ -401,8 +401,8 @@ public class ClientSyncService {
                     if (!target.startsWith(mirrorRoot)) {
                         log.error("Path traversal blocked — server sent path outside mirror dir: '{}'", relPath);
                         // Must drain bytes from stream to keep it in sync before continuing
-                        if (!deleted && fileSize > 0) {
-                            in.skipNBytes(fileSize);
+                        if (!deleted && fileSizeBytes > 0) {
+                            in.skipNBytes(fileSizeBytes);
                         }
                         continue;
                     }
@@ -424,14 +424,15 @@ public class ClientSyncService {
                         out.write(ackPathBytes);
                         out.flush();
                     } else {
-                        if (fileSize < 0 || fileSize > MAX_FILE_SIZE) {
-                            throw new IOException("Unreasonable file size from server (" + fileSize + " bytes) for: " + relPath);
+                        if (fileSizeBytes < 0 || fileSizeBytes > MAX_FILE_SIZE) {
+                            throw new IOException("Unreasonable file size from server (" + fileSizeBytes + " bytes) for: " + relPath);
                         }
-                        byte[] fileBytes = in.readNBytes((int) fileSize);
+                        byte[] fileBytes = in.readNBytes((int) fileSizeBytes);
                         Files.createDirectories(target.getParent());
                         Files.write(target, fileBytes);
                         fileMetadataService.recordSynced(dir, relPath);
-                        log.info("Written: {} ({} bytes, v{})", relPath, fileSize, syncVersion);
+                        String fileSizeMb = String.format("%.2f", (double) fileSizeBytes / (1024 * 1024));
+                        log.info("Written: {} ({} MB, v{})", relPath, fileSizeMb, syncVersion);
                     }
 
                     if (syncVersion > highestVersion) highestVersion = syncVersion;

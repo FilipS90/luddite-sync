@@ -1,5 +1,7 @@
 package com.fstojilj.luddite.sync.server.utils;
 
+import lombok.extern.slf4j.Slf4j;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -9,6 +11,7 @@ import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
+@Slf4j
 public final class FileChecksumUtils {
 
     private static final int BUFFER_SIZE = 8192;
@@ -18,6 +21,7 @@ public final class FileChecksumUtils {
     }
 
     public static String calculateFileChecksum(Path filePath) {
+        log.info("Calculating checksum for file: {}", filePath.getFileName());
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
 
