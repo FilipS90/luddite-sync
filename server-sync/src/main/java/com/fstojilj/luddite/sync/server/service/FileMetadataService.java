@@ -60,6 +60,10 @@ public class FileMetadataService {
      */
     @Transactional
     public void addFileMetadata(Path filePath, long rootDirId, String relativePath) {
+        if (relativePath.endsWith("Thumbs.db")) {
+            return;
+        }
+
         File file = filePath.toFile();
         if (!file.exists() || !file.isFile()) {
             throw new IllegalArgumentException("Path must point to an existing file");
