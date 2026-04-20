@@ -1,8 +1,8 @@
 package com.fstojilj.luddite.sync.server.cli;
 
 import com.fstojilj.luddite.sync.common.model.RootDir;
-import com.fstojilj.luddite.sync.server.service.RootDirService;
 import com.fstojilj.luddite.sync.server.service.PushService;
+import com.fstojilj.luddite.sync.server.service.RootDirService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -67,7 +67,7 @@ class AdminCliTest {
     @Test
     void handle_list_withDirs_shouldPrintDirs() throws Exception {
         when(rootDirService.findAll()).thenReturn(Set.of(
-                RootDir.builder().id(1L).name("photos").absolutePath("/photos").build()
+                RootDir.builder().id(1).name("photos").absolutePath("/photos").build()
         ));
         handle("list");
         assertThat(output()).contains("/photos");
@@ -115,14 +115,14 @@ class AdminCliTest {
 
     @Test
     void handle_remove_validId_removed_shouldPrint() throws Exception {
-        when(rootDirService.removeRootDir(1L)).thenReturn(true);
+        when(rootDirService.removeRootDir(1)).thenReturn(true);
         handle("remove 1");
         assertThat(output()).contains("Removed root dir id=1");
     }
 
     @Test
     void handle_remove_validId_notFound_shouldPrint() throws Exception {
-        when(rootDirService.removeRootDir(99L)).thenReturn(false);
+        when(rootDirService.removeRootDir(99)).thenReturn(false);
         handle("remove 99");
         assertThat(output()).contains("No root dir found");
     }

@@ -4,59 +4,52 @@ import com.fstojilj.luddite.sync.common.model.FileMetadata;
 import com.fstojilj.luddite.sync.server.repository.FileMetadataRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.File;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.Map;
 
 import static com.fstojilj.luddite.sync.server.utils.FileChecksumUtils.calculateFileChecksum;
 import static com.fstojilj.luddite.sync.server.utils.FileSystemUtils.listAllFilesForDir;
 
 /**
  * Business logic for file metadata lifecycle on the server.
- *
- * <p>Owns the monotonically increasing {@code syncVersion} counter — seeded lazily
- * from {@code MAX(sync_version)} on the very first call to {@link #nextSyncVersion()},
- * which guarantees the schema already exists at that point.
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class FileMetadataService {
+@Order(2)
+public class FileMetadataService implements ApplicationRunner {
 
     private final FileMetadataRepository fileMetadataRepository;
-    private final JdbcTemplate jdbcTemplate;
 
-    /**
-     * Sentinel value meaning "not yet seeded from the database".
-     */
-    private static final long UNSEEDED = Long.MIN_VALUE;
+    private Map<Integer, Long> syncVersionCounter = new HashMap<>();
 
-    private final AtomicLong syncVersionCounter = new AtomicLong(UNSEEDED);
+    @Override
+    public void run(ApplicationArguments args) throws Exception {
+        syncVersionCounter = fileMetadataRepository.getMaxSyncVersionByRootDir();
+    }
 
     /**
      * Mints the next monotonically increasing sync version.
      * Seeds from {@code MAX(sync_version)} on the very first invocation.
      */
-    public long nextSyncVersion() {
-        if (syncVersionCounter.get() == UNSEEDED) {
-            Long max = jdbcTemplate.queryForObject(
-                    "SELECT MAX(sync_version) FROM file_metadata", Long.class);
-            long seed = (max != null) ? max : 0L;
-            syncVersionCounter.compareAndSet(UNSEEDED, seed);
-            log.info("Sync-version counter seeded at {}", seed);
-        }
-        return syncVersionCounter.incrementAndGet();
+    public Long nextSyncVersion(int rootDirId) {
+        syncVersionCounter.merge(rootDirId, 1L, Long::sum);
+        return syncVersionCounter.get(rootDirId);
     }
 
     // ── Write path ────────────────────────────────────────────────────────────
 
     @Transactional
-    public void addFileMetadata(Path filePath, long rootDirId, String relativePath) {
+    public void addFileMetadata(Path filePath, int rootDirId, String relativePath) {
         // TODO : fix so that Thumbs.db files are not passing
 
         File file = filePath.toFile();
@@ -67,11 +60,11 @@ public class FileMetadataService {
     }
 
     @Transactional
-    public void addAllFileMetadataForRoot(String rootAbsolutePath, long rootDirId) {
+    public void addAllFileMetadataForRoot(String rootAbsolutePath, int rootDirId) {
         recursiveAddFileMetadataForSubdirs(rootAbsolutePath, rootAbsolutePath, rootDirId);
     }
 
-    private void recursiveAddFileMetadataForSubdirs(String dirAbsolutePath, String rootAbsolutePath, long rootDirId) {
+    private void recursiveAddFileMetadataForSubdirs(String dirAbsolutePath, String rootAbsolutePath, int rootDirId) {
         List<File> files = listAllFilesForDir(dirAbsolutePath);
         Path rootPath = Path.of(rootAbsolutePath);
 
@@ -89,7 +82,7 @@ public class FileMetadataService {
      * Returns the new syncVersion assigned to this file.
      */
     @Transactional
-    public void updateFileMetadata(Path absoluteFilePath, long rootDirId, String relativeFilePath) {
+    public void updateFileMetadata(Path absoluteFilePath, int rootDirId, String relativeFilePath) {
         File file = absoluteFilePath.toFile();
         if (!file.exists() || !file.isFile()) {
             throw new IllegalArgumentException("Path must point to an existing file");
@@ -116,8 +109,8 @@ public class FileMetadataService {
      *                           hard-deleted immediately in {@link #acknowledgeDelete})
      */
     @Transactional
-    public void softDeleteFileMetadata(long rootDirId, String relativeFilePath, String connectedClientIds) {
-        long version = nextSyncVersion();
+    public void softDeleteFileMetadata(int rootDirId, String relativeFilePath, String connectedClientIds) {
+        long version = nextSyncVersion(rootDirId);
         if (connectedClientIds.isBlank()) {
             // No clients connected — hard-delete immediately, nothing to replicate
             fileMetadataRepository.delete(rootDirId, relativeFilePath);
@@ -139,12 +132,12 @@ public class FileMetadataService {
      * @param hardwareId   the acknowledging client's stable hardware ID
      */
     @Transactional
-    public void acknowledgeDelete(long rootDirId, String relativePath, String hardwareId) {
+    public void acknowledgeDelete(int rootDirId, String relativePath, String hardwareId) {
         fileMetadataRepository.acknowledgeDelete(rootDirId, relativePath, hardwareId);
     }
 
     @Transactional
-    public void deleteAllForRootDir(long rootDirId) {
+    public void deleteAllForRootDir(int rootDirId) {
         fileMetadataRepository.deleteAllByRootDirId(rootDirId);
     }
 
@@ -159,7 +152,7 @@ public class FileMetadataService {
      * @param syncVersion  the version to stamp
      */
     @Transactional
-    public void stampSyncVersion(long rootDirId, String relativePath, long syncVersion) {
+    public void stampSyncVersion(int rootDirId, String relativePath, long syncVersion) {
         fileMetadataRepository.updateSyncVersion(rootDirId, relativePath, syncVersion);
     }
 
@@ -174,11 +167,11 @@ public class FileMetadataService {
      * @param lastSyncVersion last version the client has acknowledged
      * @return list of changed records
      */
-    public List<FileMetadata> findChangedSince(long rootDirId, Long lastSyncVersion, long limit) {
+    public List<FileMetadata> findChangedSince(int rootDirId, Long lastSyncVersion, long limit) {
         return fileMetadataRepository.findChangedSince(rootDirId, lastSyncVersion, limit);
     }
 
-    private FileMetadata buildFileMetadata(File file, long rootDirId, String relativePath) {
+    private FileMetadata buildFileMetadata(File file, int rootDirId, String relativePath) {
         return FileMetadata.builder()
                 .filename(file.getName())
                 .rootDirId(rootDirId)

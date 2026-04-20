@@ -257,7 +257,7 @@ public class PushService {
             List<SyncHandshakeEntry> handshake = readHandshake(in);
             log.info("Handshake from {}: {} dir(s)", socket.getRemoteSocketAddress(), handshake.size());
 
-            Set<Long> subscribedIds = resolveSubscribedIds(handshake);
+            Set<Integer> subscribedIds = resolveSubscribedIds(handshake);
 
             // Register this client
             connectedClients.put(hardwareId, socket.getRemoteSocketAddress().toString());
@@ -336,7 +336,7 @@ public class PushService {
                 return;
             }
 
-            long rootDirId = rootDirOpt.get().getId();
+            int rootDirId = rootDirOpt.get().getId();
             String rootAbsPath = rootDirOpt.get().getAbsolutePath();
 
             long limit = 100;
@@ -350,7 +350,7 @@ public class PushService {
                 // Mint once here — used both in the wire write and the post-flush DB stamp
                 long version = meta.syncVersion() != null
                         ? meta.syncVersion()
-                        : fileMetadataService.nextSyncVersion();
+                        : fileMetadataService.nextSyncVersion(meta.rootDirId());
 
                 if (meta.deleted()) {
                     payload.add(new PollRecord(meta, version, new byte[0]));
@@ -496,8 +496,8 @@ public class PushService {
      * @param handshake entries from the client
      * @return set of resolved root-dir IDs
      */
-    private Set<Long> resolveSubscribedIds(List<SyncHandshakeEntry> handshake) {
-        Set<Long> ids = new HashSet<>();
+    private Set<Integer> resolveSubscribedIds(List<SyncHandshakeEntry> handshake) {
+        Set<Integer> ids = new HashSet<>();
         for (SyncHandshakeEntry entry : handshake) {
             rootDirRepository.findByName(entry.dirName()).ifPresentOrElse(
                     dir -> ids.add(dir.getId()),

@@ -23,7 +23,7 @@ public class RootDirRepository {
     private final JdbcTemplate jdbcTemplate;
 
     private final RowMapper<RootDir> rowMapper = (rs, _) -> RootDir.builder()
-            .id(rs.getLong("id"))
+            .id(rs.getInt("id"))
             .name(rs.getString("name"))
             .absolutePath(rs.getString("absolute_path"))
             .createdAt(rs.getTimestamp("created_at") != null ? rs.getTimestamp("created_at").toInstant() : null)
@@ -31,7 +31,7 @@ public class RootDirRepository {
             .build();
 
 
-    public long insert(RootDir rootDir) {
+    public int insert(RootDir rootDir) {
         String sql = """
                 INSERT INTO root_dir (name, absolute_path)
                 VALUES (?, ?)
@@ -51,7 +51,7 @@ public class RootDirRepository {
             throw new IllegalStateException("Failed to retrieve generated key for FileMetadata");
         }
 
-        return key.longValue();
+        return key.intValue();
     }
 
 

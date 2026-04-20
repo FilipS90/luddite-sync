@@ -12,7 +12,7 @@ import java.time.Instant;
 @Data
 @Builder
 public class RootDir {
-    private Long id;
+    private Integer id;
     private String name;
     private String absolutePath;
     private Instant createdAt;
