@@ -55,14 +55,9 @@ public class FileMetadataService {
 
     // ── Write path ────────────────────────────────────────────────────────────
 
-    /**
-     * Returns the new syncVersion assigned to this file.
-     */
     @Transactional
     public void addFileMetadata(Path filePath, long rootDirId, String relativePath) {
-        if (relativePath.contains("Thumbs.db")) {
-            return;
-        }
+        // TODO : fix so that Thumbs.db files are not passing
 
         File file = filePath.toFile();
         if (!file.exists() || !file.isFile()) {
