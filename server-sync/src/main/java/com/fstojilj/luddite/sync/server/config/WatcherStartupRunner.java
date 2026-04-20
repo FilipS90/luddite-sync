@@ -1,5 +1,6 @@
 package com.fstojilj.luddite.sync.server.config;
 
+import com.fstojilj.luddite.sync.common.model.RootDir;
 import com.fstojilj.luddite.sync.server.repository.RootDirRepository;
 import com.fstojilj.luddite.sync.server.service.DirWatcherService;
 import com.fstojilj.luddite.sync.server.service.RootDirService;
@@ -43,7 +44,7 @@ public class WatcherStartupRunner implements ApplicationRunner {
         // Resume watchers for all dirs already in the DB (including the ones just added)
         var rootDirs = rootDirRepository.findAll();
         log.info("Resuming watchers for {} root dir(s)", rootDirs.size());
-        for (var rootDir : rootDirs) {
+        for (RootDir rootDir : rootDirs) {
             dirWatcherService.startWatching(rootDir.getAbsolutePath(), rootDir.getId());
         }
     }

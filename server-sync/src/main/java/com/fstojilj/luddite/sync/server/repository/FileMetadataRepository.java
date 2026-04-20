@@ -13,7 +13,9 @@ import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Repository
 @RequiredArgsConstructor
@@ -25,7 +27,7 @@ public class FileMetadataRepository {
     private final RowMapper<FileMetadata> rowMapper = (rs, _) -> FileMetadata.builder()
             .id(rs.getLong("id"))
             .filename(rs.getString("filename"))
-            .rootDirId(rs.getLong("root_dir_id"))
+            .rootDirId(rs.getInt("root_dir_id"))
             .relativePath(rs.getString("relative_path"))
             .checksum(rs.getString("checksum"))
             .fileSize(rs.getLong("file_size"))
@@ -67,8 +69,22 @@ public class FileMetadataRepository {
         return key.longValue();
     }
 
+    public Map<Integer, Long> getMaxSyncVersionByRootDir() {
+        return jdbcTemplate.query(
+                "SELECT root_dir_id, MAX(sync_version) as max_sync_version FROM file_metadata GROUP BY root_dir_id",
+                rs -> {
+                    Map<Integer, Long> map = new HashMap<>();
+                    while (rs.next()) {
+                        long val = rs.getLong("max_sync_version");
+                        map.put(rs.getInt("root_dir_id"), rs.wasNull() ? null : val);
+                    }
+                    return map;
+                }
+        );
+    }
 
-    public void updateSyncVersion(long rootDirId, String relativePath, long syncVersion) {
+
+    public void updateSyncVersion(int rootDirId, String relativePath, long syncVersion) {
         jdbcTemplate.update(
                 "UPDATE file_metadata SET sync_version = MAX(COALESCE(sync_version, 0), ?) WHERE root_dir_id = ? AND relative_path = ?",
                 syncVersion, rootDirId, relativePath);
@@ -78,7 +94,7 @@ public class FileMetadataRepository {
      * Hard-deletes a live (non-soft-deleted) file metadata row.
      * Use {@link #softDelete} for deletion events that must be replicated to clients.
      */
-    public void delete(Long rootDirId, String relativePath) {
+    public void delete(Integer rootDirId, String relativePath) {
         String sql = "DELETE FROM file_metadata WHERE root_dir_id = ? AND relative_path = ?";
         int rowsAffected = jdbcTemplate.update(sql, rootDirId, relativePath);
         if (rowsAffected > 0) {
@@ -88,7 +104,7 @@ public class FileMetadataRepository {
         }
     }
 
-    public void deleteAllByRootDirId(long rootDirId) {
+    public void deleteAllByRootDirId(int rootDirId) {
         jdbcTemplate.update("DELETE FROM file_metadata WHERE root_dir_id = ?", rootDirId);
         log.debug("Deleted all FileMetadata for rootDirId: {}", rootDirId);
     }
@@ -104,11 +120,11 @@ public class FileMetadataRepository {
      */
     public List<FileMetadata> findChangedSince(long rootDirId, Long lastSyncVersion, long limit) {
         return jdbcTemplate.query("""
-                SELECT * FROM file_metadata
-                WHERE root_dir_id = ?
-                  AND (sync_version IS NULL OR sync_version > ?)
-                LIMIT ?
-                """,
+                        SELECT * FROM file_metadata
+                        WHERE root_dir_id = ?
+                          AND (sync_version IS NULL OR sync_version > ?)
+                        LIMIT ?
+                        """,
                 rowMapper, rootDirId, lastSyncVersion, limit);
     }
 
@@ -145,7 +161,7 @@ public class FileMetadataRepository {
      * @param relativePath relative file path
      * @param hardwareId   the client hardware ID to remove
      */
-    public void acknowledgeDelete(long rootDirId, String relativePath, String hardwareId) {
+    public void acknowledgeDelete(int rootDirId, String relativePath, String hardwareId) {
         var results = jdbcTemplate.queryForList(
                 "SELECT client_ids FROM file_metadata WHERE root_dir_id = ? AND relative_path = ? AND deleted = TRUE",
                 rootDirId, relativePath);

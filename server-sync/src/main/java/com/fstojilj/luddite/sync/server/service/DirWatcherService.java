@@ -38,12 +38,12 @@ public class DirWatcherService {
     private final Executor executor = Executors.newVirtualThreadPerTaskExecutor();
     private final ConcurrentHashMap<String, WatchService> activeWatchers = new ConcurrentHashMap<>();
 
-    public void startWatching(String rootPath, long rootDirId) {
+    public void startWatching(String rootPath, int rootDirId) {
         Path rootDir = Paths.get(rootPath).toAbsolutePath();
         startWatching(rootDir, rootDir, rootDirId);
     }
 
-    private void startWatching(Path pathToWatch, Path rootDirPath, long rootDirId) {
+    private void startWatching(Path pathToWatch, Path rootDirPath, int rootDirId) {
         if (activeWatchers.containsKey(pathToWatch.toString())) {
             return;
         }
@@ -61,7 +61,7 @@ public class DirWatcherService {
         }
     }
 
-    private void watch(Path watchedDir, Path rootDirPath, long rootDirId) {
+    private void watch(Path watchedDir, Path rootDirPath, int rootDirId) {
         WatchService watchService = null;
         try {
             watchService = FileSystems.getDefault().newWatchService();
@@ -132,7 +132,7 @@ public class DirWatcherService {
      * @param relativePath     path relative to the root directory
      */
     private void handleFileEvent(WatchEvent.Kind<?> kind, Path absoluteFilePath,
-                                 long rootDirId, String relativePath) {
+                                 int rootDirId, String relativePath) {
         try {
             if (kind == StandardWatchEventKinds.ENTRY_CREATE) {
                 fileMetadataService.addFileMetadata(absoluteFilePath, rootDirId, relativePath);
@@ -147,7 +147,7 @@ public class DirWatcherService {
         }
     }
 
-    private void recursivelyWatchSubdirs(Path currentDir, Path rootDirPath, long rootDirId) throws IOException {
+    private void recursivelyWatchSubdirs(Path currentDir, Path rootDirPath, int rootDirId) throws IOException {
         try (var fileStream = Files.walk(currentDir, Integer.MAX_VALUE)) {
             fileStream.filter(Files::isDirectory)
                     .filter(dir -> !dir.equals(currentDir))

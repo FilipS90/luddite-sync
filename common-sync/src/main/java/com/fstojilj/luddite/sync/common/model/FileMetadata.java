@@ -8,7 +8,7 @@ import java.time.Instant;
 public record FileMetadata(
         Long id,
         String filename,
-        Long rootDirId,
+        Integer rootDirId,
         String relativePath,
         Long fileSize,
         String checksum,

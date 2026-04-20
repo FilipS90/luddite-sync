@@ -59,7 +59,7 @@ class DirWatcherServiceTest {
         String path = tempDir.toAbsolutePath().toString();
         activeWatchers().put(path, mockWatcher);
 
-        dirWatcherService.startWatching(path, 1L);
+        dirWatcherService.startWatching(path, 1);
 
         assertThat(activeWatchers()).hasSize(1);
     }
@@ -68,7 +68,7 @@ class DirWatcherServiceTest {
     void startWatching_newDir_shouldRegisterWatcher() throws Exception {
         String path = tempDir.toAbsolutePath().toString();
 
-        dirWatcherService.startWatching(path, 1L);
+        dirWatcherService.startWatching(path, 1);
 
         // Wait for the virtual thread to register the watcher
         long deadline = System.currentTimeMillis() + 3000;
@@ -86,7 +86,7 @@ class DirWatcherServiceTest {
     void startWatching_andFileCreated_shouldCallAddFileMetadata() throws Exception {
         String path = tempDir.toAbsolutePath().toString();
 
-        dirWatcherService.startWatching(path, 1L);
+        dirWatcherService.startWatching(path, 1);
 
         // Wait for watcher to be registered
         long deadline = System.currentTimeMillis() + 3000;
@@ -99,7 +99,7 @@ class DirWatcherServiceTest {
         Thread.sleep(300); // Give the watch loop time to fire
 
         verify(fileMetadataService).addFileMetadata(
-                tempDir.resolve("test.jpg"), 1L, "test.jpg");
+                tempDir.resolve("test.jpg"), 1, "test.jpg");
 
         dirWatcherService.stopWatching(path);
     }
@@ -110,7 +110,7 @@ class DirWatcherServiceTest {
         String rootPath = tempDir.toAbsolutePath().toString();
         String subPath = subDir.toAbsolutePath().toString();
 
-        dirWatcherService.startWatching(rootPath, 1L);
+        dirWatcherService.startWatching(rootPath, 1);
 
         // Wait for both root and subdir watchers
         long deadline = System.currentTimeMillis() + 3000;

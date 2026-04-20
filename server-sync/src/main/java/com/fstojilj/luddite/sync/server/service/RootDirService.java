@@ -32,14 +32,14 @@ public class RootDirService {
                 .absolutePath(absolutePath)
                 .build();
 
-        long roodDirId = rootDirRepository.insert(rootDir);
+        int roodDirId = rootDirRepository.insert(rootDir);
         fileMetadataService.addAllFileMetadataForRoot(absolutePath, roodDirId);
         dirWatcherService.startWatching(absolutePath, roodDirId);
     }
 
 
     @Transactional
-    public boolean removeRootDir(long id) {
+    public boolean removeRootDir(int id) {
         var rootDir = rootDirRepository.getRootDirById(id);
         if (rootDir.isEmpty()) {
             return false;

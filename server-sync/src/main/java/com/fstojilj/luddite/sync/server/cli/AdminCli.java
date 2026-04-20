@@ -1,7 +1,7 @@
 package com.fstojilj.luddite.sync.server.cli;
 
-import com.fstojilj.luddite.sync.server.service.RootDirService;
 import com.fstojilj.luddite.sync.server.service.PushService;
+import com.fstojilj.luddite.sync.server.service.RootDirService;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
@@ -98,7 +98,7 @@ public class AdminCli {
                     return;
                 }
                 try {
-                    long id = Long.parseLong(arg);
+                    int id = Integer.parseInt(arg);
                     boolean removed = rootDirService.removeRootDir(id);
                     if (removed) {
                         System.out.printf("  Removed root dir id=%d%n", id);
