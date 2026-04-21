@@ -9,6 +9,8 @@ import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.SpringApplication;
+import org.springframework.context.ApplicationContext;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
@@ -82,6 +84,7 @@ public class PushService {
     // ── Dependencies ─────────────────────────────────────────────────────────
     private final FileMetadataService fileMetadataService;
     private final RootDirRepository rootDirRepository;
+    private final ApplicationContext applicationContext;
 
     // ── Config ────────────────────────────────────────────────────────────────
     @Value("${sync.socket.port:8888}")
@@ -195,7 +198,7 @@ public class PushService {
                 out.flush();
             }
             log.info("RESUME_SERVER_MODE sent to {} — exiting with code 3", hardwareId);
-            System.exit(3);
+            SpringApplication.exit(applicationContext, () -> 3);
             return true;
         } catch (IOException e) {
             log.warn("Failed to send RESUME_SERVER_MODE to {}: {}", hardwareId, e.getMessage());
@@ -286,7 +289,7 @@ public class PushService {
                     }
                     case SHUTDOWN -> {
                         log.info("Shutdown signal from client '{}' — exiting with code 2", finalHardwareId);
-                        System.exit(2);
+                        SpringApplication.exit(applicationContext, () -> 2);
                     }
                     default -> log.warn("Unexpected byte {} from client '{}'", msg, finalHardwareId);
                 }

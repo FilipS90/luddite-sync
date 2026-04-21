@@ -6,6 +6,8 @@ import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.SpringApplication;
+import org.springframework.context.ApplicationContext;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
@@ -75,6 +77,7 @@ public class ClientSyncService {
     private final RootDirService rootDirService;
     private final FileMetadataService fileMetadataService;
     private final HardwareIdService hardwareIdService;
+    private final ApplicationContext applicationContext;
 
     /**
      * Dirs currently advertised by the server — exposed for the CLI {@code add} command.
@@ -448,7 +451,7 @@ public class ClientSyncService {
                 byte signal = in.readByte();
                 if (signal == RESUME_SERVER_MODE) {
                     log.info("RESUME_SERVER_MODE received — exiting with code 2 to restart as server");
-                    System.exit(2);
+                    SpringApplication.exit(applicationContext, () -> 2);
                 } else {
                     log.warn("Unexpected byte from server outside poll: {}", signal);
                 }

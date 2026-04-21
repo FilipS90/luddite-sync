@@ -6,6 +6,7 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.SpringApplication;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
@@ -33,6 +34,7 @@ public class AdminCli {
 
     private final RootDirService rootDirService;
     private final PushService pushService;
+    private final SpringApplication applicationContext;
 
     @PostConstruct
     public void start() {
@@ -125,7 +127,7 @@ public class AdminCli {
             case "help" -> printHelp();
             case "exit" -> {
                 System.out.println("  Shutting down...");
-                System.exit(0);
+                SpringApplication.exit(applicationContext, () -> 0);
             }
             default -> System.out.printf("  Unknown command: '%s'. Type 'help' for available commands.%n", command);
         }
