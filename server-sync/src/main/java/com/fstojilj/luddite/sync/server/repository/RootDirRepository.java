@@ -66,7 +66,7 @@ public class RootDirRepository {
         return rowsAffected > 0;
     }
 
-
+    // TODO : may throw EmptyResultDataAccessException, investigate
     public Optional<RootDir> getRootDirById(long rootDirId) {
         String sql = "SELECT * FROM root_dir WHERE id = ?";
         return Optional.ofNullable(jdbcTemplate.queryForObject(sql, rowMapper, rootDirId));

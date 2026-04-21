@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.SpringApplication;
+import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
@@ -34,7 +35,7 @@ public class AdminCli {
 
     private final RootDirService rootDirService;
     private final PushService pushService;
-    private final SpringApplication applicationContext;
+    private final ApplicationContext applicationContext;
 
     @PostConstruct
     public void start() {
