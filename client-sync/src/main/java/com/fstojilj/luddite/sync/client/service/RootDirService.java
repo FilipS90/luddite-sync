@@ -40,7 +40,7 @@ public class RootDirService {
             }
             fileMetadataService.findAllByDir(dir)
                     .forEach(rel -> fileMetadataService.removeRecord(dir, rel));
-            removeDirectory(dir);
+            rootDirRepository.remove(dir);
             log.info("Removed stale dir from sync state: '{}'", dir);
         }
     }
