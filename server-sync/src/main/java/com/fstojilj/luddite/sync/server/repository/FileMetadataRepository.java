@@ -13,9 +13,9 @@ import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 @Repository
 @RequiredArgsConstructor
@@ -69,11 +69,11 @@ public class FileMetadataRepository {
         return key.longValue();
     }
 
-    public Map<Integer, Long> getMaxSyncVersionByRootDir() {
+    public ConcurrentMap<Integer, Long> getMaxSyncVersionByRootDir() {
         return jdbcTemplate.query(
                 "SELECT root_dir_id, MAX(sync_version) as max_sync_version FROM file_metadata GROUP BY root_dir_id",
                 rs -> {
-                    Map<Integer, Long> map = new HashMap<>();
+                    ConcurrentMap<Integer, Long> map = new ConcurrentHashMap<>();
                     while (rs.next()) {
                         long val = rs.getLong("max_sync_version");
                         map.put(rs.getInt("root_dir_id"), rs.wasNull() ? null : val);

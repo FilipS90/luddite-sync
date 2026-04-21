@@ -12,9 +12,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.io.File;
 import java.nio.file.Path;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 import static com.fstojilj.luddite.sync.server.utils.FileChecksumUtils.calculateFileChecksum;
 import static com.fstojilj.luddite.sync.server.utils.FileSystemUtils.listAllFilesForDir;
@@ -28,9 +29,14 @@ import static com.fstojilj.luddite.sync.server.utils.FileSystemUtils.listAllFile
 @Order(2)
 public class FileMetadataService implements ApplicationRunner {
 
+    private static final Set<String> IGNORED_FILENAMES = Set.of(
+            "thumbs.db", "desktop.ini", ".ds_store", ".localized",
+            "thumbs.db:encryptable", "ethumbs.db"
+    );
+
     private final FileMetadataRepository fileMetadataRepository;
 
-    private Map<Integer, Long> syncVersionCounter = new HashMap<>();
+    private ConcurrentMap<Integer, Long> syncVersionCounter = new ConcurrentHashMap<>();
 
     @Override
     public void run(ApplicationArguments args) throws Exception {
@@ -50,11 +56,13 @@ public class FileMetadataService implements ApplicationRunner {
 
     @Transactional
     public void addFileMetadata(Path filePath, int rootDirId, String relativePath) {
-        // TODO : fix so that Thumbs.db files are not passing
-
         File file = filePath.toFile();
         if (!file.exists() || !file.isFile()) {
             throw new IllegalArgumentException("Path must point to an existing file");
+        }
+        if (isIgnored(file.getName())) {
+            log.debug("Ignoring file: {}", filePath);
+            return;
         }
         fileMetadataRepository.add(buildFileMetadata(file, rootDirId, relativePath));
     }
@@ -72,6 +80,10 @@ public class FileMetadataService implements ApplicationRunner {
             if (file.isDirectory()) {
                 recursiveAddFileMetadataForSubdirs(file.getAbsolutePath(), rootAbsolutePath, rootDirId);
             } else {
+                if (isIgnored(file.getName())) {
+                    log.debug("Ignoring file during initial scan: {}", file.getAbsolutePath());
+                    continue;
+                }
                 String relativePath = File.separator + rootPath.relativize(file.toPath());
                 fileMetadataRepository.add(buildFileMetadata(file, rootDirId, relativePath));
             }
@@ -182,5 +194,9 @@ public class FileMetadataService implements ApplicationRunner {
                 .deleted(false)
                 .clientIds(null)
                 .build();
+    }
+
+    private static boolean isIgnored(String filename) {
+        return IGNORED_FILENAMES.contains(filename.toLowerCase());
     }
 }
