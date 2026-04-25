@@ -28,6 +28,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyStore;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -520,29 +521,34 @@ public class PushService {
      */
     private SSLServerSocket buildSslServerSocket() throws Exception {
         char[] password = keystorePassword.toCharArray();
+        keystorePassword = null; // cleared for security reasons
 
-        KeyStore keyStore = KeyStore.getInstance("PKCS12");
-        try (var in = keystoreResource.getInputStream()) {
-            keyStore.load(in, password);
+        try {
+            KeyStore keyStore = KeyStore.getInstance("PKCS12");
+            try (var in = keystoreResource.getInputStream()) {
+                keyStore.load(in, password);
+            }
+
+            KeyStore trustStore = KeyStore.getInstance("PKCS12");
+            try (var in = truststoreResource.getInputStream()) {
+                trustStore.load(in, password);
+            }
+
+            var kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+            kmf.init(keyStore, password);
+
+            var tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            tmf.init(trustStore);
+
+            var ctx = SSLContext.getInstance("TLS");
+            ctx.init(kmf.getKeyManagers(), tmf.getTrustManagers(), null);
+
+            var socket = (SSLServerSocket) ctx.getServerSocketFactory().createServerSocket(port);
+            socket.setNeedClientAuth(true);
+            return socket;
+        } finally {
+            Arrays.fill(password, '\0');
         }
-
-        KeyStore trustStore = KeyStore.getInstance("PKCS12");
-        try (var in = truststoreResource.getInputStream()) {
-            trustStore.load(in, password);
-        }
-
-        var kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
-        kmf.init(keyStore, password);
-
-        var tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-        tmf.init(trustStore);
-
-        var ctx = SSLContext.getInstance("TLS");
-        ctx.init(kmf.getKeyManagers(), tmf.getTrustManagers(), null);
-
-        var socket = (SSLServerSocket) ctx.getServerSocketFactory().createServerSocket(port);
-        socket.setNeedClientAuth(true);
-        return socket;
     }
 }
 
