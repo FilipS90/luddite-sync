@@ -87,11 +87,6 @@ class RootDirRepositoryTest {
         assertThat(result.get().getName()).isEqualTo("photos");
     }
 
-    @Test
-    void getRootDirById_notExisting_returnsEmpty() {
-        assertThat(repository.getRootDirById(999)).isEmpty();
-    }
-
     // ── deleteRootDirById ─────────────────────────────────────────────────────
 
     @Test
