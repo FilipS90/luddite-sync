@@ -244,10 +244,8 @@ public class PushService {
      */
     private void serveClient(SSLSocket socket) {
         String hardwareId = null;
-        DataOutputStream out = null;
-        try {
-            var in = new DataInputStream(socket.getInputStream());
-            out = new DataOutputStream(socket.getOutputStream());
+        try (var in = new DataInputStream(socket.getInputStream());
+             var out = new DataOutputStream(socket.getOutputStream())) {
 
             // 1 — advertise available root dirs
             sendAvailableDirs(out);
@@ -348,61 +346,92 @@ public class PushService {
             log.debug("Poll from '{}' for dir '{}' since v{}: {} record(s)",
                     hardwareId, dirName, lastSyncVersion, changed.size());
 
-            List<PollRecord> payload = new ArrayList<>();
-
-            for (FileMetadata meta : changed) {
-                // Mint once here — used both in the wire write and the post-flush DB stamp
-                long version = meta.syncVersion() != null
-                        ? meta.syncVersion()
-                        : fileMetadataService.nextSyncVersion(meta.rootDirId());
-
-                if (meta.deleted()) {
-                    payload.add(new PollRecord(meta, version, new byte[0]));
-                } else {
-                    String relNorm = meta.relativePath().replaceAll("^[/\\\\]+", "");
-                    Path absPath = Path.of(rootAbsPath).resolve(relNorm);
-                    byte[] fileBytes;
-                    try {
-                        fileBytes = Files.readAllBytes(absPath);
-                    } catch (IOException e) {
-                        log.warn("Poll: file no longer on disk, skipping '{}': {}", absPath, e.getMessage());
-                        continue;
-                    }
-                    payload.add(new PollRecord(meta, version, fileBytes));
-                }
-            }
 
             // Write the full response to the wire first
-            out.writeInt(payload.size());
-            for (PollRecord rec : payload) {
-                String relNorm = rec.meta().relativePath().replaceAll("^[/\\\\]+", "");
+            out.writeInt(changed.size());
+            for (FileMetadata meta : changed) {
+                String relNorm = meta.relativePath().replaceAll("^[/\\\\]+", "");
                 String qualifiedPath = dirName + "/" + relNorm;
+                Path absPath = Path.of(rootAbsPath).resolve(relNorm);
+                long version = meta.syncVersion() != null ? meta.syncVersion() : fileMetadataService.nextSyncVersion(rootDirId);
                 byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
 
-                byte flags = rec.meta().deleted() ? FLAG_DELETED : 0;
+                byte flags = meta.deleted() ? FLAG_DELETED : 0;
+                long fileBytesSize = flags == 0 ? Files.size(absPath) : 0;
                 out.writeByte(flags);
                 out.writeInt(pathBytes.length);
                 out.write(pathBytes);
-                out.writeLong(rec.syncVersion());
-                out.writeLong(rec.bytes().length);
-                if (!rec.meta().deleted()) {
-                    out.write(rec.bytes());
+                out.writeLong(version);
+                out.writeLong(fileBytesSize);
+                if (!meta.deleted()) {
+                    sendFileBytes(out, absPath, fileBytesSize);
                 }
+
+                if (meta.syncVersion() == null) {
+                    fileMetadataService.stampSyncVersion(rootDirId, meta.relativePath(), version);
+                }
+
             }
             out.flush();
 
-            for (PollRecord rec : payload) {
-                if (rec.meta().syncVersion() == null) {
-                    fileMetadataService.stampSyncVersion(rootDirId, rec.meta().relativePath(), rec.syncVersion());
-                }
-            }
-
-            if (!payload.isEmpty()) {
-                log.debug("Poll response to '{}': {} record(s) for dir '{}'",
-                        hardwareId, payload.size(), dirName);
-            }
+        } catch (IOException e) {
+            log.warn("Error handling poll from '{}': {}", hardwareId, e.getMessage());
+            throw e;
+        } catch (Exception e) {
+            log.error("Unexpected error handling poll from '{}'", hardwareId, e);
+            throw e;
         } finally {
             pollLock.unlock();
+        }
+    }
+
+    /**
+     * Streams file bytes to the client in chunks.
+     *
+     * <p>If the file is deleted from disk between the DB query and the read, this method logs
+     * a warning and stops streaming.
+     *
+     * @param out           the client's output stream
+     * @param absPath       the absolute path to the file on disk
+     * @param fileBytesSize the expected size of the file in bytes
+     * @throws IOException if reading or writing fails
+     */
+    private void sendFileBytes(DataOutputStream out, Path absPath, long fileBytesSize) throws IOException {
+        if (fileBytesSize <= 33 * 1024 * 1024) {
+            sendAllFileBytes(absPath, out);
+            return;
+        }
+
+        long chunkSize = 33L * 1024 * 1024;
+        try (var in = Files.newInputStream(absPath)) {
+            byte[] buf = new byte[(int) chunkSize];
+            int read;
+            while ((read = in.read(buf)) != -1) {
+                out.write(buf, 0, read);
+            }
+        } catch (IOException e) {
+            log.error("Failed to read file bytes for '{}': {}", absPath, e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * Reads the entire file into memory and writes it to the output stream.
+     *
+     * <p>Used for small files (<100 MB) to reduce latency. For larger files, {@link #sendFileBytes}
+     * is used to stream in chunks.
+     *
+     * @param absPath the absolute path to the file on disk
+     * @param out     the client's output stream
+     * @throws IOException if reading or writing fails
+     */
+    private void sendAllFileBytes(Path absPath, DataOutputStream out) throws IOException {
+        try {
+            byte[] bytes = Files.readAllBytes(absPath);
+            out.write(bytes);
+        } catch (IOException e) {
+            log.warn("Failed to read file bytes for '{}': {}", absPath, e.getMessage());
+            throw e;
         }
     }
 

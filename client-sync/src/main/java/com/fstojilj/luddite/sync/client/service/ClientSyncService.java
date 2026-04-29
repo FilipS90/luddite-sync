@@ -72,7 +72,6 @@ public class ClientSyncService {
     private static final byte FLAG_DELETED = 0x01;
 
     private static final long POLL_INTERVAL_MS = 2_000;
-    private static final long MAX_FILE_SIZE = Integer.MAX_VALUE; // ~2 GB
 
     private final RootDirService rootDirService;
     private final FileMetadataService fileMetadataService;
@@ -410,14 +409,11 @@ public class ClientSyncService {
                         continue;
                     }
 
-                    // dirName is the first component of relPath
-                    String dir = Path.of(relPath).getName(0).toString();
-
                     if (deleted) {
                         // Delete from disk first, then purge DB record (disk-only delete already done here,
                         // so use purgeRecord not removeRecord to avoid a second disk delete attempt)
                         Files.deleteIfExists(target);
-                        fileMetadataService.purgeRecord(dir, relPath);
+                        fileMetadataService.purgeRecord(dirName, relPath);
                         log.info("Deleted: {}", relPath);
 
                         // ACK the delete so server can remove from client_ids
@@ -427,13 +423,25 @@ public class ClientSyncService {
                         out.write(ackPathBytes);
                         out.flush();
                     } else {
-                        if (fileSizeBytes < 0 || fileSizeBytes > MAX_FILE_SIZE) {
-                            throw new IOException("Unreasonable file size from server (" + fileSizeBytes + " bytes) for: " + relPath);
-                        }
-                        byte[] fileBytes = in.readNBytes((int) fileSizeBytes);
                         Files.createDirectories(target.getParent());
-                        Files.write(target, fileBytes);
-                        fileMetadataService.recordSynced(dir, relPath);
+                        if (fileSizeBytes <= 33L * 1024 * 1024) {
+                            // Small file — read whole into memory, write at once
+                            byte[] fileBytes = in.readNBytes((int) fileSizeBytes);
+                            Files.write(target, fileBytes);
+                        } else {
+                            // Large file — read in 33 MB chunks, stream directly to disk
+                            try (var fileOut = Files.newOutputStream(target)) {
+                                byte[] buf = new byte[33 * 1024 * 1024];
+                                long remaining = fileSizeBytes;
+                                while (remaining > 0) {
+                                    int toRead = (int) Math.min(buf.length, remaining);
+                                    int read = in.readNBytes(buf, 0, toRead); // reads exactly toRead bytes
+                                    fileOut.write(buf, 0, read);
+                                    remaining -= read;
+                                }
+                            }
+                        }
+                        fileMetadataService.recordSynced(dirName, relPath);
                         String fileSizeMb = String.format("%.2f", (double) fileSizeBytes / (1024 * 1024));
                         log.info("Written: {} ({} MB, v{})", relPath, fileSizeMb, syncVersion);
                     }
