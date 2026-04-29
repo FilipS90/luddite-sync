@@ -397,17 +397,17 @@ public class PushService {
      * @throws IOException if reading or writing fails
      */
     private void sendFileBytes(DataOutputStream out, Path absPath, long fileBytesSize) throws IOException {
-        if (fileBytesSize < 33 * 1024 * 1024) {
+        if (fileBytesSize <= 33 * 1024 * 1024) {
             sendAllFileBytes(absPath, out);
             return;
         }
 
         long chunkSize = 33L * 1024 * 1024;
         try (var in = Files.newInputStream(absPath)) {
-            byte[] buffer = new byte[(int) chunkSize];
+            byte[] buf = new byte[(int) chunkSize];
             int read;
-            while ((read = in.read(buffer)) != -1) {
-                out.write(buffer, 0, read);
+            while ((read = in.read(buf)) != -1) {
+                out.write(buf, 0, read);
             }
         } catch (IOException e) {
             log.error("Failed to read file bytes for '{}': {}", absPath, e.getMessage());
