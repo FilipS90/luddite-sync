@@ -117,13 +117,6 @@ public class PushService {
      */
     private final ReentrantLock pollLock = new ReentrantLock();
 
-    /**
-     * A single record to be sent in a poll response: the original metadata row,
-     * the sync version assigned to this delivery, and the file bytes (empty for deletes).
-     */
-    private record PollRecord(FileMetadata meta, long syncVersion, byte[] bytes) {
-    }
-
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     /**
@@ -270,7 +263,6 @@ public class PushService {
 
             // 4 — message loop
             final String finalHardwareId = hardwareId;
-            final DataOutputStream finalOut = out;
             while (true) {
                 byte msg = in.readByte();
 
@@ -279,7 +271,7 @@ public class PushService {
                         int nameLen = in.readInt();
                         String dirName = new String(in.readNBytes(nameLen), StandardCharsets.UTF_8);
                         Long lastSyncVersion = in.readLong();
-                        handlePoll(finalOut, dirName, lastSyncVersion, finalHardwareId);
+                        handlePoll(out, dirName, lastSyncVersion, finalHardwareId);
                     }
                     case DELETE_ACK -> {
                         int pathLen = in.readInt();
@@ -303,7 +295,8 @@ public class PushService {
             }
             try {
                 socket.close();
-            } catch (IOException ignored) {
+            } catch (IOException e) {
+                log.error("Error closing socket for client '{}': {}", hardwareId, e.getMessage());
             }
         }
     }
