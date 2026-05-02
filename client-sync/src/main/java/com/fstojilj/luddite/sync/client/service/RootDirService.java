@@ -31,7 +31,7 @@ public class RootDirService {
 
     @Value("${sync.client.retain-local-directory}")
     private boolean retainLocalDirectory;
-    
+
     public void removeStaleDirs(List<String> staleDirs) {
         for (String dir : staleDirs) {
             Path dirPath = Path.of(mirrorDirPath).resolve(dir);
@@ -57,14 +57,25 @@ public class RootDirService {
     }
 
     /**
-     * Removes a single directory from the local sync state and deletes it from disk.
+     * Removes a single directory from the local sync state and optionally deletes it from disk.
+     * Also cleans up all {@link com.fstojilj.luddite.sync.client.repository.FileMetadataRepository}
+     * records for that directory.
      *
-     * @param directory the directory name to remove
+     * @param directory        the directory name to remove
+     * @param deleteLocalFiles if {@code true} the mirrored directory is deleted from disk
      */
-    public void removeDirectory(String directory) {
-        Path dirPath = Path.of(mirrorDirPath).resolve(directory);
-        FileSystemUtils.deleteDirectoryRecursively(dirPath);
+    public void removeDirectory(String directory, boolean deleteLocalFiles) {
+        if (deleteLocalFiles) {
+            Path dirPath = Path.of(mirrorDirPath).resolve(directory);
+            FileSystemUtils.deleteDirectoryRecursively(dirPath);
+            fileMetadataService.findAllByDir(directory)
+                    .forEach(rel -> fileMetadataService.removeRecord(directory, rel));
+        } else {
+            fileMetadataService.findAllByDir(directory)
+                    .forEach(rel -> fileMetadataService.purgeRecord(directory, rel));
+        }
         rootDirRepository.remove(directory);
+        log.info("Removed directory '{}' from sync state (deleteLocalFiles={})", directory, deleteLocalFiles);
     }
 
     /**

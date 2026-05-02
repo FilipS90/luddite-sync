@@ -109,7 +109,7 @@ public class ClientCli {
             }
             case "remove" -> {
                 if (arg.isEmpty()) {
-                    System.out.println("  Usage: remove <dir-name>");
+                    System.out.println("  Usage (unsubscribe from dir): remove <dir-name>");
                     return;
                 }
                 if (!dirNames.contains(arg)) {
@@ -117,7 +117,7 @@ public class ClientCli {
                     return;
                 }
 
-                rootDirService.removeDirectory(arg);
+                rootDirService.removeDirectory(arg, false);
                 System.out.printf("  Unsubscribed from: %s%n", arg);
             }
             case "refresh" -> {
