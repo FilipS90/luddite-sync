@@ -9,6 +9,7 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Component;
 
@@ -37,6 +38,7 @@ import static java.lang.Thread.sleep;
 @Component
 @RequiredArgsConstructor
 @Slf4j
+@ConditionalOnProperty(name = "sync.client.ui", havingValue = "cli")
 public class ClientCli {
 
     private final RootDirService rootDirService;
@@ -109,7 +111,7 @@ public class ClientCli {
             }
             case "remove" -> {
                 if (arg.isEmpty()) {
-                    System.out.println("  Usage: remove <dir-name>");
+                    System.out.println("  Usage (unsubscribe from dir): remove <dir-name>");
                     return;
                 }
                 if (!dirNames.contains(arg)) {
@@ -117,7 +119,7 @@ public class ClientCli {
                     return;
                 }
 
-                rootDirService.removeDirectory(arg);
+                rootDirService.removeDirectory(arg, false);
                 System.out.printf("  Unsubscribed from: %s%n", arg);
             }
             case "refresh" -> {

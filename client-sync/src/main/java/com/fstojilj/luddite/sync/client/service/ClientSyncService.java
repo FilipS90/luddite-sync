@@ -125,6 +125,13 @@ public class ClientSyncService {
     }
 
     /**
+     * Returns {@code true} if the SSL socket is currently open and connected.
+     */
+    public boolean isConnected() {
+        return socket != null && !socket.isClosed() && socket.isConnected();
+    }
+
+    /**
      * Drops the current connection so the sync loop reconnects immediately,
      * re-reading the list of available directories from the server.
      * Intended to be called by the CLI {@code refresh} command.

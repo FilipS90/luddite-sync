@@ -91,7 +91,7 @@ class ClientRootDirServiceTest {
         Path photosDir = Files.createDirectory(tempDir.resolve("photos"));
         Files.writeString(photosDir.resolve("file.jpg"), "data");
 
-        rootDirService.removeDirectory("photos");
+        rootDirService.removeDirectory("photos", true);
 
         verify(rootDirRepository).remove("photos");
         assertThat(photosDir).doesNotExist();

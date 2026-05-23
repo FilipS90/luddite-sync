@@ -113,7 +113,7 @@ class ClientCliTest {
     void handle_remove_noArg_printsUsage() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
         handle("remove");
-        assertThat(output()).contains("Usage: remove");
+        assertThat(output()).contains("Usage (unsubscribe from dir): remove <dir-name>");
     }
 
     @Test
@@ -127,7 +127,7 @@ class ClientCliTest {
     void handle_remove_knownDir_callsRemove() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of(new SyncHandshakeEntry("photos", 1L)));
         handle("remove photos");
-        verify(rootDirService).removeDirectory("photos");
+        verify(rootDirService).removeDirectory("photos", false);
         assertThat(output()).contains("photos");
     }
 
