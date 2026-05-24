@@ -25,7 +25,6 @@ import static java.lang.Thread.sleep;
  * listc             — list connected clients and their addresses
  * add &lt;path&gt;        — register a new root dir and start watching it
  * remove &lt;id&gt;       — stop watching and unregister a root dir by ID
- * switch-mode &lt;addr&gt; — signal a specific client to restart as a server (use 'listc' for addresses)
  * help              — show available commands
  * exit              — shut down the server
  */
@@ -132,19 +131,6 @@ public class AdminCli {
                     System.out.println("  Error: id must be a number");
                 }
             }
-            case "switch-mode" -> {
-                if (arg.isEmpty()) {
-                    System.out.println("  Usage: switch-mode <hardware-id>");
-                    System.out.println("  Use 'listc' to see connected client hardware IDs.");
-                    return;
-                }
-                boolean sent = pushService.sendResumeServerMode(arg);
-                if (sent) {
-                    System.out.printf("  Switch-mode signal sent to %s%n", arg);
-                } else {
-                    System.out.printf("  No connected client found with hardware ID: %s%n", arg);
-                }
-            }
             case "help" -> printHelp();
             case "exit" -> {
                 System.out.println("  Shutting down...");
@@ -162,7 +148,6 @@ public class AdminCli {
         System.out.println("  listc               list connected clients and their addresses");
         System.out.println("  add <path>          register and watch a new root dir");
         System.out.println("  remove <id>         unregister a root dir by ID");
-        System.out.println("  switch-mode <id>    signal a specific client to restart as a server (use 'listc' for hardware IDs)");
         System.out.println("  help                show this message");
         System.out.println("  exit                shut down the server");
         System.out.println();

@@ -30,7 +30,6 @@ import static java.lang.Thread.sleep;
  * add &lt;name&gt;          — subscribe to a server directory by name
  * remove &lt;name&gt;       — unsubscribe from a directory
  * refresh             — reconnect to server to re-poll available directories
- * shutdown-server     — send a remote shutdown signal to the server over the socket
  * mirror              — show the current mirror directory
  * help                — show available commands
  * exit                — shut down the client
@@ -126,10 +125,6 @@ public class ClientCli {
                 System.out.println("  Reconnecting to server to re-poll available directories...");
                 clientSyncService.reconnect();
             }
-            case "shutdown-server" -> {
-                System.out.println("  Sending shutdown signal to server...");
-                clientSyncService.sendShutdown();
-            }
             case "mirror" -> System.out.printf("  Mirror directory: %s%n", mirrorDir);
             case "help" -> printHelp();
             case "exit" -> {
@@ -148,7 +143,6 @@ public class ClientCli {
         System.out.println("  add <name>          subscribe to a server directory");
         System.out.println("  remove <name>       unsubscribe from a directory");
         System.out.println("  refresh             reconnect and re-poll server for available dirs");
-        System.out.println("  shutdown-server     remotely shut down the server");
         System.out.println("  mirror              show current mirror directory");
         System.out.println("  help                show this message");
         System.out.println("  exit                shut down the client");

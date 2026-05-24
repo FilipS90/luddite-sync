@@ -9,8 +9,6 @@ import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.SpringApplication;
-import org.springframework.context.ApplicationContext;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
@@ -51,9 +49,6 @@ import java.util.concurrent.locks.ReentrantLock;
  *       ({@code [1b DELETE_ACK][4b pathLen][path]}) after removing the file from disk;
  *       the server then removes the client from that record's {@code client_ids} list and
  *       hard-deletes the row once all clients have acknowledged.</li>
- *   <li>A {@code SHUTDOWN} byte from the client causes the server to exit with code 2.</li>
- *   <li>A {@code RESUME_SERVER_MODE} byte sent by the server instructs the client to
- *       restart itself as a server (exit code 2 on the client side).</li>
  * </ol>
  *
  * <h2>Poll response wire format</h2>
@@ -76,8 +71,6 @@ public class PushService {
     // ── Wire protocol bytes ───────────────────────────────────────────────────
     public static final byte POLL = 1;
     public static final byte DELETE_ACK = 2;
-    public static final byte SHUTDOWN = 3;
-    public static final byte RESUME_SERVER_MODE = 4;
 
     // ── Flag bits in poll response ────────────────────────────────────────────
     private static final byte FLAG_DELETED = 0x01;
@@ -85,7 +78,6 @@ public class PushService {
     // ── Dependencies ─────────────────────────────────────────────────────────
     private final FileMetadataService fileMetadataService;
     private final RootDirRepository rootDirRepository;
-    private final ApplicationContext applicationContext;
 
     // ── Config ────────────────────────────────────────────────────────────────
     @Value("${sync.socket.port:8888}")
@@ -170,38 +162,7 @@ public class PushService {
     }
 
     /**
-     * Sends a {@code RESUME_SERVER_MODE} signal to the client identified by the given
-     * hardware ID, instructing it to restart in server mode (exit code 2).
-     * After sending, this process also exits with code 3.
-     *
-     * @param hardwareId the target client's stable hardware ID
-     * @return {@code true} if the signal was sent, {@code false} if no matching session exists
-     */
-    public boolean sendResumeServerMode(String hardwareId) {
-        // We store the DataOutputStream per-session in the serve thread; here we use
-        // a simple shared map so the CLI can reach it.
-        // The actual write is handled via the clientOutputStreams map below.
-        DataOutputStream out = clientOutputStreams.get(hardwareId);
-        if (out == null) {
-            log.warn("sendResumeServerMode: no session for hardwareId '{}'", hardwareId);
-            return false;
-        }
-        try {
-            synchronized (out) {
-                out.writeByte(RESUME_SERVER_MODE);
-                out.flush();
-            }
-            log.info("RESUME_SERVER_MODE sent to {} — exiting with code 3", hardwareId);
-            SpringApplication.exit(applicationContext, () -> 3);
-            return true;
-        } catch (IOException e) {
-            log.warn("Failed to send RESUME_SERVER_MODE to {}: {}", hardwareId, e.getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Output streams keyed by hardwareId so the CLI can send out-of-band signals.
+     * Output streams keyed by client-id so the CLI can send out-of-band signals.
      */
     private final ConcurrentHashMap<String, DataOutputStream> clientOutputStreams = new ConcurrentHashMap<>();
 
@@ -277,10 +238,6 @@ public class PushService {
                         int pathLen = in.readInt();
                         String qualifiedPath = new String(in.readNBytes(pathLen), StandardCharsets.UTF_8);
                         handleDeleteAck(qualifiedPath, finalHardwareId);
-                    }
-                    case SHUTDOWN -> {
-                        log.info("Shutdown signal from client '{}' — exiting with code 2", finalHardwareId);
-                        SpringApplication.exit(applicationContext, () -> 2);
                     }
                     default -> log.warn("Unexpected byte {} from client '{}'", msg, finalHardwareId);
                 }

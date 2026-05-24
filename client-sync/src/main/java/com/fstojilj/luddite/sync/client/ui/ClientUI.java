@@ -261,7 +261,6 @@ public class ClientUI {
         panel.add(retroButton("[ STOP SYNC ]", FG_AMBER, () -> stopSync(false)));
         panel.add(retroButton("[ STOP & DELETE ]", FG_RED, () -> stopSync(true)));
         panel.add(retroButton("[ REFRESH ]", FG_AMBER, this::doRefresh));
-        panel.add(retroButton("[ SHUTDOWN SERVER ]", FG_RED, this::doShutdownServer));
         panel.add(retroButton("[ EXIT ]", FG_RED, this::exitApp));
 
         return panel;
@@ -354,15 +353,6 @@ public class ClientUI {
         appendLog("[INFO] Reconnecting to server...");
         clientSyncService.reconnect();
         refreshData();
-    }
-
-    private void doShutdownServer() {
-        int confirm = JOptionPane.showConfirmDialog(frame,
-                retroHtmlMsg("Send SHUTDOWN signal to the server?"),
-                "CONFIRM SHUTDOWN", JOptionPane.YES_NO_OPTION);
-        if (confirm != JOptionPane.YES_OPTION) return;
-        appendLog("[WARN] Sending shutdown signal to server...");
-        clientSyncService.sendShutdown();
     }
 
     private void exitApp() {

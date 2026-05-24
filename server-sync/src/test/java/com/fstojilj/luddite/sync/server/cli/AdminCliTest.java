@@ -140,26 +140,6 @@ class AdminCliTest {
     }
 
     @Test
-    void handle_switchMode_noArg_shouldPrintUsage() throws Exception {
-        handle("switch-mode");
-        assertThat(output()).contains("Usage: switch-mode");
-    }
-
-    @Test
-    void handle_switchMode_clientFound_shouldConfirm() throws Exception {
-        when(pushService.sendResumeServerMode("hw-id-abc123")).thenReturn(true);
-        handle("switch-mode hw-id-abc123");
-        assertThat(output()).contains("Switch-mode signal sent");
-    }
-
-    @Test
-    void handle_switchMode_clientNotFound_shouldPrintNotFound() throws Exception {
-        when(pushService.sendResumeServerMode("hw-id-unknown")).thenReturn(false);
-        handle("switch-mode hw-id-unknown");
-        assertThat(output()).contains("No connected client");
-    }
-
-    @Test
     void handle_help_shouldPrintHelp() throws Exception {
         handle("help");
         assertThat(output()).contains("Luddite Sync Server");

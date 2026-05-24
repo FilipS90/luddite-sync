@@ -140,15 +140,6 @@ class ClientCliTest {
         verify(clientSyncService).reconnect();
     }
 
-    // ── shutdown-server ───────────────────────────────────────────────────────
-
-    @Test
-    void handle_shutdownServer_callsSendShutdown() throws Exception {
-        when(rootDirService.findAll()).thenReturn(List.of());
-        handle("shutdown-server");
-        verify(clientSyncService).sendShutdown();
-    }
-
     // ── mirror ────────────────────────────────────────────────────────────────
 
     @Test

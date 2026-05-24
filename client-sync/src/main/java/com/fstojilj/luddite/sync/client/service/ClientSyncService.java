@@ -6,8 +6,6 @@ import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.SpringApplication;
-import org.springframework.context.ApplicationContext;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
@@ -66,8 +64,6 @@ public class ClientSyncService {
 
     private static final byte POLL = 1;
     private static final byte DELETE_ACK = 2;
-    private static final byte SHUTDOWN = 3;
-    private static final byte RESUME_SERVER_MODE = 4;
 
     private static final byte FLAG_DELETED = 0x01;
 
@@ -76,7 +72,6 @@ public class ClientSyncService {
     private final RootDirService rootDirService;
     private final FileMetadataService fileMetadataService;
     private final ClientIdService clientIdService;
-    private final ApplicationContext applicationContext;
 
     /**
      * Dirs currently advertised by the server — exposed for the CLI {@code add} command.
@@ -141,28 +136,6 @@ public class ClientSyncService {
         // Do NOT set running=false — that exits the loop entirely.
         // Closing the socket causes an IOException in connectAndSync which triggers a reconnect.
         closeSocket();
-    }
-
-    /**
-     * Sends a {@code SHUTDOWN} signal to the server over the existing mTLS socket,
-     * asking it to terminate.
-     *
-     * <p>If the socket is not currently connected, the call is a no-op and a warning
-     * is logged.
-     */
-    public void sendShutdown() {
-        if (socket == null || socket.isClosed()) {
-            log.warn("Cannot send shutdown — not connected to server");
-            return;
-        }
-        try {
-            var out = new DataOutputStream(socket.getOutputStream());
-            out.writeByte(SHUTDOWN);
-            out.flush();
-            log.info("Shutdown signal sent to server");
-        } catch (IOException e) {
-            log.warn("Failed to send shutdown signal: {}", e.getMessage());
-        }
     }
 
     /**
@@ -464,12 +437,7 @@ public class ClientSyncService {
             // Check for server-initiated signals (non-blocking: peek at available bytes)
             if (in.available() > 0) {
                 byte signal = in.readByte();
-                if (signal == RESUME_SERVER_MODE) {
-                    log.info("RESUME_SERVER_MODE received — exiting with code 2 to restart as server");
-                    SpringApplication.exit(applicationContext, () -> 2);
-                } else {
-                    log.warn("Unexpected byte from server outside poll: {}", signal);
-                }
+                log.warn("Unexpected byte from server outside poll: {}", signal);
             }
 
             sleep(POLL_INTERVAL_MS);
