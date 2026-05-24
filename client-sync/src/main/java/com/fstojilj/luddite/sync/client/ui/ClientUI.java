@@ -349,6 +349,7 @@ public class ClientUI {
         appendLog(deleteLocalFiles
                 ? "[OK]   Stopped sync and deleted local files for: " + dir
                 : "[OK]   Stopped sync (local files kept) for: " + dir);
+        clientSyncService.reconnect();
         refreshData();
     }
 
