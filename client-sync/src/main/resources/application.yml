@@ -16,6 +16,7 @@ sync:
     mirror-dir: ${user.home}/.luddite
     retain-local-directory: true
     ui: swing
+    name: xyz-client
   socket:
     keystore: classpath:client-keystore.p12
     truststore: classpath:truststore.p12

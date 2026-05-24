@@ -75,7 +75,7 @@ public class ClientSyncService {
 
     private final RootDirService rootDirService;
     private final FileMetadataService fileMetadataService;
-    private final HardwareIdService hardwareIdService;
+    private final ClientIdService clientIdService;
     private final ApplicationContext applicationContext;
 
     /**
@@ -263,11 +263,11 @@ public class ClientSyncService {
      * @throws IOException if writing fails
      */
     private void sendHardwareId(DataOutputStream out) throws IOException {
-        byte[] idBytes = hardwareIdService.getHardwareId().getBytes(StandardCharsets.UTF_8);
+        byte[] idBytes = clientIdService.getClientId().getBytes(StandardCharsets.UTF_8);
         out.writeInt(idBytes.length);
         out.write(idBytes);
         out.flush();
-        log.info("Sent hardwareId to server: {}", hardwareIdService.getHardwareId());
+        log.info("Sent hardwareId to server: {}", clientIdService.getClientId());
     }
 
     /**
