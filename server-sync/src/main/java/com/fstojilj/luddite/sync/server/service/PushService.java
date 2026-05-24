@@ -71,6 +71,7 @@ public class PushService {
     // ── Wire protocol bytes ───────────────────────────────────────────────────
     public static final byte POLL = 1;
     public static final byte DELETE_ACK = 2;
+    public static final byte PRIVATE_AUTH = 3;
 
     // ── Flag bits in poll response ────────────────────────────────────────────
     private static final byte FLAG_DELETED = 0x01;
@@ -238,6 +239,13 @@ public class PushService {
                         int pathLen = in.readInt();
                         String qualifiedPath = new String(in.readNBytes(pathLen), StandardCharsets.UTF_8);
                         handleDeleteAck(qualifiedPath, finalClientId);
+                    }
+                    case PRIVATE_AUTH -> {
+                        int nameLen = in.readInt();
+                        String dirName = new String(in.readNBytes(nameLen), StandardCharsets.UTF_8);
+                        int hashLen = in.readInt();
+                        String passwordHash = new String(in.readNBytes(hashLen), StandardCharsets.UTF_8);
+                        handlePrivateAuth(out, dirName, passwordHash, subscribedIds, finalClientId);
                     }
                     default -> log.warn("Unexpected byte {} from client '{}'", msg, finalClientId);
                 }
@@ -414,6 +422,52 @@ public class PushService {
         );
     }
 
+    // ── Private-auth handler ──────────────────────────────────────────────────
+
+    /**
+     * Handles a PRIVATE_AUTH request from a client.
+     *
+     * <p>Wire format (client → server):
+     * <pre>
+     * [1 byte]  PRIVATE_AUTH
+     * [4 bytes] dir name length
+     * [N bytes] dir name (UTF-8)
+     * [4 bytes] password hash length
+     * [M bytes] SHA-256 hex hash (UTF-8)
+     * </pre>
+     * Server response: {@code 0x01} = granted, {@code 0x00} = denied.
+     *
+     * @param out           the client's output stream
+     * @param dirName       the private directory name being requested
+     * @param passwordHash  the SHA-256 hex hash sent by the client
+     * @param subscribedIds the mutable set of authorised dir IDs for this session
+     * @param clientId      client identifier for logging
+     * @throws IOException if writing fails
+     */
+    private void handlePrivateAuth(DataOutputStream out, String dirName, String passwordHash,
+                                   Set<Integer> subscribedIds, String clientId) throws IOException {
+        var dirOpt = rootDirRepository.findByName(dirName);
+        if (dirOpt.isEmpty() || !dirOpt.get().isPrivate()) {
+            log.warn("PRIVATE_AUTH from '{}' for unknown/non-private dir '{}' — denied", clientId, dirName);
+            out.writeByte(0x00);
+            out.flush();
+            return;
+        }
+
+        RootDir dir = dirOpt.get();
+        String storedHash = dir.getPassword();
+
+        if (storedHash != null && storedHash.equals(passwordHash)) {
+            subscribedIds.add(dir.getId());
+            log.info("PRIVATE_AUTH from '{}' for dir '{}' — GRANTED", clientId, dirName);
+            out.writeByte(0x01);
+        } else {
+            log.warn("PRIVATE_AUTH from '{}' for dir '{}' — DENIED (wrong password)", clientId, dirName);
+            out.writeByte(0x00);
+        }
+        out.flush();
+    }
+
     // ── Handshake helpers ─────────────────────────────────────────────────────
 
     /**
@@ -432,7 +486,7 @@ public class PushService {
      */
     private void sendAvailableDirs(DataOutputStream out) throws IOException {
         List<String> dirNames = rootDirRepository.findAll().stream()
-                .filter(RootDir::isPrivate)
+                .filter(rd -> !rd.isPrivate())
                 .map(RootDir::getName)
                 .toList();
         out.writeInt(dirNames.size());

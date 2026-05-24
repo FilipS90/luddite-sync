@@ -1,6 +1,7 @@
 package com.fstojilj.luddite.sync.server.cli;
 
 import com.fstojilj.luddite.sync.common.model.RootDir;
+import com.fstojilj.luddite.sync.common.util.PasswordUtils;
 import com.fstojilj.luddite.sync.server.service.PushService;
 import com.fstojilj.luddite.sync.server.service.RootDirService;
 import org.junit.jupiter.api.BeforeEach;
@@ -102,14 +103,14 @@ class AdminCliTest {
     @Test
     void handle_add_withPathAndFlags_shouldAddAndPrint() throws Exception {
         handle("add /home/user/photos --private --pswd admin123");
-        verify(rootDirService).addRootDir("/home/user/photos", true, "admin123");
+        verify(rootDirService).addRootDir("/home/user/photos", true, PasswordUtils.hash("admin123"));
         assertThat(output()).contains("Added and watching");
     }
 
     @Test
     void handle_add_withPathAndFlags2_shouldAddAndPrint() throws Exception {
         handle("add /home/user/photos --pswd admin123 --private");
-        verify(rootDirService).addRootDir("/home/user/photos", true, "admin123");
+        verify(rootDirService).addRootDir("/home/user/photos", true, PasswordUtils.hash("admin123"));
         assertThat(output()).contains("Added and watching");
     }
 

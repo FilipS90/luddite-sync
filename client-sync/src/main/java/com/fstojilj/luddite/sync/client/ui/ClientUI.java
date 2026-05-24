@@ -21,11 +21,13 @@ import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JPasswordField;
 import javax.swing.JScrollPane;
 import javax.swing.JSeparator;
 import javax.swing.JSplitPane;
 import javax.swing.JTable;
 import javax.swing.JTextArea;
+import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.Timer;
@@ -258,6 +260,7 @@ public class ClientUI {
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 6));
         panel.setBackground(BG);
         panel.add(retroButton("[ START SYNC >> ]", FG, this::subscribeSelected));
+        panel.add(retroButton("[ SYNC PRIVATE ]", FG_AMBER, this::syncPrivate));
         panel.add(retroButton("[ STOP SYNC ]", FG_AMBER, () -> stopSync(false)));
         panel.add(retroButton("[ STOP & DELETE ]", FG_RED, () -> stopSync(true)));
         panel.add(retroButton("[ REFRESH ]", FG_AMBER, this::doRefresh));
@@ -353,6 +356,91 @@ public class ClientUI {
         appendLog("[INFO] Reconnecting to server...");
         clientSyncService.reconnect();
         refreshData();
+    }
+
+    private void syncPrivate() {
+        // Build a small panel with two fields
+        JTextField dirField = new JTextField(20);
+        JPasswordField passField = new JPasswordField(20);
+
+        dirField.setBackground(new Color(0x1A, 0x1A, 0x1A));
+        dirField.setForeground(FG);
+        dirField.setCaretColor(FG);
+        dirField.setFont(MONO);
+        dirField.setBorder(new LineBorder(BORDER_CLR, 1));
+
+        passField.setBackground(new Color(0x1A, 0x1A, 0x1A));
+        passField.setForeground(FG);
+        passField.setCaretColor(FG);
+        passField.setFont(MONO);
+        passField.setBorder(new LineBorder(BORDER_CLR, 1));
+        passField.setEchoChar('*');
+
+        JPanel inputPanel = new JPanel(new java.awt.GridLayout(4, 1, 0, 4));
+        inputPanel.setBackground(BG);
+        inputPanel.add(label("DIRECTORY NAME:", MONO_SM, FG_DIM));
+        inputPanel.add(dirField);
+        inputPanel.add(label("PASSWORD:", MONO_SM, FG_DIM));
+        inputPanel.add(passField);
+
+        int result = JOptionPane.showConfirmDialog(frame, inputPanel,
+                "SYNC PRIVATE DIRECTORY",
+                JOptionPane.OK_CANCEL_OPTION,
+                JOptionPane.PLAIN_MESSAGE);
+
+        if (result != JOptionPane.OK_OPTION) return;
+
+        String dirName = dirField.getText().trim();
+        String password = new String(passField.getPassword());
+
+        if (dirName.isEmpty() || password.isEmpty()) {
+            appendLog("[WARN] Directory name and password must not be empty.");
+            return;
+        }
+
+        appendLog("[INFO] Requesting access to private dir: " + dirName);
+        clientSyncService.requestPrivateDir(dirName, password);
+
+        // Poll the auth result after a short delay to let the reconnect complete
+        new javax.swing.SwingWorker<Boolean, Void>() {
+            @Override
+            protected Boolean doInBackground() throws Exception {
+                // Wait long enough for the reconnect + auth round-trip (max 8 s)
+                for (int i = 0; i < 16; i++) {
+                    Thread.sleep(500);
+                    java.util.Map<String, Boolean> results = clientSyncService.getPrivateAuthResults();
+                    if (results.containsKey(dirName)) {
+                        return results.get(dirName);
+                    }
+                }
+                return null; // timeout — no result yet
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    Boolean granted = get();
+                    if (Boolean.TRUE.equals(granted)) {
+                        appendLog("[OK]   Access granted to private dir: " + dirName);
+                        refreshData();
+                    } else if (Boolean.FALSE.equals(granted)) {
+                        appendLog("[WARN] Access denied to private dir: " + dirName);
+                        JOptionPane.showMessageDialog(frame,
+                                "<html><body style='font-family:Courier New;font-size:12px;"
+                                        + "color:#FF4444;background:#0D0D0D;padding:8px'>"
+                                        + "ACCESS DENIED<br>Wrong directory name or password.</body></html>",
+                                "ACCESS DENIED",
+                                JOptionPane.ERROR_MESSAGE);
+                        // Ask user to retry with a new password
+                        syncPrivate();
+                    } else {
+                        appendLog("[WARN] Could not confirm auth result for: " + dirName + " — will retry on next reconnect.");
+                    }
+                } catch (Exception ex) {
+                    log.warn("syncPrivate result check error", ex);
+                }
+            }
+        }.execute();
     }
 
     private void exitApp() {

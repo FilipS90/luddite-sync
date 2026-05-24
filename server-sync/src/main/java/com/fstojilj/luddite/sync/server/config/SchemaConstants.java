@@ -6,7 +6,7 @@ public interface SchemaConstants {
             CREATE TABLE IF NOT EXISTS root_dir (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
-                isPrivate BOOLEAN NOT NULL DEFAULT FALSE,
+                is_private BOOLEAN NOT NULL DEFAULT FALSE,
                 password TEXT,
                 absolute_path TEXT NOT NULL UNIQUE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

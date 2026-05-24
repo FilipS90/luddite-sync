@@ -292,6 +292,88 @@ class PushServiceTest {
         }
     }
 
+    // ── handlePrivateAuth ─────────────────────────────────────────────────────
+
+    @Test
+    void handlePrivateAuth_correctHash_writesGrantedAndAddsToSubscribedIds() throws Exception {
+        String hash = com.fstojilj.luddite.sync.common.util.PasswordUtils.hash("secret");
+        RootDir dir = RootDir.builder().id(42).name("vault").isPrivate(true).password(hash).absolutePath("/vault").build();
+        when(rootDirRepository.findByName("vault")).thenReturn(Optional.of(dir));
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        DataOutputStream out = new DataOutputStream(baos);
+        java.util.Set<Integer> subscribedIds = new java.util.HashSet<>();
+
+        invokeHandlePrivateAuth(out, "vault", hash, subscribedIds, "client-1");
+
+        assertThat(baos.toByteArray()).isEqualTo(new byte[]{0x01});
+        assertThat(subscribedIds).containsExactly(42);
+    }
+
+    @Test
+    void handlePrivateAuth_wrongHash_writesDeniedAndDoesNotSubscribe() throws Exception {
+        String correctHash = com.fstojilj.luddite.sync.common.util.PasswordUtils.hash("secret");
+        String wrongHash = com.fstojilj.luddite.sync.common.util.PasswordUtils.hash("wrong");
+        RootDir dir = RootDir.builder().id(42).name("vault").isPrivate(true).password(correctHash).absolutePath("/vault").build();
+        when(rootDirRepository.findByName("vault")).thenReturn(Optional.of(dir));
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        DataOutputStream out = new DataOutputStream(baos);
+        java.util.Set<Integer> subscribedIds = new java.util.HashSet<>();
+
+        invokeHandlePrivateAuth(out, "vault", wrongHash, subscribedIds, "client-1");
+
+        assertThat(baos.toByteArray()).isEqualTo(new byte[]{0x00});
+        assertThat(subscribedIds).isEmpty();
+    }
+
+    @Test
+    void handlePrivateAuth_unknownDir_writesDenied() throws Exception {
+        when(rootDirRepository.findByName("ghost")).thenReturn(Optional.empty());
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        DataOutputStream out = new DataOutputStream(baos);
+        java.util.Set<Integer> subscribedIds = new java.util.HashSet<>();
+
+        invokeHandlePrivateAuth(out, "ghost", "anyhash", subscribedIds, "client-1");
+
+        assertThat(baos.toByteArray()).isEqualTo(new byte[]{0x00});
+        assertThat(subscribedIds).isEmpty();
+    }
+
+    @Test
+    void handlePrivateAuth_publicDir_writesDenied() throws Exception {
+        RootDir dir = RootDir.builder().id(7).name("public").isPrivate(false).password(null).absolutePath("/public").build();
+        when(rootDirRepository.findByName("public")).thenReturn(Optional.of(dir));
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        DataOutputStream out = new DataOutputStream(baos);
+        java.util.Set<Integer> subscribedIds = new java.util.HashSet<>();
+
+        invokeHandlePrivateAuth(out, "public", "anyhash", subscribedIds, "client-1");
+
+        assertThat(baos.toByteArray()).isEqualTo(new byte[]{0x00});
+        assertThat(subscribedIds).isEmpty();
+    }
+
+    // ── helpers ───────────────────────────────────────────────────────────────
+
+    private void invokeHandlePrivateAuth(DataOutputStream out, String dirName, String passwordHash,
+                                          java.util.Set<Integer> subscribedIds, String clientId) throws Exception {
+        Method m = PushService.class.getDeclaredMethod(
+                "handlePrivateAuth", DataOutputStream.class, String.class, String.class,
+                java.util.Set.class, String.class);
+        m.setAccessible(true);
+        try {
+            m.invoke(pushService, out, dirName, passwordHash, subscribedIds, clientId);
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof IOException ex) throw ex;
+            if (cause instanceof RuntimeException ex) throw ex;
+            throw e;
+        }
+    }
+
     private void invokeHandlePoll(DataOutputStream out, String dirName,
                                   Long lastSyncVersion, String clientId) throws Exception {
         Method m = PushService.class.getDeclaredMethod(

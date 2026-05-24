@@ -25,6 +25,8 @@ public class RootDirRepository {
     private final RowMapper<RootDir> rowMapper = (rs, _) -> RootDir.builder()
             .id(rs.getInt("id"))
             .name(rs.getString("name"))
+            .isPrivate(rs.getBoolean("is_private"))
+            .password(rs.getString("password"))
             .absolutePath(rs.getString("absolute_path"))
             .createdAt(rs.getTimestamp("created_at") != null ? rs.getTimestamp("created_at").toInstant() : null)
             .modifiedAt(rs.getTimestamp("modified_at") != null ? rs.getTimestamp("modified_at").toInstant() : null)
@@ -33,7 +35,7 @@ public class RootDirRepository {
 
     public int insert(RootDir rootDir) {
         String sql = """
-                INSERT INTO root_dir (name, isPrivate, password, absolute_path)
+                INSERT INTO root_dir (name, is_private, password, absolute_path)
                 VALUES (?, ?, ?, ?)
                 """;
 

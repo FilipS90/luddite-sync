@@ -71,6 +71,35 @@ class RootDirRepositoryTest {
         assertThat(repository.findByName("missing")).isEmpty();
     }
 
+    // ── isPrivate / password round-trip ───────────────────────────────────────
+
+    @Test
+    void insert_privateDir_persitsIsPrivateAndPassword() {
+        int id = repository.insert(buildDir("secret", true, "hashvalue", "/secret"));
+        Optional<RootDir> result = repository.getRootDirById(id);
+        assertThat(result).isPresent();
+        assertThat(result.get().isPrivate()).isTrue();
+        assertThat(result.get().getPassword()).isEqualTo("hashvalue");
+    }
+
+    @Test
+    void insert_publicDir_isPrivateFalseAndPasswordNull() {
+        int id = repository.insert(buildDir("public", false, null, "/public"));
+        Optional<RootDir> result = repository.getRootDirById(id);
+        assertThat(result).isPresent();
+        assertThat(result.get().isPrivate()).isFalse();
+        assertThat(result.get().getPassword()).isNull();
+    }
+
+    @Test
+    void findByName_privateDir_returnsCorrectFlags() {
+        repository.insert(buildDir("vault", true, "myHash", "/vault"));
+        Optional<RootDir> result = repository.findByName("vault");
+        assertThat(result).isPresent();
+        assertThat(result.get().isPrivate()).isTrue();
+        assertThat(result.get().getPassword()).isEqualTo("myHash");
+    }
+
     // ── getRootDirById ────────────────────────────────────────────────────────
 
     @Test

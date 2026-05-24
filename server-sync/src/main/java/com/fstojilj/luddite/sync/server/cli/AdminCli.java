@@ -1,5 +1,6 @@
 package com.fstojilj.luddite.sync.server.cli;
 
+import com.fstojilj.luddite.sync.common.util.PasswordUtils;
 import com.fstojilj.luddite.sync.server.service.PushService;
 import com.fstojilj.luddite.sync.server.service.RootDirService;
 import jakarta.annotation.PostConstruct;
@@ -105,10 +106,12 @@ public class AdminCli {
                 String absolutePath = arg.split("\\s+")[0];
                 System.out.println("  Adding root dir: " + absolutePath);
                 System.out.println("  Private: " + isPrivate);
-                System.out.println("  Password: " + (password != null ? password : "none"));
+                System.out.println("  Password: " + (password != null ? "[hashed]" : "none"));
+
+                String passwordHash = password != null ? PasswordUtils.hash(password) : null;
 
                 try {
-                    rootDirService.addRootDir(absolutePath, isPrivate, password);
+                    rootDirService.addRootDir(absolutePath, isPrivate, passwordHash);
                     System.out.printf("  Added and watching: %s%n", arg);
                 } catch (Exception e) {
                     System.out.printf("  Error: %s%n", e.getMessage());

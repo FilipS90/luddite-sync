@@ -48,6 +48,49 @@ public class RootDirRepository {
     }
 
     /**
+     * Registers a private directory with its hashed password.
+     * Updates the password_hash if the entry already exists.
+     *
+     * @param dirName      server-side directory name
+     * @param passwordHash SHA-256 hex hash of the user-supplied password
+     */
+    public void registerPrivateDir(String dirName, String passwordHash) {
+        jdbcTemplate.update("""
+                INSERT INTO root_dirs (dir_name, last_sync_version, password_hash, is_private)
+                VALUES (?, -1, ?, TRUE)
+                ON CONFLICT(dir_name) DO UPDATE SET password_hash = excluded.password_hash,
+                                                    is_private = TRUE
+                """, dirName, passwordHash);
+    }
+
+    /**
+     * Returns the stored SHA-256 password hash for a private directory, or {@code null}
+     * if the directory is not registered or has no stored hash.
+     *
+     * @param dirName directory name
+     * @return stored hash or null
+     */
+    public String getPasswordHash(String dirName) {
+        List<String> results = jdbcTemplate.query(
+                "SELECT password_hash FROM root_dirs WHERE dir_name = ?",
+                (rs, _) -> rs.getString("password_hash"),
+                dirName);
+        return results.isEmpty() ? null : results.getFirst();
+    }
+
+    /**
+     * Returns all locally registered private directories with their stored password hashes.
+     * Used during reconnect to automatically re-authenticate.
+     *
+     * @return list of (dirName, passwordHash) pairs as String arrays
+     */
+    public List<String[]> findAllPrivate() {
+        return jdbcTemplate.query(
+                "SELECT dir_name, password_hash FROM root_dirs WHERE is_private = TRUE",
+                (rs, _) -> new String[]{rs.getString("dir_name"), rs.getString("password_hash")});
+    }
+
+    /**
      * Removes a directory entry from the local state.
      *
      * @param dirName directory name to remove

@@ -32,7 +32,7 @@ class FileMetadataRepositoryTest {
         jdbcTemplate.execute(FILE_METADATA_TABLE);
 
         // Insert a root_dir row so FK constraint is satisfied
-        jdbcTemplate.update("INSERT INTO root_dir (name, isPrivate, password, absolute_path) VALUES ('photos', false, 'admin123', '/photos')");
+        jdbcTemplate.update("INSERT INTO root_dir (name, is_private, password, absolute_path) VALUES ('photos', false, 'admin123', '/photos')");
 
         repository = new FileMetadataRepository(jdbcTemplate);
     }
