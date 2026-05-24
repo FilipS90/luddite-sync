@@ -31,7 +31,7 @@ public class FileMetadataService implements ApplicationRunner {
 
     private static final Set<String> IGNORED_FILENAMES = Set.of(
             "thumbs.db", "desktop.ini", ".ds_store", ".localized",
-            "thumbs.db:encryptable", "ethumbs.db"
+            "thumbs.db:encryptable", "ethumbs.db", ".git"
     );
 
     private final FileMetadataRepository fileMetadataRepository;

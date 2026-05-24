@@ -10,6 +10,11 @@ import org.springframework.stereotype.Component;
 
 import java.nio.file.Paths;
 
+import static com.fstojilj.luddite.sync.server.config.SchemaConstants.FILE_METADATA_TABLE;
+import static com.fstojilj.luddite.sync.server.config.SchemaConstants.ROOT_DIR_TABLE;
+import static com.fstojilj.luddite.sync.server.config.SchemaConstants.UPDATE_FILE_METADATA_MODIFIED_AT_TRIGGER;
+import static com.fstojilj.luddite.sync.server.config.SchemaConstants.UPDATE_ROOT_DIR_MODIFIED_AT_TRIGGER;
+
 /**
  * Creates the SQLite schema on startup using CREATE TABLE IF NOT EXISTS.
  * Runs before WatcherStartupRunner thanks to @Order(1).
@@ -28,50 +33,10 @@ public class SchemaInitializer implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         log.info("Initializing SQLite schema...");
 
-        jdbcTemplate.execute("""
-                CREATE TABLE IF NOT EXISTS root_dir (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    absolute_path TEXT NOT NULL UNIQUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                """);
-
-        jdbcTemplate.execute("""
-                CREATE TABLE IF NOT EXISTS file_metadata (
-                    id            INTEGER  PRIMARY KEY AUTOINCREMENT,
-                    filename      TEXT     NOT NULL,
-                    root_dir_id   INTEGER  NOT NULL REFERENCES root_dir(id) ON DELETE CASCADE,
-                    relative_path TEXT     NOT NULL,
-                    checksum      TEXT     NOT NULL,
-                    file_size     INTEGER  NOT NULL,
-                    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    modified_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    sync_version  BIGINT,
-                    deleted       BOOLEAN  NOT NULL DEFAULT FALSE,
-                    client_ids    TEXT,
-                    UNIQUE (root_dir_id, relative_path, filename)
-                )
-                """);
-
-        createTriggerIfNotExists("update_root_dir_modified_at", """
-                CREATE TRIGGER update_root_dir_modified_at
-                AFTER UPDATE ON root_dir
-                FOR EACH ROW
-                BEGIN
-                    UPDATE root_dir SET modified_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
-                END
-                """);
-
-        createTriggerIfNotExists("update_file_metadata_modified_at", """
-                CREATE TRIGGER update_file_metadata_modified_at
-                AFTER UPDATE ON file_metadata
-                FOR EACH ROW
-                BEGIN
-                    UPDATE file_metadata SET modified_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
-                END
-                """);
+        jdbcTemplate.execute(ROOT_DIR_TABLE);
+        jdbcTemplate.execute(FILE_METADATA_TABLE);
+        createTriggerIfNotExists("update_root_dir_modified_at", UPDATE_ROOT_DIR_MODIFIED_AT_TRIGGER);
+        createTriggerIfNotExists("update_file_metadata_modified_at", UPDATE_FILE_METADATA_MODIFIED_AT_TRIGGER);
 
         for (String rootDirAbsolutePath : serverProperties.getRootDirs()) {
             String name = Paths.get(rootDirAbsolutePath).getFileName().toString();

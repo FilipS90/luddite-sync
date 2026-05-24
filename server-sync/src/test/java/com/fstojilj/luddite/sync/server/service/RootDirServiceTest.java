@@ -37,7 +37,7 @@ class RootDirServiceTest {
     @Test
     void addRootDir_validPath_shouldInsertIndexAndWatch() {
         when(rootDirRepository.insert(any(RootDir.class))).thenReturn(7);
-        rootDirService.addRootDir("/photos/family");
+        rootDirService.addRootDir("/photos/family", true, "admin123");
         verify(rootDirRepository).insert(any(RootDir.class));
         verify(fileMetadataService).addAllFileMetadataForRoot("/photos/family", 7);
         verify(dirWatcherService).startWatching("/photos/family", 7);

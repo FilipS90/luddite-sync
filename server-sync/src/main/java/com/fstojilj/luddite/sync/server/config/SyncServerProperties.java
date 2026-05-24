@@ -15,7 +15,6 @@ import java.util.Set;
  * Example config:
  * sync:
  * server:
- * root-dirs:
  * - /mnt/photos
  * - /mnt/documents
  */

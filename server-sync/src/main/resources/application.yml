@@ -9,8 +9,6 @@ spring:
       query-timeout: 5
 
 sync:
-  server:
-    root-dirs: [ ]
   socket:
     port: 8888
     keystore: classpath:server-keystore.p12

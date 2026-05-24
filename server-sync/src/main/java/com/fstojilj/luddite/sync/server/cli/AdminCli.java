@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.Optional;
 
 import static java.lang.Thread.sleep;
 
@@ -86,10 +87,29 @@ public class AdminCli {
             case "add" -> {
                 if (arg.isEmpty()) {
                     System.out.println("  Usage: add <absolute-path>");
+                    System.out.println("  Available flags: --private, for private dirs --pswd <password> is mandatory");
                     return;
                 }
+                boolean isPrivate = arg.contains("--private");
+                if (isPrivate && !arg.contains("--pswd")) {
+                    System.out.println("  Error: Private root dirs require a password. Use --pswd <password> to specify it.");
+                    return;
+                }
+
+                String password = extractPassword(arg).orElse(null);
+
+                if (isPrivate && password == null) {
+                    System.out.println("  Error: Failed to extract password for private root dir. Ensure the --pswd flag is correctly formatted.");
+                    return;
+                }
+
+                String absolutePath = arg.split("\\s+")[0];
+                System.out.println("  Adding root dir: " + absolutePath);
+                System.out.println("  Private: " + isPrivate);
+                System.out.println("  Password: " + (password != null ? password : "none"));
+
                 try {
-                    rootDirService.addRootDir(arg);
+                    rootDirService.addRootDir(absolutePath, isPrivate, password);
                     System.out.printf("  Added and watching: %s%n", arg);
                 } catch (Exception e) {
                     System.out.printf("  Error: %s%n", e.getMessage());
@@ -146,5 +166,36 @@ public class AdminCli {
         System.out.println("  help                show this message");
         System.out.println("  exit                shut down the server");
         System.out.println();
+    }
+
+    private Optional<String> extractPassword(String args) {
+        String pswdFlag = "--pswd";
+        int startIndex = args.indexOf(pswdFlag);
+
+        if (startIndex == -1) {
+            return Optional.empty();
+        }
+
+        startIndex += pswdFlag.length();
+
+        String password = null;
+
+        for (int i = startIndex; i < args.length(); i++) {
+            char c = args.charAt(i);
+            if (c != ' ' && i == startIndex) {
+                log.error("Malformed password flag, use --pswd <password> format");
+                return Optional.empty();
+            }
+
+            if (c == ' ' && i != startIndex) {
+                password = args.substring(startIndex + 1, i);
+                break;
+            } else if (i == args.length() - 1) {
+                password = args.substring(startIndex + 1);
+                break;
+            }
+        }
+
+        return Optional.ofNullable(password);
     }
 }

@@ -25,10 +25,12 @@ public class RootDirService {
 
 
     @Transactional
-    public void addRootDir(String absolutePath) {
+    public void addRootDir(String absolutePath, boolean isPrivate, String password) {
         var dirName = getDirName(absolutePath);
         var rootDir = RootDir.builder()
                 .name(dirName)
+                .isPrivate(isPrivate)
+                .password(password)
                 .absolutePath(absolutePath)
                 .build();
 

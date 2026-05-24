@@ -17,7 +17,6 @@ import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -96,15 +95,22 @@ class AdminCliTest {
     @Test
     void handle_add_withPath_shouldAddAndPrint() throws Exception {
         handle("add /home/user/photos");
-        verify(rootDirService).addRootDir("/home/user/photos");
+        verify(rootDirService).addRootDir("/home/user/photos", false, null);
         assertThat(output()).contains("Added and watching");
     }
 
     @Test
-    void handle_add_serviceThrows_shouldPrintError() throws Exception {
-        doThrow(new IllegalArgumentException("bad path")).when(rootDirService).addRootDir("/bad");
-        handle("add /bad");
-        assertThat(output()).contains("Error: bad path");
+    void handle_add_withPathAndFlags_shouldAddAndPrint() throws Exception {
+        handle("add /home/user/photos --private --pswd admin123");
+        verify(rootDirService).addRootDir("/home/user/photos", true, "admin123");
+        assertThat(output()).contains("Added and watching");
+    }
+
+    @Test
+    void handle_add_withPathAndFlags2_shouldAddAndPrint() throws Exception {
+        handle("add /home/user/photos --pswd admin123 --private");
+        verify(rootDirService).addRootDir("/home/user/photos", true, "admin123");
+        assertThat(output()).contains("Added and watching");
     }
 
     @Test

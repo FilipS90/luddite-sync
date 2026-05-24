@@ -33,8 +33,8 @@ public class RootDirRepository {
 
     public int insert(RootDir rootDir) {
         String sql = """
-                INSERT INTO root_dir (name, absolute_path)
-                VALUES (?, ?)
+                INSERT INTO root_dir (name, isPrivate, password, absolute_path)
+                VALUES (?, ?, ?, ?)
                 """;
 
         KeyHolder keyHolder = new GeneratedKeyHolder();
@@ -42,7 +42,9 @@ public class RootDirRepository {
         jdbcTemplate.update(connection -> {
             var ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
             ps.setString(1, rootDir.getName());
-            ps.setString(2, rootDir.getAbsolutePath());
+            ps.setBoolean(2, rootDir.isPrivate());
+            ps.setString(3, rootDir.getPassword());
+            ps.setString(4, rootDir.getAbsolutePath());
             return ps;
         }, keyHolder);
 
