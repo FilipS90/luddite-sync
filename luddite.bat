@@ -28,25 +28,10 @@ goto :eof
 echo [luddite] Starting in SERVER mode...
 java -Djava.net.preferIPv4Stack=true -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -Dstdin.encoding=UTF-8 -jar %SERVER_JAR%
 set EXIT_CODE=%ERRORLEVEL%
-@REM if %EXIT_CODE%==2 (
-@REM     echo [luddite] Shutdown signal received -- switching to CLIENT mode
-@REM     set MODE=client
-@REM     goto loop
-@REM )
-@REM if %EXIT_CODE%==3 (
-@REM     echo [luddite] Switch-mode complete -- restarting as CLIENT
-@REM     set MODE=client
-@REM     goto loop
-@REM )
 goto :eof
 
 :run_client
 echo [luddite] Starting in CLIENT mode...
 java -Djava.net.preferIPv4Stack=true -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -Dstdin.encoding=UTF-8 -jar %CLIENT_JAR% --sync.socket.keystore=classpath:client-keystore.p12
 set EXIT_CODE=%ERRORLEVEL%
-@REM if %EXIT_CODE%==2 (
-@REM     echo [luddite] Resume-server-mode signal received -- switching back to SERVER mode
-@REM     set MODE=server
-@REM     goto loop
-@REM )
 goto :eof

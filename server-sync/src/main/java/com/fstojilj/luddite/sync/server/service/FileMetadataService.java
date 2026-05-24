@@ -111,12 +111,12 @@ public class FileMetadataService implements ApplicationRunner {
 
     /**
      * Soft-deletes a file: marks it as deleted, bumps its {@code sync_version}, and sets
-     * {@code client_ids} to the comma-separated hardware IDs of every currently connected
+     * {@code client_ids} to the comma-separated client IDs of every currently connected
      * client. The row stays in the database until every client has acknowledged the delete.
      *
      * @param rootDirId          root directory ID
      * @param relativeFilePath   relative path of the deleted file
-     * @param connectedClientIds comma-separated hardware IDs of all connected clients;
+     * @param connectedClientIds comma-separated client IDs of all connected clients;
      *                           pass an empty string if no clients are connected (row is
      *                           hard-deleted immediately in {@link #acknowledgeDelete})
      */
@@ -136,16 +136,16 @@ public class FileMetadataService implements ApplicationRunner {
 
 
     /**
-     * Removes {@code hardwareId} from the {@code client_ids} of a soft-deleted row.
+     * Removes {@code clientId} from the {@code client_ids} of a soft-deleted row.
      * When all clients have acknowledged, the row is hard-deleted.
      *
      * @param rootDirId    root directory ID
      * @param relativePath relative file path
-     * @param hardwareId   the acknowledging client's stable hardware ID
+     * @param clientId     the acknowledging client's stable client ID
      */
     @Transactional
-    public void acknowledgeDelete(int rootDirId, String relativePath, String hardwareId) {
-        fileMetadataRepository.acknowledgeDelete(rootDirId, relativePath, hardwareId);
+    public void acknowledgeDelete(int rootDirId, String relativePath, String clientId) {
+        fileMetadataRepository.acknowledgeDelete(rootDirId, relativePath, clientId);
     }
 
     @Transactional

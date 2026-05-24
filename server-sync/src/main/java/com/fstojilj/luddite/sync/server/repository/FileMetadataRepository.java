@@ -135,7 +135,7 @@ public class FileMetadataRepository {
      * @param rootDirId    root directory ID
      * @param relativePath relative file path
      * @param syncVersion  new monotonic sync version minted for this deletion event
-     * @param clientIds    comma-separated hardware IDs of all currently connected clients
+     * @param clientIds    comma-separated client IDs of all currently connected clients
      */
     public void softDelete(long rootDirId, String relativePath, long syncVersion, String clientIds) {
         int rows = jdbcTemplate.update("""
@@ -153,15 +153,15 @@ public class FileMetadataRepository {
     }
 
     /**
-     * Removes {@code hardwareId} from the {@code client_ids} list of a soft-deleted row.
+     * Removes {@code clientId} from the {@code client_ids} list of a soft-deleted row.
      * When the list becomes empty (all clients have acknowledged the delete) the row is
      * hard-deleted from the database.
      *
      * @param rootDirId    root directory ID
      * @param relativePath relative file path
-     * @param hardwareId   the client hardware ID to remove
+     * @param clientId     the client ID to remove
      */
-    public void acknowledgeDelete(int rootDirId, String relativePath, String hardwareId) {
+    public void acknowledgeDelete(int rootDirId, String relativePath, String clientId) {
         var results = jdbcTemplate.queryForList(
                 "SELECT client_ids FROM file_metadata WHERE root_dir_id = ? AND relative_path = ? AND deleted = TRUE",
                 rootDirId, relativePath);
@@ -183,7 +183,7 @@ public class FileMetadataRepository {
         // Remove this client's ID from the comma-separated list
         String updated = java.util.Arrays.stream(raw.split(","))
                 .map(String::trim)
-                .filter(id -> !id.equals(hardwareId))
+                .filter(id -> !id.equals(clientId))
                 .collect(java.util.stream.Collectors.joining(","));
 
         if (updated.isEmpty()) {
@@ -195,7 +195,7 @@ public class FileMetadataRepository {
                     "UPDATE file_metadata SET client_ids = ? WHERE root_dir_id = ? AND relative_path = ?",
                     updated, rootDirId, relativePath);
             log.debug("acknowledgeDelete: removed '{}' from pending list for rootDirId={} '{}', remaining: {}",
-                    hardwareId, rootDirId, relativePath, updated);
+                    clientId, rootDirId, relativePath, updated);
         }
     }
 }

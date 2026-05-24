@@ -36,9 +36,12 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class PushServiceTest {
 
-    @Mock private FileMetadataService fileMetadataService;
-    @Mock private RootDirRepository rootDirRepository;
-    @Mock private ApplicationContext applicationContext;
+    @Mock
+    private FileMetadataService fileMetadataService;
+    @Mock
+    private RootDirRepository rootDirRepository;
+    @Mock
+    private ApplicationContext applicationContext;
 
     @InjectMocks
     private PushService pushService;
@@ -290,12 +293,12 @@ class PushServiceTest {
     }
 
     private void invokeHandlePoll(DataOutputStream out, String dirName,
-                                  Long lastSyncVersion, String hardwareId) throws Exception {
+                                  Long lastSyncVersion, String clientId) throws Exception {
         Method m = PushService.class.getDeclaredMethod(
                 "handlePoll", DataOutputStream.class, String.class, Long.class, String.class);
         m.setAccessible(true);
         try {
-            m.invoke(pushService, out, dirName, lastSyncVersion, hardwareId);
+            m.invoke(pushService, out, dirName, lastSyncVersion, clientId);
         } catch (InvocationTargetException e) {
             Throwable cause = e.getCause();
             if (cause instanceof IOException ex) throw ex;

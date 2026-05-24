@@ -40,7 +40,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * <h2>Connection lifecycle</h2>
  * <ol>
  *   <li>Server advertises all known root directory names.</li>
- *   <li>Client sends its stable {@code hardwareId} (motherboard/BIOS serial or fallback UUID).</li>
+ *   <li>Client sends its stable {@code clientId}.</li>
  *   <li>Client sends a subscription handshake: list of (dirName, lastSyncVersion) pairs.</li>
  *   <li>Client enters a poll loop: every ~2 s it sends a poll request
  *       ({@code [1b POLL][4b dirNameLen][dirName][8b lastSyncVersion]}) and the server
@@ -97,7 +97,7 @@ public class PushService {
     private volatile boolean running = false;
 
     /**
-     * One entry per connected client: key = stable hardware ID, value = remote address string.
+     * One entry per connected client: key = stable client ID, value = remote address string.
      * Used to populate {@code client_ids} on soft-deleted rows and to expose the client list
      * to the admin CLI.
      */
@@ -152,10 +152,10 @@ public class PushService {
     }
 
     /**
-     * Returns a comma-separated string of hardware IDs for all currently connected clients.
+     * Returns a comma-separated string of client IDs for all currently connected clients.
      * Called by {@link DirWatcherService} at soft-delete time to populate {@code client_ids}.
      *
-     * @return comma-separated hardware IDs, or an empty string if no clients are connected
+     * @return comma-separated client IDs, or an empty string if no clients are connected
      */
     public String getConnectedClientIds() {
         return String.join(",", connectedClients.keySet());
@@ -189,7 +189,7 @@ public class PushService {
      *
      * <ol>
      *   <li>Sends the available root directory list.</li>
-     *   <li>Reads the client's stable {@code hardwareId}.</li>
+     *   <li>Reads the client's stable {@code clientId}.</li>
      *   <li>Reads the subscription handshake.</li>
      *   <li>Enters the message loop: handles {@code POLL} and {@code DELETE_ACK} messages.</li>
      * </ol>
@@ -197,17 +197,17 @@ public class PushService {
      * @param socket the accepted SSL socket
      */
     private void serveClient(SSLSocket socket) {
-        String hardwareId = null;
+        String clientId = null;
         try (var in = new DataInputStream(socket.getInputStream());
              var out = new DataOutputStream(socket.getOutputStream())) {
 
             // 1 — advertise available root dirs
             sendAvailableDirs(out);
 
-            // 2 — read client's stable hardware ID
+            // 2 — read client's stable client ID
             int idLen = in.readInt();
-            hardwareId = new String(in.readNBytes(idLen), StandardCharsets.UTF_8);
-            log.info("Client {} identified as hardwareId='{}'", socket.getRemoteSocketAddress(), hardwareId);
+            clientId = new String(in.readNBytes(idLen), StandardCharsets.UTF_8);
+            log.info("Client {} identified as clientId='{}'", socket.getRemoteSocketAddress(), clientId);
 
             // 3 — read subscription handshake
             List<SyncHandshakeEntry> handshake = readHandshake(in);
@@ -216,14 +216,14 @@ public class PushService {
             Set<Integer> subscribedIds = resolveSubscribedIds(handshake);
 
             // Register this client
-            connectedClients.put(hardwareId, socket.getRemoteSocketAddress().toString());
-            clientOutputStreams.put(hardwareId, out);
+            connectedClients.put(clientId, socket.getRemoteSocketAddress().toString());
+            clientOutputStreams.put(clientId, out);
 
             log.info("Client '{}' ({}) subscribed to {} dir(s)",
-                    hardwareId, socket.getRemoteSocketAddress(), subscribedIds.size());
+                    clientId, socket.getRemoteSocketAddress(), subscribedIds.size());
 
             // 4 — message loop
-            final String finalHardwareId = hardwareId;
+            final String finalClientId = clientId;
             while (true) {
                 byte msg = in.readByte();
 
@@ -232,28 +232,28 @@ public class PushService {
                         int nameLen = in.readInt();
                         String dirName = new String(in.readNBytes(nameLen), StandardCharsets.UTF_8);
                         Long lastSyncVersion = in.readLong();
-                        handlePoll(out, dirName, lastSyncVersion, finalHardwareId);
+                        handlePoll(out, dirName, lastSyncVersion, finalClientId);
                     }
                     case DELETE_ACK -> {
                         int pathLen = in.readInt();
                         String qualifiedPath = new String(in.readNBytes(pathLen), StandardCharsets.UTF_8);
-                        handleDeleteAck(qualifiedPath, finalHardwareId);
+                        handleDeleteAck(qualifiedPath, finalClientId);
                     }
-                    default -> log.warn("Unexpected byte {} from client '{}'", msg, finalHardwareId);
+                    default -> log.warn("Unexpected byte {} from client '{}'", msg, finalClientId);
                 }
             }
 
         } catch (IOException e) {
-            log.info("Client '{}' disconnected: {}", hardwareId, socket.getRemoteSocketAddress());
+            log.info("Client '{}' disconnected: {}", clientId, socket.getRemoteSocketAddress());
         } finally {
-            if (hardwareId != null) {
-                connectedClients.remove(hardwareId);
-                clientOutputStreams.remove(hardwareId);
+            if (clientId != null) {
+                connectedClients.remove(clientId);
+                clientOutputStreams.remove(clientId);
             }
             try {
                 socket.close();
             } catch (IOException e) {
-                log.error("Error closing socket for client '{}': {}", hardwareId, e.getMessage());
+                log.error("Error closing socket for client '{}': {}", clientId, e.getMessage());
             }
         }
     }
@@ -273,16 +273,16 @@ public class PushService {
      * @param out             the client's output stream
      * @param dirName         the directory name the client is polling
      * @param lastSyncVersion the last sync version the client already has
-     * @param hardwareId      the polling client's hardware ID (for logging)
+     * @param clientId        the polling client's ID (for logging)
      * @throws IOException if writing to the stream fails
      */
     private void handlePoll(DataOutputStream out, String dirName,
-                            Long lastSyncVersion, String hardwareId) throws IOException {
+                            Long lastSyncVersion, String clientId) throws IOException {
         pollLock.lock();
         try {
             var rootDirOpt = rootDirRepository.findByName(dirName);
             if (rootDirOpt.isEmpty()) {
-                log.warn("Poll from '{}' for unknown dir '{}', sending empty response", hardwareId, dirName);
+                log.warn("Poll from '{}' for unknown dir '{}', sending empty response", clientId, dirName);
                 out.writeInt(0);
                 out.flush();
                 return;
@@ -294,7 +294,7 @@ public class PushService {
             long limit = 100;
             List<FileMetadata> changed = fileMetadataService.findChangedSince(rootDirId, lastSyncVersion, limit);
             log.debug("Poll from '{}' for dir '{}' since v{}: {} record(s)",
-                    hardwareId, dirName, lastSyncVersion, changed.size());
+                    clientId, dirName, lastSyncVersion, changed.size());
 
 
             // Write the full response to the wire first
@@ -325,10 +325,10 @@ public class PushService {
             out.flush();
 
         } catch (IOException e) {
-            log.warn("Error handling poll from '{}': {}", hardwareId, e.getMessage());
+            log.warn("Error handling poll from '{}': {}", clientId, e.getMessage());
             throw e;
         } catch (Exception e) {
-            log.error("Unexpected error handling poll from '{}'", hardwareId, e);
+            log.error("Unexpected error handling poll from '{}'", clientId, e);
             throw e;
         } finally {
             pollLock.unlock();
@@ -389,13 +389,13 @@ public class PushService {
 
     /**
      * Processes a delete acknowledgement from a client.
-     * Removes the client's hardware ID from the row's {@code client_ids} list.
+     * Removes the client's ID from the row's {@code client_ids} list.
      * When the list is empty the row is hard-deleted.
      *
      * @param qualifiedPath qualified path of the form "dirName/relativePath"
-     * @param hardwareId    the acknowledging client's hardware ID
+     * @param clientId      the acknowledging client's ID
      */
-    private void handleDeleteAck(String qualifiedPath, String hardwareId) {
+    private void handleDeleteAck(String qualifiedPath, String clientId) {
         // qualifiedPath = "dirName/rel/path/file.txt"
         int slash = qualifiedPath.indexOf('/');
         if (slash < 0) {
@@ -407,8 +407,8 @@ public class PushService {
 
         rootDirRepository.findByName(dirName).ifPresentOrElse(
                 rootDir -> {
-                    fileMetadataService.acknowledgeDelete(rootDir.getId(), relativePath, hardwareId);
-                    log.debug("Delete-ACK from '{}' for '{}'", hardwareId, qualifiedPath);
+                    fileMetadataService.acknowledgeDelete(rootDir.getId(), relativePath, clientId);
+                    log.debug("Delete-ACK from '{}' for '{}'", clientId, qualifiedPath);
                 },
                 () -> log.warn("handleDeleteAck: unknown dir '{}' in path '{}'", dirName, qualifiedPath)
         );
@@ -432,6 +432,7 @@ public class PushService {
      */
     private void sendAvailableDirs(DataOutputStream out) throws IOException {
         List<String> dirNames = rootDirRepository.findAll().stream()
+                .filter(RootDir::isPrivate)
                 .map(RootDir::getName)
                 .toList();
         out.writeInt(dirNames.size());

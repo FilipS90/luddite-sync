@@ -35,7 +35,7 @@ import java.util.List;
  *   <li>Waits (polling every 7 s) for the user to subscribe to at least one dir
  *       via the CLI if no dirs are configured yet.</li>
  *   <li>Purges stale local dirs, registers new ones, audits the mirror for missing
- *       files, then sends the stable {@code hardwareId} followed by the subscription
+ *       files, then sends the stable {@code clientId} followed by the subscription
  *       handshake with last-known sync versions.</li>
  *   <li>Enters a poll loop that every 2 s sends a {@code POLL} request per subscribed
  *       directory, reads the response, writes/deletes files on disk, and sends a
@@ -180,7 +180,7 @@ public class ClientSyncService {
 
                 registerDirs(dirsToSync);
                 auditMissingFiles(dirsToSync);
-                sendHardwareId(out);
+                sendClientId(out);
                 sendHandshake(out, dirsToSync);
                 pollLoop(in, out, dirsToSync);
 
@@ -227,7 +227,7 @@ public class ClientSyncService {
     }
 
     /**
-     * Sends the client's stable hardware ID to the server immediately after the
+     * Sends the client's stable client ID to the server immediately after the
      * available-dirs advertisement.
      *
      * <p>Wire format: {@code [4 bytes] id length, [N bytes] id (UTF-8)}
@@ -235,12 +235,12 @@ public class ClientSyncService {
      * @param out the server output stream
      * @throws IOException if writing fails
      */
-    private void sendHardwareId(DataOutputStream out) throws IOException {
+    private void sendClientId(DataOutputStream out) throws IOException {
         byte[] idBytes = clientIdService.getClientId().getBytes(StandardCharsets.UTF_8);
         out.writeInt(idBytes.length);
         out.write(idBytes);
         out.flush();
-        log.info("Sent hardwareId to server: {}", clientIdService.getClientId());
+        log.info("Sent clientId to server: {}", clientIdService.getClientId());
     }
 
     /**
