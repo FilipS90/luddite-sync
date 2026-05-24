@@ -68,12 +68,16 @@ import java.util.concurrent.locks.ReentrantLock;
 @RequiredArgsConstructor
 public class PushService {
 
-    // ── Wire protocol bytes ───────────────────────────────────────────────────
+    // ── Wire protocol bytes — client→server message types ────────────────────
     public static final byte POLL = 1;
     public static final byte DELETE_ACK = 2;
     public static final byte PRIVATE_AUTH = 3;
 
-    // ── Flag bits in poll response ────────────────────────────────────────────
+    // ── Wire protocol bytes — PRIVATE_AUTH server→client response ────────────
+    private static final byte AUTH_GRANTED = 0x10;
+    private static final byte AUTH_DENIED  = 0x11;
+
+    // ── Flag bits inside poll-response file records ───────────────────────────
     private static final byte FLAG_DELETED = 0x01;
 
     // ── Dependencies ─────────────────────────────────────────────────────────
@@ -435,7 +439,7 @@ public class PushService {
      * [4 bytes] password hash length
      * [M bytes] SHA-256 hex hash (UTF-8)
      * </pre>
-     * Server response: {@code 0x01} = granted, {@code 0x00} = denied.
+     * Server response: {@code AUTH_GRANTED} (0x10) = granted, {@code AUTH_DENIED} (0x11) = denied.
      *
      * @param out           the client's output stream
      * @param dirName       the private directory name being requested
@@ -449,7 +453,7 @@ public class PushService {
         var dirOpt = rootDirRepository.findByName(dirName);
         if (dirOpt.isEmpty() || !dirOpt.get().isPrivate()) {
             log.warn("PRIVATE_AUTH from '{}' for unknown/non-private dir '{}' — denied", clientId, dirName);
-            out.writeByte(0x00);
+            out.writeByte(AUTH_DENIED);
             out.flush();
             return;
         }
@@ -460,10 +464,10 @@ public class PushService {
         if (storedHash != null && storedHash.equals(passwordHash)) {
             subscribedIds.add(dir.getId());
             log.info("PRIVATE_AUTH from '{}' for dir '{}' — GRANTED", clientId, dirName);
-            out.writeByte(0x01);
+            out.writeByte(AUTH_GRANTED);
         } else {
             log.warn("PRIVATE_AUTH from '{}' for dir '{}' — DENIED (wrong password)", clientId, dirName);
-            out.writeByte(0x00);
+            out.writeByte(AUTH_DENIED);
         }
         out.flush();
     }

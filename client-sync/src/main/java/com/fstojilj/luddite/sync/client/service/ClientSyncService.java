@@ -69,6 +69,10 @@ public class ClientSyncService {
     private static final byte DELETE_ACK = 2;
     private static final byte PRIVATE_AUTH = 3;
 
+    // ── Wire protocol bytes — PRIVATE_AUTH server→client response ────────────
+    private static final byte AUTH_GRANTED = 0x10;
+    private static final byte AUTH_DENIED  = 0x11;
+
     private static final byte FLAG_DELETED = 0x01;
 
     private static final long POLL_INTERVAL_MS = 2_000;
@@ -567,7 +571,7 @@ public class ClientSyncService {
         out.writeInt(hashBytes.length);
         out.write(hashBytes);
         out.flush();
-        return in.readByte() == 0x01;
+        return in.readByte() == AUTH_GRANTED;
     }
 
     /**

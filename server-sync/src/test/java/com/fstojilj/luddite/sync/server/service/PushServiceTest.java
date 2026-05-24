@@ -306,7 +306,7 @@ class PushServiceTest {
 
         invokeHandlePrivateAuth(out, "vault", hash, subscribedIds, "client-1");
 
-        assertThat(baos.toByteArray()).isEqualTo(new byte[]{0x01});
+        assertThat(baos.toByteArray()).isEqualTo(new byte[]{0x10});
         assertThat(subscribedIds).containsExactly(42);
     }
 
@@ -323,7 +323,7 @@ class PushServiceTest {
 
         invokeHandlePrivateAuth(out, "vault", wrongHash, subscribedIds, "client-1");
 
-        assertThat(baos.toByteArray()).isEqualTo(new byte[]{0x00});
+        assertThat(baos.toByteArray()).isEqualTo(new byte[]{0x11});
         assertThat(subscribedIds).isEmpty();
     }
 
@@ -337,7 +337,7 @@ class PushServiceTest {
 
         invokeHandlePrivateAuth(out, "ghost", "anyhash", subscribedIds, "client-1");
 
-        assertThat(baos.toByteArray()).isEqualTo(new byte[]{0x00});
+        assertThat(baos.toByteArray()).isEqualTo(new byte[]{0x11});
         assertThat(subscribedIds).isEmpty();
     }
 
@@ -352,7 +352,7 @@ class PushServiceTest {
 
         invokeHandlePrivateAuth(out, "public", "anyhash", subscribedIds, "client-1");
 
-        assertThat(baos.toByteArray()).isEqualTo(new byte[]{0x00});
+        assertThat(baos.toByteArray()).isEqualTo(new byte[]{0x11});
         assertThat(subscribedIds).isEmpty();
     }
 
