@@ -25,6 +25,8 @@ public class RootDirRepository {
     private final RowMapper<RootDir> rowMapper = (rs, _) -> RootDir.builder()
             .id(rs.getInt("id"))
             .name(rs.getString("name"))
+            .isPrivate(rs.getBoolean("is_private"))
+            .password(rs.getString("password"))
             .absolutePath(rs.getString("absolute_path"))
             .createdAt(rs.getTimestamp("created_at") != null ? rs.getTimestamp("created_at").toInstant() : null)
             .modifiedAt(rs.getTimestamp("modified_at") != null ? rs.getTimestamp("modified_at").toInstant() : null)
@@ -33,8 +35,8 @@ public class RootDirRepository {
 
     public int insert(RootDir rootDir) {
         String sql = """
-                INSERT INTO root_dir (name, absolute_path)
-                VALUES (?, ?)
+                INSERT INTO root_dir (name, is_private, password, absolute_path)
+                VALUES (?, ?, ?, ?)
                 """;
 
         KeyHolder keyHolder = new GeneratedKeyHolder();
@@ -42,7 +44,9 @@ public class RootDirRepository {
         jdbcTemplate.update(connection -> {
             var ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
             ps.setString(1, rootDir.getName());
-            ps.setString(2, rootDir.getAbsolutePath());
+            ps.setBoolean(2, rootDir.isPrivate());
+            ps.setString(3, rootDir.getPassword());
+            ps.setString(4, rootDir.getAbsolutePath());
             return ps;
         }, keyHolder);
 

@@ -14,6 +14,8 @@ import java.time.Instant;
 public class RootDir {
     private Integer id;
     private String name;
+    private boolean isPrivate;
+    private String password;
     private String absolutePath;
     private Instant createdAt;
     private Instant modifiedAt;

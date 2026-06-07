@@ -1,13 +1,12 @@
 package com.fstojilj.luddite.sync.client.service;
 
 import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
+import com.fstojilj.luddite.sync.common.util.PasswordUtils;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.SpringApplication;
-import org.springframework.context.ApplicationContext;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
@@ -25,6 +24,8 @@ import java.security.KeyStore;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Establishes and maintains a persistent mTLS connection to the sync server,
@@ -37,7 +38,7 @@ import java.util.List;
  *   <li>Waits (polling every 7 s) for the user to subscribe to at least one dir
  *       via the CLI if no dirs are configured yet.</li>
  *   <li>Purges stale local dirs, registers new ones, audits the mirror for missing
- *       files, then sends the stable {@code hardwareId} followed by the subscription
+ *       files, then sends the stable {@code clientId} followed by the subscription
  *       handshake with last-known sync versions.</li>
  *   <li>Enters a poll loop that every 2 s sends a {@code POLL} request per subscribed
  *       directory, reads the response, writes/deletes files on disk, and sends a
@@ -66,8 +67,11 @@ public class ClientSyncService {
 
     private static final byte POLL = 1;
     private static final byte DELETE_ACK = 2;
-    private static final byte SHUTDOWN = 3;
-    private static final byte RESUME_SERVER_MODE = 4;
+    private static final byte PRIVATE_AUTH = 3;
+
+    // ── Wire protocol bytes — PRIVATE_AUTH server→client response ────────────
+    private static final byte AUTH_GRANTED = 0x10;
+    private static final byte AUTH_DENIED  = 0x11;
 
     private static final byte FLAG_DELETED = 0x01;
 
@@ -76,7 +80,6 @@ public class ClientSyncService {
     private final RootDirService rootDirService;
     private final FileMetadataService fileMetadataService;
     private final ClientIdService clientIdService;
-    private final ApplicationContext applicationContext;
 
     /**
      * Dirs currently advertised by the server — exposed for the CLI {@code add} command.
@@ -103,6 +106,13 @@ public class ClientSyncService {
 
     private volatile boolean running = false;
     private SSLSocket socket;
+
+    /**
+     * Stores the most recent PRIVATE_AUTH result per directory name.
+     * {@code true} = granted, {@code false} = denied.
+     * Populated during each connect cycle; read by the UI to show access-denied popups.
+     */
+    private final ConcurrentHashMap<String, Boolean> privateAuthResults = new ConcurrentHashMap<>();
 
     /**
      * Starts the virtual thread that drives the connect-and-sync loop.
@@ -144,28 +154,6 @@ public class ClientSyncService {
     }
 
     /**
-     * Sends a {@code SHUTDOWN} signal to the server over the existing mTLS socket,
-     * asking it to terminate.
-     *
-     * <p>If the socket is not currently connected, the call is a no-op and a warning
-     * is logged.
-     */
-    public void sendShutdown() {
-        if (socket == null || socket.isClosed()) {
-            log.warn("Cannot send shutdown — not connected to server");
-            return;
-        }
-        try {
-            var out = new DataOutputStream(socket.getOutputStream());
-            out.writeByte(SHUTDOWN);
-            out.flush();
-            log.info("Shutdown signal sent to server");
-        } catch (IOException e) {
-            log.warn("Failed to send shutdown signal: {}", e.getMessage());
-        }
-    }
-
-    /**
      * Main sync loop: connects to the server, performs the handshake, and then
      * enters the poll loop. Reconnects automatically on {@link IOException} with
      * a 5-second back-off.
@@ -179,7 +167,7 @@ public class ClientSyncService {
                 var out = new DataOutputStream(socket.getOutputStream());
                 var in = new DataInputStream(socket.getInputStream());
 
-                // 1 — read available dirs advertised by the server
+                // 1 — read available (public) dirs advertised by the server
                 List<String> serverServedDirs = readAvailableDirs(in);
                 log.info("Server advertises {} dir(s): {}", serverServedDirs.size(), serverServedDirs);
 
@@ -194,21 +182,33 @@ public class ClientSyncService {
                     }
                 }
 
-                removeStaleDirectories(serverServedDirs, clientListeningDirs);
-                List<String> dirsToSync = serverServedDirs.stream()
+                // Only remove stale dirs that are public — private dirs won't appear in serverServedDirs
+                List<String> privateDirNames = rootDirService.findAllPrivate().stream()
+                        .map(e -> e[0])
+                        .toList();
+                removeStaleDirectories(serverServedDirs, clientListeningDirs, privateDirNames);
+
+                List<String> publicDirsToSync = serverServedDirs.stream()
                         .filter(clientListeningDirs::contains)
                         .toList();
 
+                // 3 — authenticate stored private dirs and build combined sync list
+                sendClientId(out);
+                sendHandshake(out, publicDirsToSync);
+
+                List<String> privateDirsToSync = authenticateStoredPrivateDirs(out, in);
+
+                List<String> dirsToSync = new ArrayList<>(publicDirsToSync);
+                dirsToSync.addAll(privateDirsToSync);
+
                 if (dirsToSync.isEmpty()) {
-                    log.warn("No matching dirs between server and client config. Server: {}, client wants: {}",
-                            serverServedDirs, clientListeningDirs);
-                    continue;
+                    log.warn("No dirs to sync after handshake (public: {}, private authed: {})",
+                            publicDirsToSync.size(), privateDirsToSync.size());
+                    // Don't reconnect immediately — keep waiting in poll loop with empty list
                 }
 
                 registerDirs(dirsToSync);
                 auditMissingFiles(dirsToSync);
-                sendHardwareId(out);
-                sendHandshake(out, dirsToSync);
                 pollLoop(in, out, dirsToSync);
 
             } catch (IOException e) {
@@ -248,13 +248,14 @@ public class ClientSyncService {
         return dirs;
     }
 
-    private void removeStaleDirectories(List<String> serverServedDirs, List<String> clientListeningDirs) {
-        List<String> staleDirs = getStaleDirs(serverServedDirs, clientListeningDirs);
+    private void removeStaleDirectories(List<String> serverServedDirs, List<String> clientListeningDirs,
+                                        List<String> privateDirNames) {
+        List<String> staleDirs = getStaleDirs(serverServedDirs, clientListeningDirs, privateDirNames);
         rootDirService.removeStaleDirs(staleDirs);
     }
 
     /**
-     * Sends the client's stable hardware ID to the server immediately after the
+     * Sends the client's stable client ID to the server immediately after the
      * available-dirs advertisement.
      *
      * <p>Wire format: {@code [4 bytes] id length, [N bytes] id (UTF-8)}
@@ -262,12 +263,12 @@ public class ClientSyncService {
      * @param out the server output stream
      * @throws IOException if writing fails
      */
-    private void sendHardwareId(DataOutputStream out) throws IOException {
+    private void sendClientId(DataOutputStream out) throws IOException {
         byte[] idBytes = clientIdService.getClientId().getBytes(StandardCharsets.UTF_8);
         out.writeInt(idBytes.length);
         out.write(idBytes);
         out.flush();
-        log.info("Sent hardwareId to server: {}", clientIdService.getClientId());
+        log.info("Sent clientId to server: {}", clientIdService.getClientId());
     }
 
     /**
@@ -464,12 +465,7 @@ public class ClientSyncService {
             // Check for server-initiated signals (non-blocking: peek at available bytes)
             if (in.available() > 0) {
                 byte signal = in.readByte();
-                if (signal == RESUME_SERVER_MODE) {
-                    log.info("RESUME_SERVER_MODE received — exiting with code 2 to restart as server");
-                    SpringApplication.exit(applicationContext, () -> 2);
-                } else {
-                    log.warn("Unexpected byte from server outside poll: {}", signal);
-                }
+                log.warn("Unexpected byte from server outside poll: {}", signal);
             }
 
             sleep(POLL_INTERVAL_MS);
@@ -500,17 +496,112 @@ public class ClientSyncService {
     }
 
     /**
-     * Returns directories the client is tracking that are no longer offered by the server.
+     * Returns directories the client is tracking that are no longer offered by the server,
+     * excluding private dirs (they are never advertised so must never be treated as stale).
      *
      * @param availableServerDirs directories currently advertised by the server
      * @param clientListeningDirs directories the client is currently tracking
+     * @param privateDirNames     private dir names to exclude from stale check
      * @return list of directory names to purge
      */
     private List<String> getStaleDirs(List<String> availableServerDirs,
-                                      List<String> clientListeningDirs) {
+                                      List<String> clientListeningDirs,
+                                      List<String> privateDirNames) {
         return clientListeningDirs.stream()
                 .filter(dir -> !availableServerDirs.contains(dir))
+                .filter(dir -> !privateDirNames.contains(dir))
                 .toList();
+    }
+
+    /**
+     * Sends PRIVATE_AUTH for every locally stored private dir and returns those that
+     * the server grants access to, updating {@link #privateAuthResults} accordingly.
+     *
+     * @param out the server output stream
+     * @param in  the server input stream
+     * @return list of dir names the server granted access to
+     * @throws IOException if the wire exchange fails
+     */
+    private List<String> authenticateStoredPrivateDirs(DataOutputStream out,
+                                                       DataInputStream in) throws IOException {
+        List<String[]> stored = rootDirService.findAllPrivate();
+        List<String> granted = new ArrayList<>();
+        for (String[] entry : stored) {
+            String dirName = entry[0];
+            String hash = entry[1];
+            if (hash == null) continue;
+            boolean ok = sendPrivateAuth(out, in, dirName, hash);
+            privateAuthResults.put(dirName, ok);
+            if (ok) {
+                granted.add(dirName);
+                log.info("Auto re-auth for private dir '{}': GRANTED", dirName);
+            } else {
+                log.warn("Auto re-auth for private dir '{}': DENIED — password may have changed", dirName);
+            }
+        }
+        return granted;
+    }
+
+    /**
+     * Sends a single PRIVATE_AUTH wire message and returns the server's boolean response.
+     *
+     * <p>Wire format sent:
+     * <pre>
+     * [1 byte]  PRIVATE_AUTH
+     * [4 bytes] dir name length
+     * [N bytes] dir name (UTF-8)
+     * [4 bytes] hash length
+     * [M bytes] SHA-256 hex hash (UTF-8)
+     * </pre>
+     *
+     * @param out     server output stream
+     * @param in      server input stream
+     * @param dirName private directory name
+     * @param hashHex SHA-256 hex hash of the plain-text password
+     * @return {@code true} if server responded with {@code 0x01}
+     * @throws IOException if the exchange fails
+     */
+    private boolean sendPrivateAuth(DataOutputStream out, DataInputStream in,
+                                    String dirName, String hashHex) throws IOException {
+        byte[] nameBytes = dirName.getBytes(StandardCharsets.UTF_8);
+        byte[] hashBytes = hashHex.getBytes(StandardCharsets.UTF_8);
+        out.writeByte(PRIVATE_AUTH);
+        out.writeInt(nameBytes.length);
+        out.write(nameBytes);
+        out.writeInt(hashBytes.length);
+        out.write(hashBytes);
+        out.flush();
+        return in.readByte() == AUTH_GRANTED;
+    }
+
+    /**
+     * Requests access to a private directory from the currently connected server.
+     * Stores credentials locally on success so reconnects re-authenticate automatically.
+     *
+     * <p>This method is called from the UI thread via a SwingWorker and therefore
+     * triggers a {@link #reconnect()} rather than writing to the live socket directly
+     * (which the poll loop owns). The result of the auth attempt during reconnect is
+     * available via {@link #getPrivateAuthResults()}.
+     *
+     * @param dirName       the private directory name
+     * @param plainPassword the plain-text password entered by the user
+     */
+    public void requestPrivateDir(String dirName, String plainPassword) {
+        String hash = PasswordUtils.hash(plainPassword);
+        rootDirService.registerPrivateDir(dirName, hash);
+        // Clear any previous result so the UI can detect a fresh one after reconnect
+        privateAuthResults.remove(dirName);
+        reconnect();
+    }
+
+    /**
+     * Returns an immutable snapshot of the most recent PRIVATE_AUTH results,
+     * keyed by directory name. {@code true} = granted, {@code false} = denied.
+     *
+     * @return copy of current auth results
+     */
+    public Map<String, Boolean> getPrivateAuthResults() {
+        return Map.copyOf(privateAuthResults);
     }
 
     /**

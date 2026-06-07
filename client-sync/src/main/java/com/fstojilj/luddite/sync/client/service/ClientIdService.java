@@ -11,18 +11,9 @@ import java.nio.file.Path;
 import java.util.UUID;
 
 /**
- * Resolves a stable hardware identifier for this machine that survives network changes
+ * Resolves a stable client identifier for this machine
  * (IP/address changes after router resets, etc.).
  *
- * <p>Resolution order:
- * <ol>
- *   <li><b>Linux</b> — reads {@code /sys/class/dmi/id/board_serial} directly.</li>
- *   <li><b>Windows</b> — runs {@code wmic baseboard get SerialNumber} and parses stdout.</li>
- *   <li><b>Fallback</b> — if the above fails, returns empty/unreadable, or returns the
- *       placeholder string {@code "Default string"}, a random UUID is generated once and
- *       persisted to {@code ~/.luddite/client/machine-id}. On subsequent startups the file
- *       is read back so the identity remains stable across reboots.</li>
- * </ol>
  */
 @Service
 @Slf4j

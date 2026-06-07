@@ -9,6 +9,7 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import java.util.Optional;
 import java.util.Set;
 
+import static com.fstojilj.luddite.sync.server.config.SchemaConstants.ROOT_DIR_TABLE;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -23,26 +24,19 @@ class RootDirRepositoryTest {
         var ds = new SingleConnectionDataSource("jdbc:sqlite::memory:", true);
         ds.setDriverClassName("org.sqlite.JDBC");
         var jdbc = new JdbcTemplate(ds);
-        jdbc.execute("""
-                CREATE TABLE root_dir (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    absolute_path TEXT NOT NULL UNIQUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )""");
+        jdbc.execute(ROOT_DIR_TABLE);
         repository = new RootDirRepository(jdbc);
     }
 
-    private RootDir buildDir(String name, String path) {
-        return RootDir.builder().name(name).absolutePath(path).build();
+    private RootDir buildDir(String name, Boolean isPrivate, String password, String path) {
+        return RootDir.builder().name(name).isPrivate(isPrivate).password(password).absolutePath(path).build();
     }
 
     // ── insert ────────────────────────────────────────────────────────────────
 
     @Test
     void insert_returnsGeneratedId() {
-        int id = repository.insert(buildDir("photos", "/photos"));
+        int id = repository.insert(buildDir("photos", false, "admin", "/photos"));
         assertThat(id).isGreaterThan(0);
     }
 
@@ -55,8 +49,8 @@ class RootDirRepositoryTest {
 
     @Test
     void findAll_withEntries_returnsAll() {
-        repository.insert(buildDir("photos", "/photos"));
-        repository.insert(buildDir("docs", "/docs"));
+        repository.insert(buildDir("photos", false, null, "/photos"));
+        repository.insert(buildDir("docs", false, null, "/docs"));
         Set<RootDir> all = repository.findAll();
         assertThat(all).hasSize(2);
         assertThat(all).extracting(RootDir::getName).containsExactlyInAnyOrder("photos", "docs");
@@ -66,7 +60,7 @@ class RootDirRepositoryTest {
 
     @Test
     void findByName_existing_returnsDir() {
-        repository.insert(buildDir("photos", "/photos"));
+        repository.insert(buildDir("photos", true, "admin", "/photos"));
         Optional<RootDir> result = repository.findByName("photos");
         assertThat(result).isPresent();
         assertThat(result.get().getAbsolutePath()).isEqualTo("/photos");
@@ -77,11 +71,40 @@ class RootDirRepositoryTest {
         assertThat(repository.findByName("missing")).isEmpty();
     }
 
+    // ── isPrivate / password round-trip ───────────────────────────────────────
+
+    @Test
+    void insert_privateDir_persitsIsPrivateAndPassword() {
+        int id = repository.insert(buildDir("secret", true, "hashvalue", "/secret"));
+        Optional<RootDir> result = repository.getRootDirById(id);
+        assertThat(result).isPresent();
+        assertThat(result.get().isPrivate()).isTrue();
+        assertThat(result.get().getPassword()).isEqualTo("hashvalue");
+    }
+
+    @Test
+    void insert_publicDir_isPrivateFalseAndPasswordNull() {
+        int id = repository.insert(buildDir("public", false, null, "/public"));
+        Optional<RootDir> result = repository.getRootDirById(id);
+        assertThat(result).isPresent();
+        assertThat(result.get().isPrivate()).isFalse();
+        assertThat(result.get().getPassword()).isNull();
+    }
+
+    @Test
+    void findByName_privateDir_returnsCorrectFlags() {
+        repository.insert(buildDir("vault", true, "myHash", "/vault"));
+        Optional<RootDir> result = repository.findByName("vault");
+        assertThat(result).isPresent();
+        assertThat(result.get().isPrivate()).isTrue();
+        assertThat(result.get().getPassword()).isEqualTo("myHash");
+    }
+
     // ── getRootDirById ────────────────────────────────────────────────────────
 
     @Test
     void getRootDirById_existing_returnsDir() {
-        int id = repository.insert(buildDir("photos", "/photos"));
+        int id = repository.insert(buildDir("photos", false, null, "/photos"));
         Optional<RootDir> result = repository.getRootDirById(id);
         assertThat(result).isPresent();
         assertThat(result.get().getName()).isEqualTo("photos");
@@ -91,7 +114,7 @@ class RootDirRepositoryTest {
 
     @Test
     void deleteRootDirById_existing_deletesAndReturnsTrue() {
-        int id = repository.insert(buildDir("photos", "/photos"));
+        int id = repository.insert(buildDir("photos", false, null, "/photos"));
         boolean deleted = repository.deleteRootDirById(id);
         assertThat(deleted).isTrue();
         assertThat(repository.findAll()).isEmpty();

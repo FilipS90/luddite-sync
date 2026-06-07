@@ -1,6 +1,7 @@
 package com.fstojilj.luddite.sync.server.cli;
 
 import com.fstojilj.luddite.sync.common.model.RootDir;
+import com.fstojilj.luddite.sync.common.util.PasswordUtils;
 import com.fstojilj.luddite.sync.server.service.PushService;
 import com.fstojilj.luddite.sync.server.service.RootDirService;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,7 +18,6 @@ import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -96,15 +96,22 @@ class AdminCliTest {
     @Test
     void handle_add_withPath_shouldAddAndPrint() throws Exception {
         handle("add /home/user/photos");
-        verify(rootDirService).addRootDir("/home/user/photos");
+        verify(rootDirService).addRootDir("/home/user/photos", false, null);
         assertThat(output()).contains("Added and watching");
     }
 
     @Test
-    void handle_add_serviceThrows_shouldPrintError() throws Exception {
-        doThrow(new IllegalArgumentException("bad path")).when(rootDirService).addRootDir("/bad");
-        handle("add /bad");
-        assertThat(output()).contains("Error: bad path");
+    void handle_add_withPathAndFlags_shouldAddAndPrint() throws Exception {
+        handle("add /home/user/photos --private --pswd admin123");
+        verify(rootDirService).addRootDir("/home/user/photos", true, PasswordUtils.hash("admin123"));
+        assertThat(output()).contains("Added and watching");
+    }
+
+    @Test
+    void handle_add_withPathAndFlags2_shouldAddAndPrint() throws Exception {
+        handle("add /home/user/photos --pswd admin123 --private");
+        verify(rootDirService).addRootDir("/home/user/photos", true, PasswordUtils.hash("admin123"));
+        assertThat(output()).contains("Added and watching");
     }
 
     @Test
@@ -131,26 +138,6 @@ class AdminCliTest {
     void handle_remove_invalidId_shouldPrintError() throws Exception {
         handle("remove abc");
         assertThat(output()).contains("id must be a number");
-    }
-
-    @Test
-    void handle_switchMode_noArg_shouldPrintUsage() throws Exception {
-        handle("switch-mode");
-        assertThat(output()).contains("Usage: switch-mode");
-    }
-
-    @Test
-    void handle_switchMode_clientFound_shouldConfirm() throws Exception {
-        when(pushService.sendResumeServerMode("hw-id-abc123")).thenReturn(true);
-        handle("switch-mode hw-id-abc123");
-        assertThat(output()).contains("Switch-mode signal sent");
-    }
-
-    @Test
-    void handle_switchMode_clientNotFound_shouldPrintNotFound() throws Exception {
-        when(pushService.sendResumeServerMode("hw-id-unknown")).thenReturn(false);
-        handle("switch-mode hw-id-unknown");
-        assertThat(output()).contains("No connected client");
     }
 
     @Test

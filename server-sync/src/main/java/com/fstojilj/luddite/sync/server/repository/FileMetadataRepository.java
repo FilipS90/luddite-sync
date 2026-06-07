@@ -3,6 +3,8 @@ package com.fstojilj.luddite.sync.server.repository;
 import com.fstojilj.luddite.sync.common.model.FileMetadata;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.NonNull;
+import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -10,6 +12,7 @@ import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
 import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -67,6 +70,40 @@ public class FileMetadataRepository {
 
         log.debug("Inserted FileMetadata with id: {}", key.longValue());
         return key.longValue();
+    }
+
+    public void addAll(List<FileMetadata> metadataList) {
+        String sql = """
+                INSERT INTO file_metadata (filename, root_dir_id, relative_path, checksum, file_size, created_at, modified_at, sync_version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """;
+
+        jdbcTemplate.batchUpdate(sql, new BatchPreparedStatementSetter() {
+            @Override
+            public void setValues(@NonNull PreparedStatement ps, int i) throws SQLException {
+                FileMetadata fileMetadata = metadataList.get(i);
+
+                ps.setString(1, fileMetadata.filename());
+                ps.setLong(2, fileMetadata.rootDirId());
+                ps.setString(3, fileMetadata.relativePath());
+                ps.setString(4, fileMetadata.checksum());
+                ps.setLong(5, fileMetadata.fileSize());
+
+                ps.setTimestamp(6, fileMetadata.createdAt() != null ?
+                        Timestamp.from(fileMetadata.createdAt()) : Timestamp.from(Instant.now()));
+                ps.setTimestamp(7, fileMetadata.modifiedAt() != null ?
+                        Timestamp.from(fileMetadata.modifiedAt()) : Timestamp.from(Instant.now()));
+
+                ps.setObject(8, fileMetadata.syncVersion());
+            }
+
+            @Override
+            public int getBatchSize() {
+                return metadataList.size();
+            }
+        });
+
+        log.debug("Batch inserted {} FileMetadata records successfully.", metadataList.size());
     }
 
     public ConcurrentMap<Integer, Long> getMaxSyncVersionByRootDir() {
@@ -135,7 +172,7 @@ public class FileMetadataRepository {
      * @param rootDirId    root directory ID
      * @param relativePath relative file path
      * @param syncVersion  new monotonic sync version minted for this deletion event
-     * @param clientIds    comma-separated hardware IDs of all currently connected clients
+     * @param clientIds    comma-separated client IDs of all currently connected clients
      */
     public void softDelete(long rootDirId, String relativePath, long syncVersion, String clientIds) {
         int rows = jdbcTemplate.update("""
@@ -153,15 +190,15 @@ public class FileMetadataRepository {
     }
 
     /**
-     * Removes {@code hardwareId} from the {@code client_ids} list of a soft-deleted row.
+     * Removes {@code clientId} from the {@code client_ids} list of a soft-deleted row.
      * When the list becomes empty (all clients have acknowledged the delete) the row is
      * hard-deleted from the database.
      *
      * @param rootDirId    root directory ID
      * @param relativePath relative file path
-     * @param hardwareId   the client hardware ID to remove
+     * @param clientId     the client ID to remove
      */
-    public void acknowledgeDelete(int rootDirId, String relativePath, String hardwareId) {
+    public void acknowledgeDelete(int rootDirId, String relativePath, String clientId) {
         var results = jdbcTemplate.queryForList(
                 "SELECT client_ids FROM file_metadata WHERE root_dir_id = ? AND relative_path = ? AND deleted = TRUE",
                 rootDirId, relativePath);
@@ -183,7 +220,7 @@ public class FileMetadataRepository {
         // Remove this client's ID from the comma-separated list
         String updated = java.util.Arrays.stream(raw.split(","))
                 .map(String::trim)
-                .filter(id -> !id.equals(hardwareId))
+                .filter(id -> !id.equals(clientId))
                 .collect(java.util.stream.Collectors.joining(","));
 
         if (updated.isEmpty()) {
@@ -195,7 +232,7 @@ public class FileMetadataRepository {
                     "UPDATE file_metadata SET client_ids = ? WHERE root_dir_id = ? AND relative_path = ?",
                     updated, rootDirId, relativePath);
             log.debug("acknowledgeDelete: removed '{}' from pending list for rootDirId={} '{}', remaining: {}",
-                    hardwareId, rootDirId, relativePath, updated);
+                    clientId, rootDirId, relativePath, updated);
         }
     }
 }

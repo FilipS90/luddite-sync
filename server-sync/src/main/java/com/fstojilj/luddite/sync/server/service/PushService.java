@@ -9,8 +9,6 @@ import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.SpringApplication;
-import org.springframework.context.ApplicationContext;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
@@ -42,7 +40,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * <h2>Connection lifecycle</h2>
  * <ol>
  *   <li>Server advertises all known root directory names.</li>
- *   <li>Client sends its stable {@code hardwareId} (motherboard/BIOS serial or fallback UUID).</li>
+ *   <li>Client sends its stable {@code clientId}.</li>
  *   <li>Client sends a subscription handshake: list of (dirName, lastSyncVersion) pairs.</li>
  *   <li>Client enters a poll loop: every ~2 s it sends a poll request
  *       ({@code [1b POLL][4b dirNameLen][dirName][8b lastSyncVersion]}) and the server
@@ -51,9 +49,6 @@ import java.util.concurrent.locks.ReentrantLock;
  *       ({@code [1b DELETE_ACK][4b pathLen][path]}) after removing the file from disk;
  *       the server then removes the client from that record's {@code client_ids} list and
  *       hard-deletes the row once all clients have acknowledged.</li>
- *   <li>A {@code SHUTDOWN} byte from the client causes the server to exit with code 2.</li>
- *   <li>A {@code RESUME_SERVER_MODE} byte sent by the server instructs the client to
- *       restart itself as a server (exit code 2 on the client side).</li>
  * </ol>
  *
  * <h2>Poll response wire format</h2>
@@ -73,19 +68,21 @@ import java.util.concurrent.locks.ReentrantLock;
 @RequiredArgsConstructor
 public class PushService {
 
-    // ── Wire protocol bytes ───────────────────────────────────────────────────
+    // ── Wire protocol bytes — client→server message types ────────────────────
     public static final byte POLL = 1;
     public static final byte DELETE_ACK = 2;
-    public static final byte SHUTDOWN = 3;
-    public static final byte RESUME_SERVER_MODE = 4;
+    public static final byte PRIVATE_AUTH = 3;
 
-    // ── Flag bits in poll response ────────────────────────────────────────────
+    // ── Wire protocol bytes — PRIVATE_AUTH server→client response ────────────
+    private static final byte AUTH_GRANTED = 0x10;
+    private static final byte AUTH_DENIED  = 0x11;
+
+    // ── Flag bits inside poll-response file records ───────────────────────────
     private static final byte FLAG_DELETED = 0x01;
 
     // ── Dependencies ─────────────────────────────────────────────────────────
     private final FileMetadataService fileMetadataService;
     private final RootDirRepository rootDirRepository;
-    private final ApplicationContext applicationContext;
 
     // ── Config ────────────────────────────────────────────────────────────────
     @Value("${sync.socket.port:8888}")
@@ -105,7 +102,7 @@ public class PushService {
     private volatile boolean running = false;
 
     /**
-     * One entry per connected client: key = stable hardware ID, value = remote address string.
+     * One entry per connected client: key = stable client ID, value = remote address string.
      * Used to populate {@code client_ids} on soft-deleted rows and to expose the client list
      * to the admin CLI.
      */
@@ -160,48 +157,17 @@ public class PushService {
     }
 
     /**
-     * Returns a comma-separated string of hardware IDs for all currently connected clients.
+     * Returns a comma-separated string of client IDs for all currently connected clients.
      * Called by {@link DirWatcherService} at soft-delete time to populate {@code client_ids}.
      *
-     * @return comma-separated hardware IDs, or an empty string if no clients are connected
+     * @return comma-separated client IDs, or an empty string if no clients are connected
      */
     public String getConnectedClientIds() {
         return String.join(",", connectedClients.keySet());
     }
 
     /**
-     * Sends a {@code RESUME_SERVER_MODE} signal to the client identified by the given
-     * hardware ID, instructing it to restart in server mode (exit code 2).
-     * After sending, this process also exits with code 3.
-     *
-     * @param hardwareId the target client's stable hardware ID
-     * @return {@code true} if the signal was sent, {@code false} if no matching session exists
-     */
-    public boolean sendResumeServerMode(String hardwareId) {
-        // We store the DataOutputStream per-session in the serve thread; here we use
-        // a simple shared map so the CLI can reach it.
-        // The actual write is handled via the clientOutputStreams map below.
-        DataOutputStream out = clientOutputStreams.get(hardwareId);
-        if (out == null) {
-            log.warn("sendResumeServerMode: no session for hardwareId '{}'", hardwareId);
-            return false;
-        }
-        try {
-            synchronized (out) {
-                out.writeByte(RESUME_SERVER_MODE);
-                out.flush();
-            }
-            log.info("RESUME_SERVER_MODE sent to {} — exiting with code 3", hardwareId);
-            SpringApplication.exit(applicationContext, () -> 3);
-            return true;
-        } catch (IOException e) {
-            log.warn("Failed to send RESUME_SERVER_MODE to {}: {}", hardwareId, e.getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Output streams keyed by hardwareId so the CLI can send out-of-band signals.
+     * Output streams keyed by client-id so the CLI can send out-of-band signals.
      */
     private final ConcurrentHashMap<String, DataOutputStream> clientOutputStreams = new ConcurrentHashMap<>();
 
@@ -228,7 +194,7 @@ public class PushService {
      *
      * <ol>
      *   <li>Sends the available root directory list.</li>
-     *   <li>Reads the client's stable {@code hardwareId}.</li>
+     *   <li>Reads the client's stable {@code clientId}.</li>
      *   <li>Reads the subscription handshake.</li>
      *   <li>Enters the message loop: handles {@code POLL} and {@code DELETE_ACK} messages.</li>
      * </ol>
@@ -236,17 +202,17 @@ public class PushService {
      * @param socket the accepted SSL socket
      */
     private void serveClient(SSLSocket socket) {
-        String hardwareId = null;
+        String clientId = null;
         try (var in = new DataInputStream(socket.getInputStream());
              var out = new DataOutputStream(socket.getOutputStream())) {
 
             // 1 — advertise available root dirs
             sendAvailableDirs(out);
 
-            // 2 — read client's stable hardware ID
+            // 2 — read client's stable client ID
             int idLen = in.readInt();
-            hardwareId = new String(in.readNBytes(idLen), StandardCharsets.UTF_8);
-            log.info("Client {} identified as hardwareId='{}'", socket.getRemoteSocketAddress(), hardwareId);
+            clientId = new String(in.readNBytes(idLen), StandardCharsets.UTF_8);
+            log.info("Client {} identified as clientId='{}'", socket.getRemoteSocketAddress(), clientId);
 
             // 3 — read subscription handshake
             List<SyncHandshakeEntry> handshake = readHandshake(in);
@@ -255,14 +221,14 @@ public class PushService {
             Set<Integer> subscribedIds = resolveSubscribedIds(handshake);
 
             // Register this client
-            connectedClients.put(hardwareId, socket.getRemoteSocketAddress().toString());
-            clientOutputStreams.put(hardwareId, out);
+            connectedClients.put(clientId, socket.getRemoteSocketAddress().toString());
+            clientOutputStreams.put(clientId, out);
 
             log.info("Client '{}' ({}) subscribed to {} dir(s)",
-                    hardwareId, socket.getRemoteSocketAddress(), subscribedIds.size());
+                    clientId, socket.getRemoteSocketAddress(), subscribedIds.size());
 
             // 4 — message loop
-            final String finalHardwareId = hardwareId;
+            final String finalClientId = clientId;
             while (true) {
                 byte msg = in.readByte();
 
@@ -271,32 +237,35 @@ public class PushService {
                         int nameLen = in.readInt();
                         String dirName = new String(in.readNBytes(nameLen), StandardCharsets.UTF_8);
                         Long lastSyncVersion = in.readLong();
-                        handlePoll(out, dirName, lastSyncVersion, finalHardwareId);
+                        handlePoll(out, dirName, lastSyncVersion, finalClientId);
                     }
                     case DELETE_ACK -> {
                         int pathLen = in.readInt();
                         String qualifiedPath = new String(in.readNBytes(pathLen), StandardCharsets.UTF_8);
-                        handleDeleteAck(qualifiedPath, finalHardwareId);
+                        handleDeleteAck(qualifiedPath, finalClientId);
                     }
-                    case SHUTDOWN -> {
-                        log.info("Shutdown signal from client '{}' — exiting with code 2", finalHardwareId);
-                        SpringApplication.exit(applicationContext, () -> 2);
+                    case PRIVATE_AUTH -> {
+                        int nameLen = in.readInt();
+                        String dirName = new String(in.readNBytes(nameLen), StandardCharsets.UTF_8);
+                        int hashLen = in.readInt();
+                        String passwordHash = new String(in.readNBytes(hashLen), StandardCharsets.UTF_8);
+                        handlePrivateAuth(out, dirName, passwordHash, subscribedIds, finalClientId);
                     }
-                    default -> log.warn("Unexpected byte {} from client '{}'", msg, finalHardwareId);
+                    default -> log.warn("Unexpected byte {} from client '{}'", msg, finalClientId);
                 }
             }
 
         } catch (IOException e) {
-            log.info("Client '{}' disconnected: {}", hardwareId, socket.getRemoteSocketAddress());
+            log.info("Client '{}' disconnected: {}", clientId, socket.getRemoteSocketAddress());
         } finally {
-            if (hardwareId != null) {
-                connectedClients.remove(hardwareId);
-                clientOutputStreams.remove(hardwareId);
+            if (clientId != null) {
+                connectedClients.remove(clientId);
+                clientOutputStreams.remove(clientId);
             }
             try {
                 socket.close();
             } catch (IOException e) {
-                log.error("Error closing socket for client '{}': {}", hardwareId, e.getMessage());
+                log.error("Error closing socket for client '{}': {}", clientId, e.getMessage());
             }
         }
     }
@@ -316,16 +285,16 @@ public class PushService {
      * @param out             the client's output stream
      * @param dirName         the directory name the client is polling
      * @param lastSyncVersion the last sync version the client already has
-     * @param hardwareId      the polling client's hardware ID (for logging)
+     * @param clientId        the polling client's ID (for logging)
      * @throws IOException if writing to the stream fails
      */
     private void handlePoll(DataOutputStream out, String dirName,
-                            Long lastSyncVersion, String hardwareId) throws IOException {
+                            Long lastSyncVersion, String clientId) throws IOException {
         pollLock.lock();
         try {
             var rootDirOpt = rootDirRepository.findByName(dirName);
             if (rootDirOpt.isEmpty()) {
-                log.warn("Poll from '{}' for unknown dir '{}', sending empty response", hardwareId, dirName);
+                log.warn("Poll from '{}' for unknown dir '{}', sending empty response", clientId, dirName);
                 out.writeInt(0);
                 out.flush();
                 return;
@@ -337,7 +306,7 @@ public class PushService {
             long limit = 100;
             List<FileMetadata> changed = fileMetadataService.findChangedSince(rootDirId, lastSyncVersion, limit);
             log.debug("Poll from '{}' for dir '{}' since v{}: {} record(s)",
-                    hardwareId, dirName, lastSyncVersion, changed.size());
+                    clientId, dirName, lastSyncVersion, changed.size());
 
 
             // Write the full response to the wire first
@@ -368,10 +337,10 @@ public class PushService {
             out.flush();
 
         } catch (IOException e) {
-            log.warn("Error handling poll from '{}': {}", hardwareId, e.getMessage());
+            log.warn("Error handling poll from '{}': {}", clientId, e.getMessage());
             throw e;
         } catch (Exception e) {
-            log.error("Unexpected error handling poll from '{}'", hardwareId, e);
+            log.error("Unexpected error handling poll from '{}'", clientId, e);
             throw e;
         } finally {
             pollLock.unlock();
@@ -432,13 +401,13 @@ public class PushService {
 
     /**
      * Processes a delete acknowledgement from a client.
-     * Removes the client's hardware ID from the row's {@code client_ids} list.
+     * Removes the client's ID from the row's {@code client_ids} list.
      * When the list is empty the row is hard-deleted.
      *
      * @param qualifiedPath qualified path of the form "dirName/relativePath"
-     * @param hardwareId    the acknowledging client's hardware ID
+     * @param clientId      the acknowledging client's ID
      */
-    private void handleDeleteAck(String qualifiedPath, String hardwareId) {
+    private void handleDeleteAck(String qualifiedPath, String clientId) {
         // qualifiedPath = "dirName/rel/path/file.txt"
         int slash = qualifiedPath.indexOf('/');
         if (slash < 0) {
@@ -450,11 +419,57 @@ public class PushService {
 
         rootDirRepository.findByName(dirName).ifPresentOrElse(
                 rootDir -> {
-                    fileMetadataService.acknowledgeDelete(rootDir.getId(), relativePath, hardwareId);
-                    log.debug("Delete-ACK from '{}' for '{}'", hardwareId, qualifiedPath);
+                    fileMetadataService.acknowledgeDelete(rootDir.getId(), relativePath, clientId);
+                    log.debug("Delete-ACK from '{}' for '{}'", clientId, qualifiedPath);
                 },
                 () -> log.warn("handleDeleteAck: unknown dir '{}' in path '{}'", dirName, qualifiedPath)
         );
+    }
+
+    // ── Private-auth handler ──────────────────────────────────────────────────
+
+    /**
+     * Handles a PRIVATE_AUTH request from a client.
+     *
+     * <p>Wire format (client → server):
+     * <pre>
+     * [1 byte]  PRIVATE_AUTH
+     * [4 bytes] dir name length
+     * [N bytes] dir name (UTF-8)
+     * [4 bytes] password hash length
+     * [M bytes] SHA-256 hex hash (UTF-8)
+     * </pre>
+     * Server response: {@code AUTH_GRANTED} (0x10) = granted, {@code AUTH_DENIED} (0x11) = denied.
+     *
+     * @param out           the client's output stream
+     * @param dirName       the private directory name being requested
+     * @param passwordHash  the SHA-256 hex hash sent by the client
+     * @param subscribedIds the mutable set of authorised dir IDs for this session
+     * @param clientId      client identifier for logging
+     * @throws IOException if writing fails
+     */
+    private void handlePrivateAuth(DataOutputStream out, String dirName, String passwordHash,
+                                   Set<Integer> subscribedIds, String clientId) throws IOException {
+        var dirOpt = rootDirRepository.findByName(dirName);
+        if (dirOpt.isEmpty() || !dirOpt.get().isPrivate()) {
+            log.warn("PRIVATE_AUTH from '{}' for unknown/non-private dir '{}' — denied", clientId, dirName);
+            out.writeByte(AUTH_DENIED);
+            out.flush();
+            return;
+        }
+
+        RootDir dir = dirOpt.get();
+        String storedHash = dir.getPassword();
+
+        if (storedHash != null && storedHash.equals(passwordHash)) {
+            subscribedIds.add(dir.getId());
+            log.info("PRIVATE_AUTH from '{}' for dir '{}' — GRANTED", clientId, dirName);
+            out.writeByte(AUTH_GRANTED);
+        } else {
+            log.warn("PRIVATE_AUTH from '{}' for dir '{}' — DENIED (wrong password)", clientId, dirName);
+            out.writeByte(AUTH_DENIED);
+        }
+        out.flush();
     }
 
     // ── Handshake helpers ─────────────────────────────────────────────────────
@@ -475,6 +490,7 @@ public class PushService {
      */
     private void sendAvailableDirs(DataOutputStream out) throws IOException {
         List<String> dirNames = rootDirRepository.findAll().stream()
+                .filter(rd -> !rd.isPrivate())
                 .map(RootDir::getName)
                 .toList();
         out.writeInt(dirNames.size());

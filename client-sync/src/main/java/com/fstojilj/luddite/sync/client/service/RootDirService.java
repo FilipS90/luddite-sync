@@ -118,4 +118,37 @@ public class RootDirService {
     public void updateSyncVersion(String dirName, long syncVersion) {
         rootDirRepository.updateSyncVersion(dirName, syncVersion);
     }
+
+    /**
+     * Registers a private directory with its SHA-256 hashed password so that
+     * the client can automatically re-authenticate on reconnect.
+     *
+     * @param dirName      the directory name
+     * @param passwordHash SHA-256 hex hash of the user-supplied password
+     */
+    public void registerPrivateDir(String dirName, String passwordHash) {
+        rootDirRepository.registerPrivateDir(dirName, passwordHash);
+        log.info("Registered private dir '{}' in local sync state", dirName);
+    }
+
+    /**
+     * Returns the stored SHA-256 password hash for the given private directory.
+     *
+     * @param dirName the directory name
+     * @return stored hash or null if not found
+     */
+    public String getPasswordHash(String dirName) {
+        return rootDirRepository.getPasswordHash(dirName);
+    }
+
+    /**
+     * Returns all locally stored private directories as [dirName, passwordHash] pairs.
+     * Used by {@link com.fstojilj.luddite.sync.client.service.ClientSyncService} to
+     * auto-authenticate on reconnect.
+     *
+     * @return list of String arrays where [0]=dirName, [1]=passwordHash
+     */
+    public List<String[]> findAllPrivate() {
+        return rootDirRepository.findAllPrivate();
+    }
 }

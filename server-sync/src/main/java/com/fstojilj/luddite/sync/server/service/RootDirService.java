@@ -11,6 +11,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import static com.fstojilj.luddite.sync.server.utils.FileSystemUtils.getDirName;
+import static com.fstojilj.luddite.sync.server.utils.FileSystemUtils.isValidFileSystemDirectory;
 
 @Service
 @RequiredArgsConstructor
@@ -25,10 +26,13 @@ public class RootDirService {
 
 
     @Transactional
-    public void addRootDir(String absolutePath) {
+    public void addRootDir(String absolutePath, boolean isPrivate, String password) {
+        isValidFileSystemDirectory(absolutePath);
         var dirName = getDirName(absolutePath);
         var rootDir = RootDir.builder()
                 .name(dirName)
+                .isPrivate(isPrivate)
+                .password(password)
                 .absolutePath(absolutePath)
                 .build();
 

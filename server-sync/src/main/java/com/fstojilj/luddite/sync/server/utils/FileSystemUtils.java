@@ -32,4 +32,12 @@ public final class FileSystemUtils {
         File[] files = rootDir.listFiles();
         return files != null ? List.of(files) : List.of();
     }
+
+    public static void isValidFileSystemDirectory(String absolutePath) {
+        boolean isValid = Path.of(absolutePath).normalize().toFile().isDirectory();
+
+        if (!isValid) {
+            throw new IllegalArgumentException("Provided path is not a valid directory: " + absolutePath);
+        }
+    }
 }
