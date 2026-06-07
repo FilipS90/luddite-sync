@@ -71,7 +71,7 @@ public class ClientSyncService {
 
     // ── Wire protocol bytes — PRIVATE_AUTH server→client response ────────────
     private static final byte AUTH_GRANTED = 0x10;
-    private static final byte AUTH_DENIED  = 0x11;
+    private static final byte AUTH_DENIED = 0x11;
 
     private static final byte FLAG_DELETED = 0x01;
 
@@ -151,6 +151,7 @@ public class ClientSyncService {
         // Do NOT set running=false — that exits the loop entirely.
         // Closing the socket causes an IOException in connectAndSync which triggers a reconnect.
         closeSocket();
+        start();
     }
 
     /**
