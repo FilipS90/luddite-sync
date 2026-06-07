@@ -3,6 +3,8 @@ package com.fstojilj.luddite.sync.server.repository;
 import com.fstojilj.luddite.sync.common.model.FileMetadata;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.NonNull;
+import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -10,6 +12,7 @@ import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
 import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -67,6 +70,40 @@ public class FileMetadataRepository {
 
         log.debug("Inserted FileMetadata with id: {}", key.longValue());
         return key.longValue();
+    }
+
+    public void addAll(List<FileMetadata> metadataList) {
+        String sql = """
+                INSERT INTO file_metadata (filename, root_dir_id, relative_path, checksum, file_size, created_at, modified_at, sync_version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """;
+
+        jdbcTemplate.batchUpdate(sql, new BatchPreparedStatementSetter() {
+            @Override
+            public void setValues(@NonNull PreparedStatement ps, int i) throws SQLException {
+                FileMetadata fileMetadata = metadataList.get(i);
+
+                ps.setString(1, fileMetadata.filename());
+                ps.setLong(2, fileMetadata.rootDirId());
+                ps.setString(3, fileMetadata.relativePath());
+                ps.setString(4, fileMetadata.checksum());
+                ps.setLong(5, fileMetadata.fileSize());
+
+                ps.setTimestamp(6, fileMetadata.createdAt() != null ?
+                        Timestamp.from(fileMetadata.createdAt()) : Timestamp.from(Instant.now()));
+                ps.setTimestamp(7, fileMetadata.modifiedAt() != null ?
+                        Timestamp.from(fileMetadata.modifiedAt()) : Timestamp.from(Instant.now()));
+
+                ps.setObject(8, fileMetadata.syncVersion());
+            }
+
+            @Override
+            public int getBatchSize() {
+                return metadataList.size();
+            }
+        });
+
+        log.debug("Batch inserted {} FileMetadata records successfully.", metadataList.size());
     }
 
     public ConcurrentMap<Integer, Long> getMaxSyncVersionByRootDir() {

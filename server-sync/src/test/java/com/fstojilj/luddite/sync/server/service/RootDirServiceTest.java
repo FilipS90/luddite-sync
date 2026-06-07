@@ -2,10 +2,13 @@ package com.fstojilj.luddite.sync.server.service;
 
 import com.fstojilj.luddite.sync.common.model.RootDir;
 import com.fstojilj.luddite.sync.server.repository.RootDirRepository;
+import com.fstojilj.luddite.sync.server.utils.FileSystemUtils;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Optional;
@@ -36,11 +39,16 @@ class RootDirServiceTest {
 
     @Test
     void addRootDir_validPath_shouldInsertIndexAndWatch() {
-        when(rootDirRepository.insert(any(RootDir.class))).thenReturn(7);
-        rootDirService.addRootDir("/photos/family", true, "admin123");
-        verify(rootDirRepository).insert(any(RootDir.class));
-        verify(fileMetadataService).addAllFileMetadataForRoot("/photos/family", 7);
-        verify(dirWatcherService).startWatching("/photos/family", 7);
+        try (MockedStatic<FileSystemUtils> utils = Mockito.mockStatic(FileSystemUtils.class)) {
+            utils.when(() -> FileSystemUtils.isValidFileSystemDirectory(any()))
+                    .thenAnswer(invocation -> null);
+
+            when(rootDirRepository.insert(any(RootDir.class))).thenReturn(7);
+            rootDirService.addRootDir("/photos/family", true, "admin123");
+            verify(rootDirRepository).insert(any(RootDir.class));
+            verify(fileMetadataService).addAllFileMetadataForRoot("/photos/family", 7);
+            verify(dirWatcherService).startWatching("/photos/family", 7);
+        }
     }
 
     // ── removeRootDir ─────────────────────────────────────────────────────────

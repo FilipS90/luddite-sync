@@ -105,14 +105,12 @@ public class AdminCli {
 
                 String absolutePath = arg.split("\\s+")[0];
                 System.out.println("  Adding root dir: " + absolutePath);
-                System.out.println("  Private: " + isPrivate);
-                System.out.println("  Password: " + (password != null ? "[hashed]" : "none"));
 
                 String passwordHash = password != null ? PasswordUtils.hash(password) : null;
 
                 try {
                     rootDirService.addRootDir(absolutePath, isPrivate, passwordHash);
-                    System.out.printf("  Added and watching: %s%n", arg);
+                    System.out.printf("  Added and watching: %s%n", absolutePath);
                 } catch (Exception e) {
                     System.out.printf("  Error: %s%n", e.getMessage());
                 }

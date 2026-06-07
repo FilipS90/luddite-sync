@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.io.File;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -67,25 +68,40 @@ public class FileMetadataService implements ApplicationRunner {
         fileMetadataRepository.add(buildFileMetadata(file, rootDirId, relativePath));
     }
 
-    @Transactional
     public void addAllFileMetadataForRoot(String rootAbsolutePath, int rootDirId) {
-        recursiveAddFileMetadataForSubdirs(rootAbsolutePath, rootAbsolutePath, rootDirId);
+        final short BATCH_SIZE = 200;
+        List<FileMetadata> fileBatch = new ArrayList<>(BATCH_SIZE);
+
+        collectAndAddBatchedFileMetadata(fileBatch, BATCH_SIZE, rootAbsolutePath, rootAbsolutePath, rootDirId);
+
+        if (!fileBatch.isEmpty()) {
+            fileMetadataRepository.addAll(fileBatch);
+        }
+
+        log.info("Added metadata for files in root dir '{}'", rootAbsolutePath);
     }
 
-    private void recursiveAddFileMetadataForSubdirs(String dirAbsolutePath, String rootAbsolutePath, int rootDirId) {
+    private void collectAndAddBatchedFileMetadata(List<FileMetadata> fileBatch, short batchSize, String dirAbsolutePath,
+                                                  String rootAbsolutePath, int rootDirId) {
         List<File> files = listAllFilesForDir(dirAbsolutePath);
         Path rootPath = Path.of(rootAbsolutePath);
 
         for (File file : files) {
             if (file.isDirectory()) {
-                recursiveAddFileMetadataForSubdirs(file.getAbsolutePath(), rootAbsolutePath, rootDirId);
+                collectAndAddBatchedFileMetadata(fileBatch, batchSize, file.getAbsolutePath(), rootAbsolutePath, rootDirId);
             } else {
                 if (isIgnored(file.getName())) {
                     log.debug("Ignoring file during initial scan: {}", file.getAbsolutePath());
                     continue;
                 }
                 String relativePath = File.separator + rootPath.relativize(file.toPath());
-                fileMetadataRepository.add(buildFileMetadata(file, rootDirId, relativePath));
+                var fileMetadata = buildFileMetadata(file, rootDirId, relativePath);
+                fileBatch.add(fileMetadata);
+
+                if (fileBatch.size() == batchSize) {
+                    fileMetadataRepository.addAll(fileBatch);
+                    fileBatch.clear();
+                }
             }
         }
     }
