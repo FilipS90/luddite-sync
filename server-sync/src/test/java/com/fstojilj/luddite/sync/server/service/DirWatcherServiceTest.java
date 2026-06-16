@@ -105,24 +105,24 @@ class DirWatcherServiceTest {
     }
 
     @Test
-    void startWatching_withSubdirectory_shouldWatchSubdir() throws Exception {
+    void startWatching_withSubdirectory_shouldOnlyWatchRootDir() throws Exception {
         Path subDir = Files.createDirectory(tempDir.resolve("subdir"));
         String rootPath = tempDir.toAbsolutePath().toString();
         String subPath = subDir.toAbsolutePath().toString();
 
         dirWatcherService.startWatching(rootPath, 1);
 
-        // Wait for both root and subdir watchers
+        // Wait for root dir watcher to register
         long deadline = System.currentTimeMillis() + 3000;
-        while ((!activeWatchers().containsKey(rootPath) || !activeWatchers().containsKey(subPath))
-                && System.currentTimeMillis() < deadline) {
+        while (!activeWatchers().containsKey(rootPath) && System.currentTimeMillis() < deadline) {
             Thread.sleep(20);
         }
 
-        assertThat(activeWatchers()).containsKey(subPath);
+        // Root dir IS watched via WatchService; subdirs are NOT (handled by periodic scan)
+        assertThat(activeWatchers()).containsKey(rootPath);
+        assertThat(activeWatchers()).doesNotContainKey(subPath);
 
         dirWatcherService.stopWatching(rootPath);
-        dirWatcherService.stopWatching(subPath);
     }
 }
 

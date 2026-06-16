@@ -215,4 +215,15 @@ public class FileMetadataService implements ApplicationRunner {
     private static boolean isIgnored(String filename) {
         return IGNORED_FILENAMES.contains(filename.toLowerCase());
     }
+
+    /**
+     * Returns all active (non-deleted) file metadata records for a given root directory ID.
+     * Used by the periodic subdir scanner for filesystem vs DB comparison.
+     *
+     * @param rootDirId root directory ID
+     * @return list of active FileMetadata records
+     */
+    public List<FileMetadata> findAllActiveByRootDirId(int rootDirId) {
+        return fileMetadataRepository.findAllActiveByRootDirId(rootDirId);
+    }
 }

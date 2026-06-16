@@ -235,4 +235,17 @@ public class FileMetadataRepository {
                     clientId, rootDirId, relativePath, updated);
         }
     }
+
+    /**
+     * Returns all active (non-deleted) file metadata records for a given root directory.
+     * Used by the periodic subdir scanner to compare DB state against the filesystem.
+     *
+     * @param rootDirId root directory ID
+     * @return list of active FileMetadata records
+     */
+    public List<FileMetadata> findAllActiveByRootDirId(int rootDirId) {
+        return jdbcTemplate.query(
+                "SELECT * FROM file_metadata WHERE root_dir_id = ? AND (deleted IS NULL OR deleted = FALSE)",
+                rowMapper, rootDirId);
+    }
 }
