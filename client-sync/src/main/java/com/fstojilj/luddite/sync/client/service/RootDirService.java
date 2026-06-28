@@ -132,6 +132,17 @@ public class RootDirService {
     }
 
     /**
+     * Registers a private directory with its SHA-256 hashed password so that
+     * the client can automatically re-authenticate on reconnect.
+     *
+     * @param dirName the directory name
+     */
+    public void remove(String dirName) {
+        rootDirRepository.remove(dirName);
+        log.info("Unregistered private dir '{}' in local sync state", dirName);
+    }
+
+    /**
      * Returns the stored SHA-256 password hash for the given private directory.
      *
      * @param dirName the directory name

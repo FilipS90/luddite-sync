@@ -259,7 +259,7 @@ public class ClientUI {
     private JPanel buildActionButtons() {
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 6));
         panel.setBackground(BG);
-        panel.add(retroButton("[ START SYNC >> ]", FG, this::subscribeSelected));
+        panel.add(retroButton("[ START SYNC ]", FG, this::subscribeSelected));
         panel.add(retroButton("[ SYNC PRIVATE ]", FG_AMBER, this::syncPrivate));
         panel.add(retroButton("[ STOP SYNC ]", FG_AMBER, () -> stopSync(false)));
         panel.add(retroButton("[ STOP & DELETE ]", FG_RED, () -> stopSync(true)));
