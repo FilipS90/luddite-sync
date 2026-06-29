@@ -10,8 +10,9 @@ spring:
 
 sync:
   server:
-    host: win-server
+    host: localhost
     port: 8888
+    api-url: http://${sync.server.host}:8080
   client:
     mirror-dir: ${user.home}/.luddite
     retain-local-directory: true

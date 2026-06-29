@@ -89,6 +89,8 @@ class DirsControllerTest {
         when(rootDirService.findByName("Movies")).thenReturn(Optional.of(dir));
         when(fileMetadataService.findImmediateChildDirNames(eq(1), anyString()))
                 .thenReturn(List.of("Action", "Drama"));
+        when(fileMetadataService.findImmediateChildFileNames(eq(1), anyString()))
+                .thenReturn(List.of());
 
         mvc.perform(get("/api/dirs/Movies/tree"))
                 .andExpect(status().isOk())
@@ -120,6 +122,8 @@ class DirsControllerTest {
         when(rootDirService.findByName("Secrets")).thenReturn(Optional.of(dir));
         when(fileMetadataService.findImmediateChildDirNames(anyInt(), anyString()))
                 .thenReturn(List.of("hidden"));
+        when(fileMetadataService.findImmediateChildFileNames(anyInt(), anyString()))
+                .thenReturn(List.of());
 
         mvc.perform(get("/api/dirs/Secrets/tree").header("X-Auth-Hash", "abc123"))
                 .andExpect(status().isOk())
@@ -132,6 +136,8 @@ class DirsControllerTest {
         when(rootDirService.findByName("Movies")).thenReturn(Optional.of(dir));
         when(fileMetadataService.findImmediateChildDirNames(eq(1), eq("Action")))
                 .thenReturn(List.of("2024", "2023"));
+        when(fileMetadataService.findImmediateChildFileNames(eq(1), eq("Action")))
+                .thenReturn(List.of());
 
         mvc.perform(get("/api/dirs/Movies/tree").param("under", "Action"))
                 .andExpect(status().isOk())
@@ -193,7 +199,7 @@ class DirsControllerTest {
 
         DirVersionCheckRequest req = new DirVersionCheckRequest(List.of(new DirVersionEntry("Movies", null)));
 
-        mvc.perform(post("/api/sync/versions")
+        mvc.perform(post("/api/dirs/versions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isOk())
@@ -208,7 +214,7 @@ class DirsControllerTest {
         DirVersionCheckRequest req = new DirVersionCheckRequest(
                 List.of(new DirVersionEntry("Secrets", "wronghash")));
 
-        mvc.perform(post("/api/sync/versions")
+        mvc.perform(post("/api/dirs/versions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isOk())
@@ -224,7 +230,7 @@ class DirsControllerTest {
         DirVersionCheckRequest req = new DirVersionCheckRequest(
                 List.of(new DirVersionEntry("Secrets", "abc123")));
 
-        mvc.perform(post("/api/sync/versions")
+        mvc.perform(post("/api/dirs/versions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isOk())
@@ -239,7 +245,7 @@ class DirsControllerTest {
 
         DirVersionCheckRequest req = new DirVersionCheckRequest(List.of(new DirVersionEntry("Empty", null)));
 
-        mvc.perform(post("/api/sync/versions")
+        mvc.perform(post("/api/dirs/versions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isOk())

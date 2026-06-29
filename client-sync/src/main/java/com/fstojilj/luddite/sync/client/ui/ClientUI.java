@@ -2,7 +2,7 @@ package com.fstojilj.luddite.sync.client.ui;
 
 import com.fstojilj.luddite.sync.client.service.ClientSyncService;
 import com.fstojilj.luddite.sync.client.service.RootDirService;
-import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
+import com.fstojilj.luddite.sync.client.service.ServerApiClient;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,7 +25,6 @@ import javax.swing.JPasswordField;
 import javax.swing.JScrollPane;
 import javax.swing.JSeparator;
 import javax.swing.JSplitPane;
-import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
@@ -35,8 +34,6 @@ import javax.swing.UIManager;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
 import javax.swing.border.TitledBorder;
-import javax.swing.table.DefaultTableCellRenderer;
-import javax.swing.table.DefaultTableModel;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Cursor;
@@ -56,8 +53,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
-
-import static com.fstojilj.luddite.sync.client.service.ClientSyncService.serverDirs;
 
 /**
  * Minimalistic retro-terminal Swing UI for the Luddite Sync client.
@@ -88,21 +83,40 @@ public class ClientUI {
     // ── Spring deps ───────────────────────────────────────────────────────────
     private final RootDirService rootDirService;
     private final ClientSyncService clientSyncService;
+    private final ServerApiClient serverApiClient;
     private final ApplicationContext applicationContext;
 
     @Value("${sync.client.mirror-dir}")
     private String mirrorDir;
 
+    // ── Tree item model ───────────────────────────────────────────────────────
+
+    /** Represents one row in the left tree panel. */
+    private record TreeItem(String rootDirName, String fullRelPath, int depth, boolean isRootDir, boolean isFile) {
+        String displayName() {
+            if (isRootDir) return rootDirName;
+            int slash = fullRelPath.lastIndexOf('/');
+            return slash < 0 ? fullRelPath : fullRelPath.substring(slash + 1);
+        }
+        String key() {
+            return isRootDir ? rootDirName : rootDirName + ":" + fullRelPath;
+        }
+    }
+
     // ── Swing components (all touched only on EDT) ────────────────────────────
     private JFrame frame;
     private JLabel statusDot;
     private JLabel statusLabel;
-    private DefaultListModel<String> serverListModel;
-    private DefaultTableModel subscribedTableModel;
-    private JTable subscribedTable;
-    private JList<String> serverList;
+    private DefaultListModel<TreeItem> treeListModel;
+    private JList<TreeItem> treeList;
+    private DefaultListModel<String> subscribedListModel;
+    private JList<String> subscribedList;
+    private JButton btnStartSync;
+    private JButton btnDownload;
     private JTextArea logArea;
     private Timer refreshTimer;
+    private final java.util.Set<String> expandedKeys = new java.util.HashSet<>();
+    private long lastSubscribedClickMs = 0;
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -202,49 +216,49 @@ public class ClientUI {
         panel.setBackground(BG);
         panel.setBorder(new EmptyBorder(6, 12, 4, 12));
 
-        // Left — server dirs
-        serverListModel = new DefaultListModel<>();
-        serverList = new JList<>(serverListModel);
-        serverList.setBackground(BG_CELL);
-        serverList.setForeground(FG_AMBER);
-        serverList.setFont(MONO);
-        serverList.setSelectionBackground(BORDER_CLR);
-        serverList.setSelectionForeground(Color.WHITE);
-        serverList.setBorder(new EmptyBorder(4, 6, 4, 6));
-        serverList.addMouseListener(new MouseAdapter() {
+        // Left — expandable server dir tree
+        treeListModel = new DefaultListModel<>();
+        treeList = new JList<>(treeListModel);
+        treeList.setBackground(BG_CELL);
+        treeList.setFont(MONO);
+        treeList.setSelectionBackground(BORDER_CLR);
+        treeList.setSelectionForeground(Color.WHITE);
+        treeList.setBorder(new EmptyBorder(4, 6, 4, 6));
+        treeList.setCellRenderer(buildTreeCellRenderer());
+        treeList.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
-                if (e.getClickCount() == 2) subscribeSelected();
+                if (e.getClickCount() == 1) handleTreeSingleClick(e);
+                else if (e.getClickCount() == 2) handleTreeDoubleClick(e);
             }
         });
-        JScrollPane serverScroll = retroScroll(serverList);
-        JPanel serverPanel = titledPanel("SERVER DIRECTORIES  (double-click to subscribe)", serverScroll);
+        JScrollPane treeScroll = retroScroll(treeList);
+        JPanel treePanel = titledPanel("SERVER DIRECTORIES  (click to expand, dbl-click to sync)", treeScroll);
 
         // Middle — buttons
         JPanel btnPanel = buildActionButtons();
 
-        // Right — subscribed dirs table
-        subscribedTableModel = new DefaultTableModel(new Object[]{"DIRECTORY", "SYNC VERSION"}, 0) {
-            @Override
-            public boolean isCellEditable(int r, int c) {
-                return false;
-            }
-        };
-        subscribedTable = new JTable(subscribedTableModel);
-        styleTable(subscribedTable);
-        JScrollPane subScroll = retroScroll(subscribedTable);
-        JPanel subPanel = titledPanel("SUBSCRIBED  (double-click to stop sync)", subScroll);
-
-        // Double-click to unsubscribe
-        subscribedTable.addMouseListener(new MouseAdapter() {
+        // Right — subscribed dirs list (single column, no version column)
+        subscribedListModel = new DefaultListModel<>();
+        subscribedList = new JList<>(subscribedListModel);
+        subscribedList.setBackground(BG_CELL);
+        subscribedList.setForeground(FG);
+        subscribedList.setFont(MONO);
+        subscribedList.setSelectionBackground(BORDER_CLR);
+        subscribedList.setSelectionForeground(Color.WHITE);
+        subscribedList.setBorder(new EmptyBorder(4, 6, 4, 6));
+        subscribedList.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
+                lastSubscribedClickMs = System.currentTimeMillis();
                 if (e.getClickCount() == 2) stopSync(false);
             }
         });
+        JScrollPane subScroll = retroScroll(subscribedList);
+        JPanel subPanel = titledPanel("SUBSCRIBED  (double-click to stop sync)", subScroll);
 
-        JSplitPane dirSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, serverPanel, subPanel);
-        dirSplit.setDividerLocation(300);
+        JSplitPane dirSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, treePanel, subPanel);
+        dirSplit.setDividerLocation(360);
         dirSplit.setDividerSize(4);
         dirSplit.setBackground(BG);
         dirSplit.setBorder(null);
@@ -254,18 +268,37 @@ public class ClientUI {
         return panel;
     }
 
+    private javax.swing.ListCellRenderer<TreeItem> buildTreeCellRenderer() {
+        return (list, value, index, isSelected, cellHasFocus) -> {
+            JLabel lbl = new JLabel();
+            lbl.setOpaque(true);
+            lbl.setFont(MONO);
+            lbl.setBorder(new EmptyBorder(1, 4, 1, 4));
+            if (value == null) return lbl;
+            String indent = "  ".repeat(value.depth() * 2);
+            lbl.setText(indent + value.displayName());
+            Color fg = value.isFile() ? new Color(0x00, 0xBB, 0x55) : FG_AMBER;
+            lbl.setForeground(fg);
+            lbl.setBackground(isSelected ? BORDER_CLR : BG_CELL);
+            return lbl;
+        };
+    }
+
     // ── Action buttons ────────────────────────────────────────────────────────
 
     private JPanel buildActionButtons() {
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 6));
         panel.setBackground(BG);
-        panel.add(retroButton("[ START SYNC ]", FG, this::subscribeSelected));
+        btnStartSync = retroButton("[ START SYNC >> ]", FG, this::subscribeSelected);
+        btnDownload  = retroButton("[ DOWNLOAD ]", FG_DIM, this::downloadSelected);
+        btnDownload.setEnabled(false);
+        panel.add(btnStartSync);
+        panel.add(btnDownload);
         panel.add(retroButton("[ SYNC PRIVATE ]", FG_AMBER, this::syncPrivate));
         panel.add(retroButton("[ STOP SYNC ]", FG_AMBER, () -> stopSync(false)));
         panel.add(retroButton("[ STOP & DELETE ]", FG_RED, () -> stopSync(true)));
         panel.add(retroButton("[ REFRESH ]", FG_AMBER, this::doRefresh));
         panel.add(retroButton("[ EXIT ]", FG_RED, this::exitApp));
-
         return panel;
     }
 
@@ -310,16 +343,96 @@ public class ClientUI {
         return wrapper;
     }
 
+    // ── Tree interactions ─────────────────────────────────────────────────────
+
+    private void handleTreeSingleClick(MouseEvent e) {
+        int index = treeList.locationToIndex(e.getPoint());
+        if (index < 0) return;
+        TreeItem item = treeListModel.getElementAt(index);
+        treeList.setSelectedIndex(index);
+        updateButtonStates(item);
+
+        if (item.isFile()) return; // files are leaf nodes — nothing to expand
+
+        String key = item.key();
+        if (expandedKeys.contains(key)) {
+            collapseTreeItem(index);
+            expandedKeys.remove(key);
+        } else {
+            String subPath = item.isRootDir() ? "" : item.fullRelPath();
+            String passwordHash = item.isRootDir() ? null : rootDirService.getPasswordHash(item.rootDirName());
+            new SwingWorker<com.fstojilj.luddite.sync.common.dto.TreeResponse, Void>() {
+                @Override
+                protected com.fstojilj.luddite.sync.common.dto.TreeResponse doInBackground() {
+                    return serverApiClient.fetchTree(item.rootDirName(), subPath, passwordHash);
+                }
+                @Override
+                protected void done() {
+                    try {
+                        com.fstojilj.luddite.sync.common.dto.TreeResponse resp = get();
+                        int insertAt = index + 1;
+                        for (String dir : resp.childNames()) {
+                            String childRel = item.isRootDir() ? dir : item.fullRelPath() + "/" + dir;
+                            treeListModel.add(insertAt++, new TreeItem(item.rootDirName(), childRel, item.depth() + 1, false, false));
+                        }
+                        for (String file : resp.fileNames()) {
+                            String childRel = item.isRootDir() ? file : item.fullRelPath() + "/" + file;
+                            treeListModel.add(insertAt++, new TreeItem(item.rootDirName(), childRel, item.depth() + 1, false, true));
+                        }
+                        expandedKeys.add(key);
+                    } catch (Exception ex) {
+                        log.warn("Tree expand error", ex);
+                    }
+                }
+            }.execute();
+        }
+    }
+
+    private void collapseTreeItem(int index) {
+        TreeItem item = treeListModel.getElementAt(index);
+        int depth = item.depth();
+        while (index + 1 < treeListModel.size()) {
+            TreeItem next = treeListModel.getElementAt(index + 1);
+            if (next.depth() > depth) {
+                expandedKeys.remove(next.key());
+                treeListModel.remove(index + 1);
+            } else {
+                break;
+            }
+        }
+    }
+
+    private void updateButtonStates(TreeItem item) {
+        btnStartSync.setEnabled(item.isRootDir());
+        btnDownload.setEnabled(!item.isRootDir() && !item.isFile());
+    }
+
+    private void handleTreeDoubleClick(MouseEvent e) {
+        int index = treeList.locationToIndex(e.getPoint());
+        if (index < 0) return;
+        TreeItem item = treeListModel.getElementAt(index);
+        if (item.isRootDir()) {
+            subscribeSelected();
+        } else if (!item.isFile()) {
+            downloadSelected();
+        }
+    }
+
     // ── Actions ───────────────────────────────────────────────────────────────
 
     private void subscribeSelected() {
-        String selected = serverList.getSelectedValue();
-        if (selected == null) {
+        int idx = treeList.getSelectedIndex();
+        if (idx < 0) {
             appendLog("[WARN] No server directory selected.");
             return;
         }
-        String dir = selected.trim();
-        List<String> current = rootDirService.retrieveAllInSyncDirs();
+        TreeItem item = treeListModel.getElementAt(idx);
+        if (!item.isRootDir()) {
+            appendLog("[WARN] Select a root directory to subscribe.");
+            return;
+        }
+        String dir = item.rootDirName();
+        java.util.List<String> current = rootDirService.retrieveAllInSyncDirs();
         if (current.contains(dir)) {
             appendLog("[INFO] Already subscribed to: " + dir);
             return;
@@ -329,13 +442,16 @@ public class ClientUI {
         refreshData();
     }
 
+    private void downloadSelected() {
+        appendLog("[INFO] Download not yet implemented — coming in a future update.");
+    }
+
     private void stopSync(boolean deleteLocalFiles) {
-        int row = subscribedTable.getSelectedRow();
-        if (row < 0) {
+        String dir = subscribedList.getSelectedValue();
+        if (dir == null) {
             appendLog("[WARN] No subscribed directory selected.");
             return;
         }
-        String dir = (String) subscribedTableModel.getValueAt(row, 0);
         String msg = deleteLocalFiles
                 ? "Stop sync AND delete local files for <b>" + dir + "</b>?"
                 : "Stop sync for <b>" + dir + "</b>?<br>Local mirror files will be kept.";
@@ -460,8 +576,8 @@ public class ClientUI {
         new SwingWorker<RefreshSnapshot, Void>() {
             @Override
             protected RefreshSnapshot doInBackground() {
-                List<String> srv = serverDirs;
-                List<SyncHandshakeEntry> subs = rootDirService.findAll(); // DB call — off EDT
+                java.util.List<String> srv = serverApiClient.fetchPublicDirs();
+                java.util.List<String> subs = rootDirService.retrieveAllInSyncDirs();
                 boolean connected = clientSyncService.isConnected();
                 return new RefreshSnapshot(srv, subs, connected);
             }
@@ -471,12 +587,36 @@ public class ClientUI {
                 try {
                     RefreshSnapshot snap = get();
 
-                    serverListModel.clear();
-                    snap.serverDirs().forEach(serverListModel::addElement);
+                    // Update left panel: add new root dirs, remove gone ones
+                    java.util.Set<String> currentRoots = new java.util.HashSet<>();
+                    for (int i = 0; i < treeListModel.size(); i++) {
+                        TreeItem item = treeListModel.getElementAt(i);
+                        if (item.isRootDir()) currentRoots.add(item.rootDirName());
+                    }
+                    for (String dir : snap.serverDirs()) {
+                        if (!currentRoots.contains(dir)) {
+                            treeListModel.addElement(new TreeItem(dir, dir, 0, true, false));
+                        }
+                    }
+                    java.util.Set<String> newRoots = new java.util.HashSet<>(snap.serverDirs());
+                    for (int i = treeListModel.size() - 1; i >= 0; i--) {
+                        TreeItem item = treeListModel.getElementAt(i);
+                        if (item.isRootDir() && !newRoots.contains(item.rootDirName())) {
+                            collapseTreeItem(i);
+                            treeListModel.remove(i);
+                            expandedKeys.remove(item.key());
+                        }
+                    }
 
-                    subscribedTableModel.setRowCount(0);
-                    for (SyncHandshakeEntry e : snap.subscribedDirs()) {
-                        subscribedTableModel.addRow(new Object[]{e.dirName(), e.lastSyncVersion()});
+                    // Update right panel
+                    long now = System.currentTimeMillis();
+                    int selectedIdx = subscribedList.getSelectedIndex();
+                    String selectedVal = selectedIdx >= 0 ? subscribedListModel.getElementAt(selectedIdx) : null;
+                    subscribedListModel.clear();
+                    snap.subscribedDirs().forEach(subscribedListModel::addElement);
+                    if (selectedVal != null && now - lastSubscribedClickMs < 3000) {
+                        int newIdx = subscribedListModel.indexOf(selectedVal);
+                        if (newIdx >= 0) subscribedList.setSelectedIndex(newIdx);
                     }
 
                     Color dotColor = snap.connected() ? FG : FG_RED;
@@ -490,10 +630,9 @@ public class ClientUI {
         }.execute();
     }
 
-    private record RefreshSnapshot(List<String> serverDirs,
-                                   List<SyncHandshakeEntry> subscribedDirs,
-                                   boolean connected) {
-    }
+    private record RefreshSnapshot(java.util.List<String> serverDirs,
+                                   java.util.List<String> subscribedDirs,
+                                   boolean connected) {}
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -518,8 +657,12 @@ public class ClientUI {
             @Override
             public void write(int b) {
                 if (b == '\n') {
-                    flush();
-                } else {
+                    if (buf.size() > 0) {
+                        String line = buf.toString(StandardCharsets.UTF_8);
+                        buf.reset();
+                        if (!line.isBlank()) appendLog(line);
+                    }
+                } else if (b != '\r') {
                     buf.write(b);
                 }
             }
@@ -531,11 +674,9 @@ public class ClientUI {
 
             @Override
             public void flush() {
-                if (buf.size() > 0) {
-                    String line = buf.toString(StandardCharsets.UTF_8);
-                    buf.reset();
-                    if (!line.isBlank()) appendLog(line);
-                }
+                // Intentional no-op — autoFlush on PrintStream calls flush() after every
+                // sub-write; logging here would split one logical line into fragments.
+                // Only complete lines (terminated by \n) are logged, via write(int b).
             }
         };
         System.setOut(new PrintStream(interceptor, true, StandardCharsets.UTF_8));
@@ -608,30 +749,6 @@ public class ClientUI {
         panel.setBorder(BorderFactory.createCompoundBorder(border, new EmptyBorder(4, 4, 4, 4)));
         panel.add(content, BorderLayout.CENTER);
         return panel;
-    }
-
-    private static void styleTable(JTable table) {
-        table.setBackground(BG_CELL);
-        table.setForeground(FG);
-        table.setFont(MONO);
-        table.setGridColor(BORDER_CLR);
-        table.setRowHeight(22);
-        table.setSelectionBackground(BORDER_CLR);
-        table.setSelectionForeground(Color.WHITE);
-        table.setShowHorizontalLines(true);
-        table.setShowVerticalLines(false);
-        table.getTableHeader().setBackground(BG);
-        table.getTableHeader().setForeground(FG_DIM);
-        table.getTableHeader().setFont(MONO_SM);
-        table.getTableHeader().setBorder(new LineBorder(BORDER_CLR, 1));
-        DefaultTableCellRenderer rightRenderer = new DefaultTableCellRenderer();
-        rightRenderer.setHorizontalAlignment(JLabel.RIGHT);
-        rightRenderer.setBackground(BG_CELL);
-        rightRenderer.setForeground(FG_AMBER);
-        rightRenderer.setFont(MONO);
-        table.getColumnModel().getColumn(1).setCellRenderer(rightRenderer);
-        table.getColumnModel().getColumn(0).setPreferredWidth(200);
-        table.getColumnModel().getColumn(1).setPreferredWidth(120);
     }
 
     private static String retroHtmlMsg(String body) {

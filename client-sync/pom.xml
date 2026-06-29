@@ -25,6 +25,12 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-jdbc</artifactId>
         </dependency>
+
+        <!-- Spring Web — HTTP client (RestClient) only; does not start an embedded server -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-web</artifactId>
+        </dependency>
         
         <!-- Actuator — exposes /actuator/refresh to reload @ConfigurationProperties at runtime -->
         <dependency>
