@@ -81,8 +81,9 @@ public class DirsController {
             return ResponseEntity.status(403).build();
         }
 
-        List<String> children = fileMetadataService.findImmediateChildDirNames(dir.getId(), under);
-        return ResponseEntity.ok(new TreeResponse(children));
+        List<String> childDirs  = fileMetadataService.findImmediateChildDirNames(dir.getId(), under);
+        List<String> childFiles = fileMetadataService.findImmediateChildFileNames(dir.getId(), under);
+        return ResponseEntity.ok(new TreeResponse(childDirs, childFiles));
     }
 
     /**
@@ -125,7 +126,7 @@ public class DirsController {
      *
      * @param request body listing subscribed dirs
      */
-    @PostMapping("/sync/versions")
+    @PostMapping("/versions")
     public DirVersionCheckResponse checkVersions(@RequestBody DirVersionCheckRequest request) {
         Map<String, Long> versions = new HashMap<>();
 

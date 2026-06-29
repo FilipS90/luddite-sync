@@ -79,9 +79,11 @@ public class ClientSyncService {
     private final RootDirService rootDirService;
     private final FileMetadataService fileMetadataService;
     private final ClientIdService clientIdService;
+    private final ServerApiClient serverApiClient;
 
     /**
-     * Dirs currently advertised by the server — exposed for the CLI {@code add} command.
+     * Dirs currently advertised by the server — exposed for the CLI {@code add} command
+     * and the UI refresh loop. Updated via HTTP on each connect cycle.
      */
     public static List<String> serverDirs = new ArrayList<>();
 
@@ -166,11 +168,16 @@ public class ClientSyncService {
                 var out = new DataOutputStream(socket.getOutputStream());
                 var in = new DataInputStream(socket.getInputStream());
 
-                // 1 — read available (public) dirs advertised by the server
-                List<String> serverServedDirs = readAvailableDirs(in);
+                // 1 — drain server's socket dir advertisement (server still sends this for protocol
+                //     compatibility; the actual dir list is fetched via HTTP below)
+                drainAvailableDirs(in);
+
+                // 2 — fetch available (public) dirs from the server REST API
+                List<String> serverServedDirs = serverApiClient.fetchPublicDirs();
+                serverDirs = serverServedDirs;
                 log.info("Server advertises {} dir(s): {}", serverServedDirs.size(), serverServedDirs);
 
-                // 2 — wait for the user to subscribe if nothing is configured yet
+                // 3 — wait for the user to subscribe if nothing is configured yet
                 List<String> clientListeningDirs = rootDirService.retrieveAllInSyncDirs();
                 printAvailableDirs(serverServedDirs);
                 if (clientListeningDirs.isEmpty()) {
@@ -191,7 +198,7 @@ public class ClientSyncService {
                         .filter(clientListeningDirs::contains)
                         .toList();
 
-                // 3 — authenticate stored private dirs and build combined sync list
+                // 4 — authenticate stored private dirs and build combined sync list
                 sendClientId(out);
                 sendHandshake(out, publicDirsToSync);
 
@@ -222,35 +229,26 @@ public class ClientSyncService {
         }
     }
 
-    /**
-     * Reads the list of root directory names advertised by the server.
-     *
-     * <p>Wire format:
-     * <pre>
-     * [4 bytes] count
-     * per dir:
-     *   [4 bytes] name length
-     *   [N bytes] name (UTF-8)
-     * </pre>
-     *
-     * @param in the server input stream
-     * @return list of directory names
-     * @throws IOException if reading fails
-     */
-    private List<String> readAvailableDirs(DataInputStream in) throws IOException {
-        int count = in.readInt();
-        List<String> dirs = new ArrayList<>(count);
-        for (int i = 0; i < count; i++) {
-            int len = in.readInt();
-            dirs.add(new String(in.readNBytes(len), StandardCharsets.UTF_8));
-        }
-        return dirs;
-    }
-
     private void removeStaleDirectories(List<String> serverServedDirs, List<String> clientListeningDirs,
                                         List<String> privateDirNames) {
         List<String> staleDirs = getStaleDirs(serverServedDirs, clientListeningDirs, privateDirNames);
         rootDirService.removeStaleDirs(staleDirs);
+    }
+
+    /**
+     * Reads and discards the dir advertisement the server sends on socket connect.
+     * The server still sends this for protocol compatibility; the actual dir list
+     * is obtained via {@code GET /api/dirs} (HTTP).
+     *
+     * @param in the server input stream
+     * @throws IOException if reading fails
+     */
+    private void drainAvailableDirs(DataInputStream in) throws IOException {
+        int count = in.readInt();
+        for (int i = 0; i < count; i++) {
+            int len = in.readInt();
+            in.readNBytes(len);
+        }
     }
 
     /**
@@ -487,7 +485,6 @@ public class ClientSyncService {
             for (int i = 1; i <= availableDirs.size(); i++) {
                 System.out.printf("  %d. %s%n", i, availableDirs.get(i - 1));
             }
-            serverDirs = availableDirs;
         }
         System.out.println();
         System.out.println("  Use the 'add' command with dir indices, e.g. 'add 1' or 'add 2,3'");

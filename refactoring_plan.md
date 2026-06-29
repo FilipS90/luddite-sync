@@ -320,25 +320,25 @@ Interactions:
 ### Phase 1 — Foundation
 - [x] `common-dtos` — Add all DTO records to `common-sync` (incl. `VersionCheckRequest/Response`, `AckRequest`)
 - [x] `server-web-dep` — Add `spring-boot-starter-web` to `server-sync` pom; server on port 8080
-- [ ] `client-web-dep` — Add `spring-boot-starter-web` + `tls` Maven profile to `client-sync` pom
+- [x] `client-web-dep` — Add `spring-boot-starter-web` + `tls` Maven profile to `client-sync` pom
 
 ### Phase 2 — Server REST API
 - [x] `server-controller-dirs` — `GET /api/dirs` (public only), `POST /api/dirs/{name}/auth`
 - [x] `server-controller-versions` — `POST /api/dirs/versions`: returns `Map<String, Long>` (version numbers only), with per-entry private-dir auth
 - [ ] `server-controller-acks` — `POST /api/dirs/{name}/acks` *(depends on server-controller-dirs)*
 - [x] `server-controller-tree` — `GET /api/dirs/{name}/tree[?under=]` returning immediate children; `X-Auth-Hash` for private dirs
-- [ ] `server-controller-files` — `GET /api/dirs/{name}/files?subdir=` with `X-Auth-Hash` check *(depends on server-controller-tree)*
+- [x] `server-controller-files` — `GET /api/dirs/{name}/files?subdir=` with `X-Auth-Hash` check *(depends on server-controller-tree)*
 - [ ] `server-socket-simplify` — `PushService` -> `FileSocketService`; TLS gate; two request types: `0x01` SYNC (streams changed records + bytes since version) and `0x02` FILE (single file by path) *(depends on server-web-dep)*
 
 ### Phase 3 — Client REST migration
-- [ ] `client-schema-cols` — Add `local_path TEXT` and `password_hash TEXT NULL` to `root_dirs` in `SchemaInitializer`
-- [ ] `client-sync-svc` — Refactor `ClientSyncService`: two-step poll loop (versions then changes), `downloadSubdir()`, private dir auth storage *(depends on client-web-dep, server-controller-changes, server-controller-files, server-socket-simplify, client-schema-cols)*
+- [x] `client-schema-cols` — Add `local_path TEXT` and `password_hash TEXT NULL` to `root_dirs` in `SchemaInitializer`
+- [x] `client-sync-svc` — Refactor `ClientSyncService`: two-step poll loop (versions then changes), `downloadSubdir()`, private dir auth storage *(depends on client-web-dep, server-controller-changes, server-controller-files, server-socket-simplify, client-schema-cols)*
 
 ### Phase 4 — UI
-- [ ] `ui-two-panel-tree` — Rebuild left panel as expandable indented `JList` with custom cell renderer; right panel to single-column `JList`; remove sync version; add `[ DOWNLOAD ]` button; wire enabled/disabled state to selection type *(depends on client-sync-svc)*
-- [ ] `ui-lazy-expand` — Wire single-click to lazy-load one level via `GET .../tree[?under=]`; toggle expand/collapse *(depends on ui-two-panel-tree, server-controller-tree)*
-- [ ] `ui-subscribe-flow` — Wire double-click root dir / `[ START SYNC >> ]` to JFileChooser dialog + optional password dialog + subscription *(depends on ui-two-panel-tree, client-schema-cols)*
-- [ ] `ui-subdir-download` — Wire double-click subdir / `[ DOWNLOAD ]` to `downloadSubdir()` *(depends on ui-lazy-expand, client-sync-svc)*
+- [x] `ui-two-panel-tree` — Rebuild left panel as expandable indented `JList` with custom cell renderer; right panel to single-column `JList`; remove sync version; add `[ DOWNLOAD ]` button; wire enabled/disabled state to selection type *(depends on client-sync-svc)*
+- [x] `ui-lazy-expand` — Wire single-click to lazy-load one level via `GET .../tree[?under=]`; toggle expand/collapse *(depends on ui-two-panel-tree, server-controller-tree)*
+- [x] `ui-subscribe-flow` — Wire double-click root dir / `[ START SYNC >> ]` to JFileChooser dialog + optional password dialog + subscription *(depends on ui-two-panel-tree, client-schema-cols)*
+- [x] `ui-subdir-download` — Wire double-click subdir / `[ DOWNLOAD ]` to `downloadSubdir()` *(depends on ui-lazy-expand, client-sync-svc)*
 
 ### Phase 5 — Cleanup & Tests
 - [ ] `update-config` — Update `application.yml` files + `copilot-instructions.md`

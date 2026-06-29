@@ -265,15 +265,15 @@ public class FileMetadataRepository {
      * Returns the distinct immediate child directory names under {@code parentRelPath}
      * for a given root directory. Derives directory structure from file paths — there
      * are no explicit directory rows in the schema.
-     *
-     * <p>For example, if the root contains files {@code photos/2024/img.jpg} and
+     * <p>
+     * <{@code ["photos"]}, and with {@code parentRelPath="photos"} returns
+     * *      * {p>For example, if the root contains files {@code photos/2024/img.jpg} and
      * {@code photos/2023/img.jpg}, calling with {@code parentRelPath=""} returns
-     * {@code ["photos"]}, and with {@code parentRelPath="photos"} returns
-     * {@code ["2024", "2023"]}.
      *
      * @param rootDirId     root directory ID
      * @param parentRelPath the path prefix to look under; use {@code ""} for the root level
      * @return sorted list of immediate child directory names
+     * @code ["2024", "2023"]}.
      */
     public List<String> findImmediateChildDirNames(int rootDirId, String parentRelPath) {
         List<String> allPaths = jdbcTemplate.queryForList(
@@ -288,6 +288,31 @@ public class FileMetadataRepository {
                 .map(p -> prefix.isEmpty() ? p : p.substring(prefix.length() + 1))
                 .map(p -> p.contains("/") ? p.substring(0, p.indexOf('/')) : null)
                 .filter(segment -> segment != null && !segment.isBlank())
+                .distinct()
+                .sorted()
+                .toList();
+    }
+
+    /**
+     * Returns the immediate child file names directly under {@code parentRelPath}
+     * for a given root directory (i.e., files with no further path segments).
+     *
+     * @param rootDirId     root directory ID
+     * @param parentRelPath the path prefix to look under; use {@code ""} for the root level
+     * @return sorted list of immediate child file names
+     */
+    public List<String> findImmediateChildFileNames(int rootDirId, String parentRelPath) {
+        List<String> allPaths = jdbcTemplate.queryForList(
+                "SELECT relative_path FROM file_metadata WHERE root_dir_id = ? AND (deleted IS NULL OR deleted = FALSE)",
+                String.class, rootDirId);
+
+        String prefix = parentRelPath == null ? "" : parentRelPath.replace('\\', '/').replaceAll("^/+|/+$", "");
+
+        return allPaths.stream()
+                .map(p -> p.replace('\\', '/').replaceAll("^/+", ""))
+                .filter(p -> prefix.isEmpty() ? !p.contains("/") : p.startsWith(prefix + "/"))
+                .map(p -> prefix.isEmpty() ? p : p.substring(prefix.length() + 1))
+                .filter(p -> !p.contains("/") && !p.isBlank())
                 .distinct()
                 .sorted()
                 .toList();

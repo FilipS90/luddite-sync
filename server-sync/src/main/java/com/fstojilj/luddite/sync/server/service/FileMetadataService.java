@@ -241,4 +241,8 @@ public class FileMetadataService implements ApplicationRunner {
     public List<String> findImmediateChildDirNames(int rootDirId, String parentRelPath) {
         return fileMetadataRepository.findImmediateChildDirNames(rootDirId, parentRelPath);
     }
+
+    public List<String> findImmediateChildFileNames(int rootDirId, String parentRelPath) {
+        return fileMetadataRepository.findImmediateChildFileNames(rootDirId, parentRelPath);
+    }
 }
