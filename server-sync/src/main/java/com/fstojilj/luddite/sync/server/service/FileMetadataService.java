@@ -2,14 +2,6 @@ package com.fstojilj.luddite.sync.server.service;
 
 import com.fstojilj.luddite.sync.common.model.FileMetadata;
 import com.fstojilj.luddite.sync.server.repository.FileMetadataRepository;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.ApplicationArguments;
-import org.springframework.boot.ApplicationRunner;
-import org.springframework.core.annotation.Order;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import java.io.File;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -17,6 +9,13 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.annotation.Order;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import static com.fstojilj.luddite.sync.server.utils.FileChecksumUtils.calculateFileChecksum;
 import static com.fstojilj.luddite.sync.server.utils.FileSystemUtils.listAllFilesForDir;
@@ -225,5 +224,21 @@ public class FileMetadataService implements ApplicationRunner {
      */
     public List<FileMetadata> findAllActiveByRootDirId(int rootDirId) {
         return fileMetadataRepository.findAllActiveByRootDirId(rootDirId);
+    }
+
+    /**
+     * Returns the current maximum sync version for a root directory.
+     * Returns {@code null} if no versioned records exist.
+     */
+    public Long getMaxSyncVersionForDir(int rootDirId) {
+        return fileMetadataRepository.getMaxSyncVersionForDir(rootDirId);
+    }
+
+    /**
+     * Returns the distinct immediate child directory names under {@code parentRelPath}.
+     * Use {@code ""} to query the root level.
+     */
+    public List<String> findImmediateChildDirNames(int rootDirId, String parentRelPath) {
+        return fileMetadataRepository.findImmediateChildDirNames(rootDirId, parentRelPath);
     }
 }

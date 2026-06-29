@@ -1,6 +1,14 @@
 package com.fstojilj.luddite.sync.server.repository;
 
 import com.fstojilj.luddite.sync.common.model.FileMetadata;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
@@ -10,15 +18,6 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
-
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
-import java.sql.Statement;
-import java.sql.Timestamp;
-import java.time.Instant;
-import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 
 @Repository
 @RequiredArgsConstructor
@@ -247,5 +246,50 @@ public class FileMetadataRepository {
         return jdbcTemplate.query(
                 "SELECT * FROM file_metadata WHERE root_dir_id = ? AND (deleted IS NULL OR deleted = FALSE)",
                 rowMapper, rootDirId);
+    }
+
+    /**
+     * Returns the current maximum sync version for a single root directory.
+     * Returns {@code null} if no versioned records exist yet.
+     *
+     * @param rootDirId root directory ID
+     * @return max sync_version, or null
+     */
+    public Long getMaxSyncVersionForDir(int rootDirId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT MAX(sync_version) FROM file_metadata WHERE root_dir_id = ?",
+                Long.class, rootDirId);
+    }
+
+    /**
+     * Returns the distinct immediate child directory names under {@code parentRelPath}
+     * for a given root directory. Derives directory structure from file paths — there
+     * are no explicit directory rows in the schema.
+     *
+     * <p>For example, if the root contains files {@code photos/2024/img.jpg} and
+     * {@code photos/2023/img.jpg}, calling with {@code parentRelPath=""} returns
+     * {@code ["photos"]}, and with {@code parentRelPath="photos"} returns
+     * {@code ["2024", "2023"]}.
+     *
+     * @param rootDirId     root directory ID
+     * @param parentRelPath the path prefix to look under; use {@code ""} for the root level
+     * @return sorted list of immediate child directory names
+     */
+    public List<String> findImmediateChildDirNames(int rootDirId, String parentRelPath) {
+        List<String> allPaths = jdbcTemplate.queryForList(
+                "SELECT relative_path FROM file_metadata WHERE root_dir_id = ? AND (deleted IS NULL OR deleted = FALSE)",
+                String.class, rootDirId);
+
+        String prefix = parentRelPath == null ? "" : parentRelPath.replace('\\', '/').replaceAll("^/+|/+$", "");
+
+        return allPaths.stream()
+                .map(p -> p.replace('\\', '/').replaceAll("^/+", ""))
+                .filter(p -> prefix.isEmpty() ? p.contains("/") : p.startsWith(prefix + "/"))
+                .map(p -> prefix.isEmpty() ? p : p.substring(prefix.length() + 1))
+                .map(p -> p.contains("/") ? p.substring(0, p.indexOf('/')) : null)
+                .filter(segment -> segment != null && !segment.isBlank())
+                .distinct()
+                .sorted()
+                .toList();
     }
 }

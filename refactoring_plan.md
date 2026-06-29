@@ -318,15 +318,15 @@ Interactions:
 ## Todo List
 
 ### Phase 1 — Foundation
-- [ ] `common-dtos` — Add all DTO records to `common-sync` (incl. `VersionCheckRequest/Response`, `AckRequest`)
-- [ ] `server-web-dep` — Add `spring-boot-starter-web` + `tls` Maven profile (socket + Spring SSL) to `server-sync` pom
+- [x] `common-dtos` — Add all DTO records to `common-sync` (incl. `VersionCheckRequest/Response`, `AckRequest`)
+- [x] `server-web-dep` — Add `spring-boot-starter-web` to `server-sync` pom; server on port 8080
 - [ ] `client-web-dep` — Add `spring-boot-starter-web` + `tls` Maven profile to `client-sync` pom
 
 ### Phase 2 — Server REST API
-- [ ] `server-controller-dirs` — `GET /api/dirs` (public only), `POST /api/dirs/{name}/auth` *(depends on common-dtos, server-web-dep)*
-- [ ] `server-controller-versions` — `POST /api/sync/versions`: returns `Map<String, Long>` (version numbers only), with per-entry private-dir auth *(depends on server-controller-dirs)*
+- [x] `server-controller-dirs` — `GET /api/dirs` (public only), `POST /api/dirs/{name}/auth`
+- [x] `server-controller-versions` — `POST /api/dirs/versions`: returns `Map<String, Long>` (version numbers only), with per-entry private-dir auth
 - [ ] `server-controller-acks` — `POST /api/dirs/{name}/acks` *(depends on server-controller-dirs)*
-- [ ] `server-controller-tree` — `GET /api/dirs/{name}/tree[?under=]` returning immediate children; `X-Auth-Hash` for private dirs *(depends on server-controller-dirs)*
+- [x] `server-controller-tree` — `GET /api/dirs/{name}/tree[?under=]` returning immediate children; `X-Auth-Hash` for private dirs
 - [ ] `server-controller-files` — `GET /api/dirs/{name}/files?subdir=` with `X-Auth-Hash` check *(depends on server-controller-tree)*
 - [ ] `server-socket-simplify` — `PushService` -> `FileSocketService`; TLS gate; two request types: `0x01` SYNC (streams changed records + bytes since version) and `0x02` FILE (single file by path) *(depends on server-web-dep)*
 
