@@ -1,14 +1,5 @@
 # Refactor Plan: HTTP REST API + Plain Socket for File Bytes
 
-## Problem
-
-Every new metadata operation (dir listing, tree browsing, auth, poll) requires extending a
-stateful binary protocol with a new message type and careful byte-order coordination on both
-ends. Adding any new feature currently means touching the protocol parser on both sides
-simultaneously.
-
----
-
 ## Proposed Architecture
 
 ### Before
@@ -16,7 +7,6 @@ Single persistent mTLS TCP socket handles everything:
 - Available-dirs advertisement
 - Subscription handshake
 - Poll / file content delivery
-- Delete ACKs
 - Private-dir authentication
 
 ### After
@@ -31,9 +21,8 @@ Single persistent mTLS TCP socket handles everything:
 | `POST` | `/api/sync/versions` | Version check — client sends list of dir names it is subscribed to (+ passwordHash for private dirs); server returns its current version per dir; client compares against its own stored versions and initiates socket sync for any outdated dir |
 | `GET` | `/api/dirs/{name}/files?subdir={subPath}` | All current files under `subPath` — metadata list for one-time download; client fetches bytes via socket |
 | `POST` | `/api/dirs/{name}/auth` | Validate a private dir — body: `{"passwordHash":"..."}` — returns 200 or 403 |
-| `POST` | `/api/dirs/{name}/acks` | Batch delete acknowledgement — body: `{"clientId":"...","paths":["path1","path2"]}` |
 
-**Plain TCP socket** (port 8889) for all file transfer — two request types differentiated by first byte:
+**Plain TCP socket** (port 8889) for all file transfer — three request types differentiated by first byte:
 
 **SYNC request** (type `0x01`) — triggered when version check reports a dir is outdated:
 ```
@@ -47,6 +36,9 @@ Server → [4b count]
 Client → [1b 0x02][4b pathLen][qualifiedPath]
 Server → [8b fileSize][fileSize bytes]  (fileSize=0 if not found)
 ```
+
+**ACK notification** — stays over the wire as is !
+
 
 ---
 
@@ -357,13 +349,15 @@ Interactions:
 ## Open Questions
 
 1. **File socket port** — Keep separate port 8889 or multiplex on 8080?
-   Separate port is simpler and the current plan keeps it separate.
+   Separate port.
 
 2. **Subdir download destination collision** — `~/Downloads/{last segment of subdir path}`
-   as the default destination. If the dir already exists, append a counter suffix or overwrite?
+   as the default destination. If the dir already exists, overwrite.
 
 3. **Soft-delete connected-client tracking (deferred)** — `DirWatcherService` currently calls
    `PushService.getConnectedClientIds()` at soft-delete time to populate `client_ids`. With
    no persistent connections in the REST model, this always returns empty, breaking the
    ACK-before-hard-delete guarantee. Deferred for now; a future fix would introduce a
    `known_clients` table populated by a `/register` endpoint that clients call on startup.
+   
+   Answer: I believe client_ids are extracted from the port connection ?
