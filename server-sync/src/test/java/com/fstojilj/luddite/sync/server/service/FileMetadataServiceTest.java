@@ -17,9 +17,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import java.util.ArrayList;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -175,6 +179,27 @@ class FileMetadataServiceTest {
         when(fileMetadataRepository.findChangedSince(1, 5L, 100)).thenReturn(expected);
         List<FileMetadata> result = fileMetadataService.findChangedSince(1, 5L, 100);
         assertThat(result).isSameAs(expected);
+    }
+
+    // ── addAllFileMetadataForRoot ─────────────────────────────────────────────
+
+    @Test
+    void addAllFileMetadataForRoot_storedRelativePathsHaveNoLeadingSeparator() throws Exception {
+        Path subDir = Files.createDirectory(tempDir.resolve("sub"));
+        Files.writeString(subDir.resolve("img.jpg"), "data");
+
+        List<FileMetadata> captured = new ArrayList<>();
+        doAnswer(inv -> { captured.addAll(inv.getArgument(0)); return null; })
+                .when(fileMetadataRepository).addAll(anyList());
+
+        fileMetadataService.addAllFileMetadataForRoot(tempDir.toString(), 1);
+
+        assertThat(captured).isNotEmpty();
+        captured.forEach(m ->
+                assertThat(m.relativePath())
+                        .as("relative path must not start with / or \\")
+                        .doesNotStartWith("/")
+                        .doesNotStartWith("\\"));
     }
 
     // ── run (ApplicationRunner) ───────────────────────────────────────────────

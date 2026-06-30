@@ -312,7 +312,7 @@ public class PushService {
             // Write the full response to the wire first
             out.writeInt(changed.size());
             for (FileMetadata meta : changed) {
-                String relNorm = meta.relativePath().replaceAll("^[/\\\\]+", "");
+                String relNorm = meta.relativePath();
                 String qualifiedPath = dirName + "/" + relNorm;
                 Path absPath = Path.of(rootAbsPath).resolve(relNorm);
                 long version = meta.syncVersion() != null ? meta.syncVersion() : fileMetadataService.nextSyncVersion(rootDirId);

@@ -1,1 +1,0 @@
-- Selection with mouse click of subscribed dir last too short;

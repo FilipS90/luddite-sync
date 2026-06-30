@@ -93,7 +93,7 @@ public class FileMetadataService implements ApplicationRunner {
                     log.debug("Ignoring file during initial scan: {}", file.getAbsolutePath());
                     continue;
                 }
-                String relativePath = File.separator + rootPath.relativize(file.toPath());
+                String relativePath = rootPath.relativize(file.toPath()).toString().replace('\\', '/');
                 var fileMetadata = buildFileMetadata(file, rootDirId, relativePath);
                 fileBatch.add(fileMetadata);
 
