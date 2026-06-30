@@ -1,7 +1,7 @@
 package com.fstojilj.luddite.sync.server.cli;
 
 import com.fstojilj.luddite.sync.common.util.PasswordUtils;
-import com.fstojilj.luddite.sync.server.service.PushService;
+import com.fstojilj.luddite.sync.server.service.FileSocketService;
 import com.fstojilj.luddite.sync.server.service.RootDirService;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -35,7 +35,7 @@ import static java.lang.Thread.sleep;
 public class AdminCli {
 
     private final RootDirService rootDirService;
-    private final PushService pushService;
+    private final FileSocketService fileSocketService;
     private final ApplicationContext applicationContext;
 
     @PostConstruct
@@ -76,7 +76,7 @@ public class AdminCli {
                 }
             }
             case "listc" -> {
-                var clients = pushService.listConnectedClients();
+                var clients = fileSocketService.listConnectedClients();
                 if (clients.isEmpty()) {
                     System.out.println("  (no clients connected)");
                 } else {

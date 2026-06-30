@@ -22,4 +22,5 @@ sync:
     keystore: classpath:client-keystore.p12
     truststore: classpath:truststore.p12
     password: ${KEYSTORE_PASSWORD}
+    tls-enabled: true
 

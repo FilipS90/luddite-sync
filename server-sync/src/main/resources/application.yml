@@ -13,11 +13,10 @@ server:
 
 sync:
   socket:
-    # File transfer and delete-ACK socket (raw TCP). Will be renamed to sync.file-socket.port
-    # when PushService is refactored in the next phase.
     port: 8888
     keystore: classpath:server-keystore.p12
     truststore: classpath:truststore.p12
     password: ${KEYSTORE_PASSWORD}
     pending-ack-ttl-ms: 20000
+    tls-enabled: true
 

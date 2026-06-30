@@ -92,16 +92,17 @@ public class ServerApiClient {
     /**
      * Authenticates against a private directory.
      *
+     * @param clientId     the stable client identifier
      * @param dirName      root directory name
      * @param passwordHash SHA-256 password hash
      * @return {@code true} if the server returned 200 (granted), {@code false} otherwise
      */
-    public boolean authenticate(String dirName, String passwordHash) {
+    public boolean authenticate(String clientId, String dirName, String passwordHash) {
         try {
             restClient.post()
                     .uri("/api/dirs/{name}/auth", dirName)
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(new AuthRequest(passwordHash))
+                    .body(new AuthRequest(clientId, passwordHash))
                     .retrieve()
                     .toBodilessEntity();
             return true;

@@ -22,6 +22,8 @@ Single persistent mTLS TCP socket handles everything:
 | `GET` | `/api/dirs/{name}/files?subdir={subPath}` | All current files under `subPath` — metadata list for one-time download; client fetches bytes via socket |
 | `POST` | `/api/dirs/{name}/auth` | Validate a private dir — body: `{"passwordHash":"..."}` — returns 200 or 403 |
 
+**Delete ACKs remain on the wire socket** (`DELETE_ACK` byte `0x02`) — not migrated to REST.
+
 **Plain TCP socket** (port 8889) for all file transfer — three request types differentiated by first byte:
 
 **SYNC request** (type `0x01`) — triggered when version check reports a dir is outdated:
@@ -90,8 +92,8 @@ mTLS is enforced on both sides automatically. Runtime override is still possible
 - SQLite schema and all repositories/services
 - `DirWatcherService`, `AdminCli`
 - `RootDirService`, `FileMetadataService`, `FileMetadataRepository`
-- Soft-delete ACK mechanism (`client_ids`, `acknowledgeDelete`) — unchanged; `POST /acks`
-  is the REST translation of `DELETE_ACK`; `clientId` is included in the request body
+- Soft-delete ACK mechanism (`client_ids`, `acknowledgeDelete`) — unchanged; `DELETE_ACK`
+  byte `0x02` remains on the socket wire; not migrated to REST
 - 2-second poll interval (now a REST call instead of a socket message)
 - `[ SYNC PRIVATE ]` button — prompts for dir name + password; private dirs are never
   listed in `GET /api/dirs` and are not shown in the left panel; the only way to access
@@ -132,7 +134,8 @@ reach one is via `[ SYNC PRIVATE ]`, which prompts for the dir name and password
    - `POST /api/sync/versions` — included inline in the dir entry (see Poll Protocol below)
    - `GET /api/dirs/{name}/changes?since=v` — sent as `X-Auth-Hash: <hash>` header
    - `GET /api/dirs/{name}/files?subdir=X` — sent as `X-Auth-Hash: <hash>` header
-   - `POST /api/dirs/{name}/acks` — included in request body
+   - Socket SYNC request (type `0x01`) — hash included in the wire message
+   - `DELETE_ACK` (type `0x02`) — unchanged; no auth needed (socket is already authenticated via mTLS or trusted connection)
 5. Server checks hash against stored password for every request on a private dir;
    returns 403 if missing or incorrect
 
@@ -149,7 +152,7 @@ The poll loop runs every 2 seconds:
 1. `POST /api/sync/versions` (REST) — client sends the list of dir names it is subscribed to (+ passwordHash for private dirs); server returns `{dirName: currentVersion}` — **version numbers only**; the client holds its own `last_sync_version` locally and does the comparison itself
 2. For each dir where `serverVersion > clientLastKnownVersion`: client opens a socket connection and sends a **SYNC request** (type `0x01`) for that dir since `lastKnownVersion`
 3. Server responds on the socket with the count + all changed records (metadata + file bytes inline) since that version
-4. Client writes received files to `root_dirs.local_path`, deletes files flagged as deleted, then calls `POST /api/dirs/{name}/acks` for deleted records
+4. Client writes received files to `root_dirs.local_path`, deletes files flagged as deleted, then sends a `DELETE_ACK` (`0x02`) over the socket for each deleted file
 5. Client updates `root_dirs.last_sync_version` to the highest version seen
 
 ```
@@ -216,7 +219,6 @@ No `subscribed_subdirs` column — subdir downloads are stateless.
   - `VersionCheckResponse(Map<String, Long> versions)` — dirName → current server version only
   - `FileEntry(String qualifiedPath, long size)`
   - `FileListResponse(List<FileEntry> files)` — for `/files` one-time download endpoint
-  - `AckRequest(String clientId, List<String> paths)`
 - `SyncHandshakeEntry` stays as internal DB/service model (no longer sent over the wire)
 
 ### `server-sync`
@@ -238,10 +240,10 @@ No `subscribed_subdirs` column — subdir downloads are stateless.
   - Type `0x01` SYNC: reads `[dirName, sinceVersion, optional hash]`; queries
     `findChangedSince`; streams records with inline file bytes; validates hash for private dirs
   - Type `0x02` FILE: reads `[qualifiedPath]`; writes `[size][bytes]` (stateless per file)
-- `PushService` -> gutted and renamed `FileSocketService`:
+  - Type `0x02` DELETE_ACK (existing): unchanged — client sends `[1b 0x02][4b pathLen][path]`
+    after removing a soft-deleted file; server calls `acknowledgeDelete`
   - Socket creation gated on `sync.tls.enabled`
-  - Remove all binary protocol handlers
-  - New protocol: read `[4b pathLen][qualifiedPath]`, write `[8b size][bytes]`
+  - Remove all binary protocol handlers except `DELETE_ACK`
   - Remove `ReentrantLock`
 
 ### `client-sync`
@@ -256,7 +258,7 @@ No `subscribed_subdirs` column — subdir downloads are stateless.
     2. For each dir where serverVersion > `root_dirs.last_sync_version`: open socket, send
        SYNC request (type `0x01`) with dirName + sinceVersion + passwordHash if private
     3. Receive changed records + file bytes from socket; write files to `local_path`;
-       delete files flagged deleted; `POST /acks` for deletions
+       delete files flagged deleted; send `DELETE_ACK` (`0x02`) over socket for each deleted file
     4. Update `root_dirs.last_sync_version`
   - New `downloadSubdir(dirName, subPath)`: `GET /api/dirs/{name}/files?subdir=X`
     → download each file via socket to `~/Downloads/{last segment of subPath}`
@@ -325,10 +327,9 @@ Interactions:
 ### Phase 2 — Server REST API
 - [x] `server-controller-dirs` — `GET /api/dirs` (public only), `POST /api/dirs/{name}/auth`
 - [x] `server-controller-versions` — `POST /api/dirs/versions`: returns `Map<String, Long>` (version numbers only), with per-entry private-dir auth
-- [ ] `server-controller-acks` — `POST /api/dirs/{name}/acks` *(depends on server-controller-dirs)*
 - [x] `server-controller-tree` — `GET /api/dirs/{name}/tree[?under=]` returning immediate children; `X-Auth-Hash` for private dirs
 - [x] `server-controller-files` — `GET /api/dirs/{name}/files?subdir=` with `X-Auth-Hash` check *(depends on server-controller-tree)*
-- [ ] `server-socket-simplify` — `PushService` -> `FileSocketService`; TLS gate; two request types: `0x01` SYNC (streams changed records + bytes since version) and `0x02` FILE (single file by path) *(depends on server-web-dep)*
+- [ ] `server-socket-simplify` — `PushService` -> `FileSocketService`; TLS gate; two request types: `0x01` SYNC (streams changed records + bytes since version) and `0x02` FILE (single file by path); `0x02` DELETE_ACK remains unchanged *(depends on server-web-dep)*
 
 ### Phase 3 — Client REST migration
 - [x] `client-schema-cols` — Add `local_path TEXT` and `password_hash TEXT NULL` to `root_dirs` in `SchemaInitializer`

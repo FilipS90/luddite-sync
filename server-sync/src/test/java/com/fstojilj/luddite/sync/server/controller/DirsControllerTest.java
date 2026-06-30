@@ -5,6 +5,7 @@ import com.fstojilj.luddite.sync.common.dto.AuthRequest;
 import com.fstojilj.luddite.sync.common.dto.DirVersionCheckRequest;
 import com.fstojilj.luddite.sync.common.dto.DirVersionEntry;
 import com.fstojilj.luddite.sync.common.model.RootDir;
+import com.fstojilj.luddite.sync.server.service.AuthCacheService;
 import com.fstojilj.luddite.sync.server.service.FileMetadataService;
 import com.fstojilj.luddite.sync.server.service.RootDirService;
 import java.util.List;
@@ -37,6 +38,9 @@ class DirsControllerTest {
 
     @Mock
     private FileMetadataService fileMetadataService;
+
+    @Mock
+    private AuthCacheService authCacheService;
 
     @InjectMocks
     private DirsController controller;
@@ -153,7 +157,7 @@ class DirsControllerTest {
 
         mvc.perform(post("/api/dirs/Movies/auth")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new AuthRequest("hash"))))
+                        .content(objectMapper.writeValueAsString(new AuthRequest("client-1", "hash"))))
                 .andExpect(status().isBadRequest());
     }
 
@@ -163,7 +167,7 @@ class DirsControllerTest {
 
         mvc.perform(post("/api/dirs/ghost/auth")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new AuthRequest("hash"))))
+                        .content(objectMapper.writeValueAsString(new AuthRequest("client-1", "hash"))))
                 .andExpect(status().isBadRequest());
     }
 
@@ -174,7 +178,7 @@ class DirsControllerTest {
 
         mvc.perform(post("/api/dirs/Secrets/auth")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new AuthRequest("abc123"))))
+                        .content(objectMapper.writeValueAsString(new AuthRequest("client-1", "abc123"))))
                 .andExpect(status().isOk());
     }
 
@@ -185,7 +189,7 @@ class DirsControllerTest {
 
         mvc.perform(post("/api/dirs/Secrets/auth")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new AuthRequest("wronghash"))))
+                        .content(objectMapper.writeValueAsString(new AuthRequest("client-1", "wronghash"))))
                 .andExpect(status().isForbidden());
     }
 
