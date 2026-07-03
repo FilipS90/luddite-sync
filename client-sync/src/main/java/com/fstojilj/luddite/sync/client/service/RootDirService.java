@@ -3,13 +3,12 @@ package com.fstojilj.luddite.sync.client.service;
 import com.fstojilj.luddite.sync.client.repository.RootDirRepository;
 import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
 import com.fstojilj.luddite.sync.common.util.FileSystemUtils;
+import java.nio.file.Path;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-
-import java.nio.file.Path;
-import java.util.List;
 
 /**
  * Manages the client-side synchronisation state: which server root directories are being
@@ -38,8 +37,7 @@ public class RootDirService {
             if (!retainLocalDirectory) {
                 FileSystemUtils.deleteDirectoryRecursively(dirPath);
             }
-            fileMetadataService.findAllByDir(dir)
-                    .forEach(rel -> fileMetadataService.removeRecord(dir, rel));
+            fileMetadataService.purgeAllFilesForDir(dir);
             rootDirRepository.remove(dir);
             log.info("Removed stale dir from sync state: '{}'", dir);
         }

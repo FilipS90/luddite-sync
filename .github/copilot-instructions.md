@@ -32,6 +32,7 @@ The `KEYSTORE_PASSWORD` environment variable must be set to start either applica
 - If you are asked to push code to luddite-sync, you first need to run $env:GIT_SSH_COMMAND="ssh -i C:/Users/fstojiljko/.ssh/id_fs_github".
 - Humility invites progress, and overconfidence invites decline, be skeptical about your work.
 - Simplicity is the ultimate sophistication.
+- The `root_dirs` client table has a nullable `local_path TEXT` column. When set it is the full target dir path used instead of the default `mirrorDir/dirName`. `RootDirService.resolveLocalPath(dirName)` is the single source of truth for per-dir path resolution. `ClientRootDir` (client-sync model) carries `dirName`, `lastSyncVersion`, and `localPath`; `SyncHandshakeEntry` (common-sync) remains the wire-protocol record and must not receive client-only fields.
 
 ## Architecture
 

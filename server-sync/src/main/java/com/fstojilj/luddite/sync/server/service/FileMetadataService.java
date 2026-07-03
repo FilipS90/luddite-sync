@@ -48,8 +48,7 @@ public class FileMetadataService implements ApplicationRunner {
      * Seeds from {@code MAX(sync_version)} on the very first invocation.
      */
     public Long nextSyncVersion(int rootDirId) {
-        syncVersionCounter.merge(rootDirId, 1L, Long::sum);
-        return syncVersionCounter.get(rootDirId);
+        return syncVersionCounter.merge(rootDirId, 1L, Long::sum);
     }
 
     // ── Write path ────────────────────────────────────────────────────────────

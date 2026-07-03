@@ -4,18 +4,6 @@ import com.fstojilj.luddite.sync.common.model.SocketOperation;
 import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
 import com.fstojilj.luddite.sync.common.util.PasswordUtils;
 import jakarta.annotation.PreDestroy;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.ApplicationArguments;
-import org.springframework.boot.ApplicationRunner;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.annotation.Order;
-import org.springframework.core.io.Resource;
-import org.springframework.stereotype.Service;
-
-import javax.net.ssl.KeyManagerFactory;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManagerFactory;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -30,6 +18,17 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManagerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.annotation.Order;
+import org.springframework.core.io.Resource;
+import org.springframework.stereotype.Service;
 
 /**
  * Establishes and maintains a persistent connection to the sync server,
@@ -67,8 +66,8 @@ import java.util.stream.Stream;
 @Order(2)
 public class ClientSyncService implements ApplicationRunner {
 
-    private static final byte SYNC       = 0x01;
-    private static final byte FILE       = 0x02;
+    private static final byte SYNC = 0x01;
+    private static final byte FILE = 0x02;
     private static final byte DELETE_ACK = 0x03;
 
     private static final byte FLAG_DELETED = 0x01;
@@ -165,8 +164,14 @@ public class ClientSyncService implements ApplicationRunner {
     private void connectAndSync() {
         while (running) {
             try {
-                // HTTP phase — all negotiation before opening the socket
                 List<String> serverPublicDirs = serverApiClient.fetchPublicDirs();
+
+                if (serverPublicDirs.isEmpty()) {
+                    log.warn("Server returned no public directories — waiting 5s before retry");
+                    sleep(15_000);
+                    continue;
+                }
+
                 serverDirs = serverPublicDirs;
                 log.info("Server advertises {} public dir(s): {}", serverPublicDirs.size(), serverPublicDirs);
 
@@ -181,7 +186,6 @@ public class ClientSyncService implements ApplicationRunner {
                     }
                 }
 
-                // Purge stale public dirs
                 List<String> privateDirNames = rootDirService.findAllPrivate().stream()
                         .map(e -> e[0])
                         .toList();

@@ -5,16 +5,6 @@ import com.fstojilj.luddite.sync.common.model.RootDir;
 import com.fstojilj.luddite.sync.server.repository.RootDirRepository;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.Resource;
-import org.springframework.stereotype.Service;
-
-import javax.net.ssl.KeyManagerFactory;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLServerSocket;
-import javax.net.ssl.TrustManagerFactory;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -29,6 +19,16 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLServerSocket;
+import javax.net.ssl.TrustManagerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
+import org.springframework.stereotype.Service;
 
 /**
  * Accepts inbound connections from sync clients and serves file-change data.
@@ -62,8 +62,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public class FileSocketService {
 
     // ── Wire protocol bytes — client→server message types ────────────────────
-    public static final byte SYNC       = 0x01;
-    public static final byte FILE       = 0x02;
+    public static final byte SYNC = 0x01;
+    public static final byte FILE = 0x02;
     public static final byte DELETE_ACK = 0x03;
 
     // ── Flag bits inside sync-response file records ───────────────────────────
@@ -100,6 +100,14 @@ public class FileSocketService {
      * to the admin CLI.
      */
     private final ConcurrentHashMap<String, String> connectedClients = new ConcurrentHashMap<>();
+
+    /**
+     * Serialises concurrent SYNC requests so that version minting and stamping are atomic.
+     * Without this lock, two clients polling the same directory simultaneously could both
+     * read the same {@code NULL sync_version} rows, mint different versions for them, and
+     * diverge.
+     */
+    private final ReentrantLock syncLock = new ReentrantLock();
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -235,6 +243,10 @@ public class FileSocketService {
     /**
      * Handles one SYNC request from a client.
      *
+     * <p>Acquires {@link #syncLock} so only one client's SYNC is processed at a time.
+     * This prevents concurrent clients from reading the same {@code NULL sync_version}
+     * rows, minting different versions for them, and diverging.
+     *
      * <p>For private directories, validates that the client has been granted access
      * via {@link AuthCacheService} (populated by HTTP auth). If not authorized, sends
      * an empty response ({@code count=0}) and logs a warning.
@@ -250,54 +262,60 @@ public class FileSocketService {
      */
     private void handleSync(DataOutputStream out, String dirName,
                             Long lastSyncVersion, String clientId) throws IOException {
-        var rootDirOpt = rootDirRepository.findByName(dirName);
-        if (rootDirOpt.isEmpty()) {
-            log.warn("Sync from '{}' for unknown dir '{}', sending empty response", clientId, dirName);
-            out.writeInt(0);
-            out.flush();
-            return;
-        }
-
-        RootDir rootDir = rootDirOpt.get();
-        if (rootDir.isPrivate() && !authCacheService.isAuthorized(clientId, dirName)) {
-            log.warn("Sync from '{}' for unauthorized private dir '{}', sending empty response", clientId, dirName);
-            out.writeInt(0);
-            out.flush();
-            return;
-        }
-
-        int rootDirId = rootDir.getId();
-        String rootAbsPath = rootDir.getAbsolutePath();
-
-        long limit = 100;
-        List<FileMetadata> changed = fileMetadataService.findChangedSince(rootDirId, lastSyncVersion, limit);
-        log.debug("Sync from '{}' for dir '{}' since v{}: {} record(s)",
-                clientId, dirName, lastSyncVersion, changed.size());
-
-        out.writeInt(changed.size());
-        for (FileMetadata meta : changed) {
-            String relNorm = meta.relativePath();
-            String qualifiedPath = dirName + "/" + relNorm;
-            Path absPath = Path.of(rootAbsPath).resolve(relNorm);
-            long version = meta.syncVersion() != null ? meta.syncVersion() : fileMetadataService.nextSyncVersion(rootDirId);
-            byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
-
-            byte flags = meta.deleted() ? FLAG_DELETED : 0;
-            long fileBytesSize = flags == 0 ? Files.size(absPath) : 0;
-            out.writeByte(flags);
-            out.writeInt(pathBytes.length);
-            out.write(pathBytes);
-            out.writeLong(version);
-            out.writeLong(fileBytesSize);
-            if (!meta.deleted()) {
-                sendFileBytes(out, absPath, fileBytesSize);
+        syncLock.lock();
+        try {
+            var rootDirOpt = rootDirRepository.findByName(dirName);
+            if (rootDirOpt.isEmpty()) {
+                log.warn("Sync from '{}' for unknown dir '{}', sending empty response", clientId, dirName);
+                out.writeInt(0);
+                out.flush();
+                return;
             }
 
-            if (meta.syncVersion() == null) {
-                fileMetadataService.stampSyncVersion(rootDirId, meta.relativePath(), version);
+            RootDir rootDir = rootDirOpt.get();
+            if (rootDir.isPrivate() && !authCacheService.isAuthorized(clientId, dirName)) {
+                log.warn("Sync from '{}' for unauthorized private dir '{}', sending empty response", clientId, dirName);
+                out.writeInt(0);
+                out.flush();
+                return;
             }
+
+            int rootDirId = rootDir.getId();
+            String rootAbsPath = rootDir.getAbsolutePath();
+
+            long limit = 100;
+            List<FileMetadata> changed = fileMetadataService.findChangedSince(rootDirId, lastSyncVersion, limit);
+            log.debug("Sync from '{}' for dir '{}' since v{}: {} record(s)",
+                    clientId, dirName, lastSyncVersion, changed.size());
+
+            out.writeInt(changed.size());
+            for (FileMetadata meta : changed) {
+                String relNorm = meta.relativePath();
+                String qualifiedPath = dirName + "/" + relNorm;
+                Path absPath = Path.of(rootAbsPath).resolve(relNorm);
+                long version = meta.syncVersion() != null ? meta.syncVersion() : fileMetadataService.
+                        nextSyncVersion(rootDirId);
+                byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
+
+                byte flags = meta.deleted() ? FLAG_DELETED : 0;
+                long fileBytesSize = flags == 0 ? Files.size(absPath) : 0;
+                out.writeByte(flags);
+                out.writeInt(pathBytes.length);
+                out.write(pathBytes);
+                out.writeLong(version);
+                out.writeLong(fileBytesSize);
+                if (!meta.deleted()) {
+                    sendFileBytes(out, absPath, fileBytesSize);
+                }
+
+                if (meta.syncVersion() == null) {
+                    fileMetadataService.stampSyncVersion(rootDirId, meta.relativePath(), version);
+                }
+            }
+            out.flush();
+        } finally {
+            syncLock.unlock();
         }
-        out.flush();
     }
 
     // ── File download handler ─────────────────────────────────────────────────

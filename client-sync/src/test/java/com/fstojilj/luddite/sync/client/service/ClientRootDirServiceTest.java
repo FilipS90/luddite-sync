@@ -105,11 +105,9 @@ class ClientRootDirServiceTest {
         Path staleDir = Files.createDirectory(tempDir.resolve("stale"));
         Files.writeString(staleDir.resolve("old.jpg"), "data");
 
-        when(fileMetadataService.findAllByDir("stale")).thenReturn(List.of("stale/old.jpg"));
-
         rootDirService.removeStaleDirs(List.of("stale"));
 
-        verify(fileMetadataService).removeRecord("stale", "stale/old.jpg");
+        verify(fileMetadataService).purgeAllFilesForDir("stale");
         verify(rootDirRepository).remove("stale");
         assertThat(staleDir).doesNotExist();
     }
@@ -119,8 +117,6 @@ class ClientRootDirServiceTest {
         ReflectionTestUtils.setField(rootDirService, "mirrorDirPath", tempDir.toString());
         ReflectionTestUtils.setField(rootDirService, "retainLocalDirectory", true);
         Path staleDir = Files.createDirectory(tempDir.resolve("stale"));
-
-        when(fileMetadataService.findAllByDir("stale")).thenReturn(List.of());
 
         rootDirService.removeStaleDirs(List.of("stale"));
 

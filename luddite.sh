@@ -18,9 +18,7 @@ for f in "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.bashrc" "$HOME/.bash_profile" "$
 done
 
 if [ -z "$KEYSTORE_PASSWORD" ]; then
-    read -rsp "[luddite] Enter keystore password: " KEYSTORE_PASSWORD
-    echo
-    export KEYSTORE_PASSWORD
+    export KEYSTORE_PASSWORD=test123
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
