@@ -1,8 +1,13 @@
 package com.fstojilj.luddite.sync.client.cli;
 
+import com.fstojilj.luddite.sync.client.model.ClientRootDir;
 import com.fstojilj.luddite.sync.client.service.ClientSyncService;
 import com.fstojilj.luddite.sync.client.service.RootDirService;
-import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -10,12 +15,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
-
-import java.io.ByteArrayOutputStream;
-import java.io.PrintStream;
-import java.lang.reflect.Method;
-import java.util.ArrayList;
-import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
@@ -76,7 +75,7 @@ class ClientCliTest {
 
     @Test
     void handle_list_withDirs_printsDirs() throws Exception {
-        when(rootDirService.findAll()).thenReturn(List.of(new SyncHandshakeEntry("photos", 42L)));
+        when(rootDirService.findAll()).thenReturn(List.of(new ClientRootDir("photos", 42L, null)));
         handle("list");
         assertThat(output()).contains("photos");
         assertThat(output()).contains("42");
@@ -95,7 +94,7 @@ class ClientCliTest {
     void handle_add_validIndex_registersDir() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
         handle("add 1");
-        verify(rootDirService).registerIfAbsent("photos");
+        verify(rootDirService).registerWithDefaultPath("photos");
         assertThat(output()).contains("photos");
     }
 
@@ -103,8 +102,8 @@ class ClientCliTest {
     void handle_add_multipleIndices_registersAll() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
         handle("add 1,2");
-        verify(rootDirService).registerIfAbsent("photos");
-        verify(rootDirService).registerIfAbsent("documents");
+        verify(rootDirService).registerWithDefaultPath("photos");
+        verify(rootDirService).registerWithDefaultPath("documents");
     }
 
     // ── remove ────────────────────────────────────────────────────────────────
@@ -118,14 +117,14 @@ class ClientCliTest {
 
     @Test
     void handle_remove_unknownDir_printsError() throws Exception {
-        when(rootDirService.findAll()).thenReturn(List.of(new SyncHandshakeEntry("photos", 1L)));
+        when(rootDirService.findAll()).thenReturn(List.of(new ClientRootDir("photos", 1L, null)));
         handle("remove unknown");
         assertThat(output()).contains("No such directory");
     }
 
     @Test
     void handle_remove_knownDir_callsRemove() throws Exception {
-        when(rootDirService.findAll()).thenReturn(List.of(new SyncHandshakeEntry("photos", 1L)));
+        when(rootDirService.findAll()).thenReturn(List.of(new ClientRootDir("photos", 1L, null)));
         handle("remove photos");
         verify(rootDirService).removeDirectory("photos", false);
         assertThat(output()).contains("photos");

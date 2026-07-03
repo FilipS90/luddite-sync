@@ -29,7 +29,8 @@ public class SchemaInitializer implements ApplicationRunner {
                     dir_name          TEXT    PRIMARY KEY NOT NULL,
                     last_sync_version BIGINT NOT NULL DEFAULT -1,
                     password_hash     TEXT,
-                    is_private        BOOLEAN NOT NULL DEFAULT FALSE
+                    is_private        BOOLEAN NOT NULL DEFAULT FALSE,
+                    custom_path       TEXT
                 )
                 """);
 

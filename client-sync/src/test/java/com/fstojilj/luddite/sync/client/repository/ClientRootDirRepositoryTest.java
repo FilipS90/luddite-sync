@@ -1,12 +1,12 @@
 package com.fstojilj.luddite.sync.client.repository;
 
-import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
+import com.fstojilj.luddite.sync.client.model.ClientRootDir;
+import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
-
-import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -25,7 +25,8 @@ class ClientRootDirRepositoryTest {
         jdbc.execute("""
                 CREATE TABLE root_dirs (
                     dir_name TEXT PRIMARY KEY,
-                    last_sync_version INTEGER NOT NULL DEFAULT -1
+                    last_sync_version INTEGER NOT NULL DEFAULT -1,
+                    custom_path TEXT
                 )""");
         repository = new RootDirRepository(jdbc);
     }
@@ -41,10 +42,18 @@ class ClientRootDirRepositoryTest {
     void findAll_withEntries_returnsAll() {
         repository.registerIfAbsent("photos");
         repository.registerIfAbsent("docs");
-        List<SyncHandshakeEntry> all = repository.findAll();
+        List<ClientRootDir> all = repository.findAll();
         assertThat(all).hasSize(2);
-        assertThat(all).extracting(SyncHandshakeEntry::dirName)
+        assertThat(all).extracting(ClientRootDir::dirName)
                 .containsExactlyInAnyOrder("photos", "docs");
+    }
+
+    @Test
+    void findAll_withCustomPath_returnsCustomPath() {
+        repository.registerWithCustomPath("photos", "D:\\Custom\\Photos");
+        List<ClientRootDir> all = repository.findAll();
+        assertThat(all).hasSize(1);
+        assertThat(all.getFirst().customPath()).isEqualTo("D:\\Custom\\Photos");
     }
 
     // ── registerIfAbsent ──────────────────────────────────────────────────────
@@ -52,7 +61,7 @@ class ClientRootDirRepositoryTest {
     @Test
     void registerIfAbsent_newDir_insertsWithVersionMinusOne() {
         repository.registerIfAbsent("photos");
-        List<SyncHandshakeEntry> all = repository.findAll();
+        List<ClientRootDir> all = repository.findAll();
         assertThat(all).hasSize(1);
         assertThat(all.getFirst().lastSyncVersion()).isEqualTo(-1L);
     }
@@ -62,8 +71,39 @@ class ClientRootDirRepositoryTest {
         repository.registerIfAbsent("photos");
         repository.updateSyncVersion("photos", 42L);
         repository.registerIfAbsent("photos"); // second call should be no-op
-        List<SyncHandshakeEntry> all = repository.findAll();
+        List<ClientRootDir> all = repository.findAll();
         assertThat(all.getFirst().lastSyncVersion()).isEqualTo(42L);
+    }
+
+    // ── registerWithCustomPath ────────────────────────────────────────────────
+
+    @Test
+    void registerWithCustomPath_persistsAndReturnsPath() {
+        repository.registerWithCustomPath("photos", "/custom/photos");
+        Optional<String> customPath = repository.findCustomPath("photos");
+        assertThat(customPath).contains("/custom/photos");
+        assertThat(repository.findAll().getFirst().lastSyncVersion()).isEqualTo(-1L);
+    }
+
+    @Test
+    void registerWithCustomPath_existingDir_updatesPathOnly() {
+        repository.registerIfAbsent("photos");
+        repository.updateSyncVersion("photos", 10L);
+        repository.registerWithCustomPath("photos", "/custom/photos");
+        List<ClientRootDir> all = repository.findAll();
+        assertThat(all.getFirst().customPath()).isEqualTo("/custom/photos");
+        assertThat(all.getFirst().lastSyncVersion()).isEqualTo(10L);
+    }
+
+    @Test
+    void findCustomPath_notRegistered_returnsEmpty() {
+        assertThat(repository.findCustomPath("missing")).isEmpty();
+    }
+
+    @Test
+    void findCustomPath_registeredWithoutCustomPath_returnsEmpty() {
+        repository.registerIfAbsent("photos");
+        assertThat(repository.findCustomPath("photos")).isEmpty();
     }
 
     // ── remove ────────────────────────────────────────────────────────────────
@@ -100,5 +140,6 @@ class ClientRootDirRepositoryTest {
         assertThat(repository.findAll().getFirst().lastSyncVersion()).isEqualTo(55L);
     }
 }
+
 
 

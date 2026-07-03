@@ -1,12 +1,12 @@
 package com.fstojilj.luddite.sync.client.repository;
 
-import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
+import com.fstojilj.luddite.sync.client.model.ClientRootDir;
+import java.util.List;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
-
-import java.util.List;
 
 /**
  * Persists the set of server root-directories the client is tracking, together with
@@ -20,16 +20,17 @@ public class RootDirRepository {
 
     private final JdbcTemplate jdbcTemplate;
 
-    private final RowMapper<SyncHandshakeEntry> rowMapper =
-            (rs, _) -> new SyncHandshakeEntry(
+    private final RowMapper<ClientRootDir> rowMapper =
+            (rs, _) -> new ClientRootDir(
                     rs.getString("dir_name"),
-                    rs.getLong("last_sync_version")
+                    rs.getLong("last_sync_version"),
+                    rs.getString("custom_path")
             );
 
     /**
      * Returns all tracked directories and their last known sync versions.
      */
-    public List<SyncHandshakeEntry> findAll() {
+    public List<ClientRootDir> findAll() {
         return jdbcTemplate.query("SELECT * FROM root_dirs", rowMapper);
     }
 
@@ -45,6 +46,37 @@ public class RootDirRepository {
                 VALUES (?, -1)
                 ON CONFLICT(dir_name) DO NOTHING
                 """, dirName);
+    }
+
+    /**
+     * Registers a directory with {@code last_sync_version = -1} and a custom local mirror
+     * path if not already present. If the directory already exists, its {@code custom_path}
+     * is updated to the given value, leaving {@code last_sync_version} untouched.
+     *
+     * @param dirName    server-side directory name
+     * @param customPath absolute local path chosen by the user for this directory
+     */
+    public void registerWithCustomPath(String dirName, String customPath) {
+        jdbcTemplate.update("""
+                INSERT INTO root_dirs (dir_name, last_sync_version, custom_path)
+                VALUES (?, -1, ?)
+                ON CONFLICT(dir_name) DO UPDATE SET custom_path = excluded.custom_path
+                """, dirName, customPath);
+    }
+
+    /**
+     * Returns the stored custom local mirror path for a directory, if any.
+     *
+     * @param dirName directory name
+     * @return the stored custom path, or {@link Optional#empty()} if the directory is not
+     * registered or has no custom path (i.e. uses the default mirror location)
+     */
+    public Optional<String> findCustomPath(String dirName) {
+        List<String> results = jdbcTemplate.query(
+                "SELECT custom_path FROM root_dirs WHERE dir_name = ?",
+                (rs, _) -> rs.getString("custom_path"),
+                dirName);
+        return results.isEmpty() ? Optional.empty() : Optional.ofNullable(results.getFirst());
     }
 
     /**

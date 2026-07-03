@@ -1,7 +1,7 @@
 package com.fstojilj.luddite.sync.client.service;
 
+import com.fstojilj.luddite.sync.client.model.ClientRootDir;
 import com.fstojilj.luddite.sync.client.repository.RootDirRepository;
-import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
 import com.fstojilj.luddite.sync.common.util.FileSystemUtils;
 import java.nio.file.Path;
 import java.util.List;
@@ -33,7 +33,7 @@ public class RootDirService {
 
     public void removeStaleDirs(List<String> staleDirs) {
         for (String dir : staleDirs) {
-            Path dirPath = Path.of(mirrorDirPath).resolve(dir);
+            Path dirPath = resolveLocalPath(dir);
             if (!retainLocalDirectory) {
                 FileSystemUtils.deleteDirectoryRecursively(dirPath);
             }
@@ -50,7 +50,7 @@ public class RootDirService {
      */
     public List<String> retrieveAllInSyncDirs() {
         return rootDirRepository.findAll().stream()
-                .map(SyncHandshakeEntry::dirName)
+                .map(ClientRootDir::dirName)
                 .toList();
     }
 
@@ -64,7 +64,7 @@ public class RootDirService {
      */
     public void removeDirectory(String directory, boolean deleteLocalFiles) {
         if (deleteLocalFiles) {
-            Path dirPath = Path.of(mirrorDirPath).resolve(directory);
+            Path dirPath = resolveLocalPath(directory);
             FileSystemUtils.deleteDirectoryRecursively(dirPath);
             fileMetadataService.findAllByDir(directory)
                     .forEach(rel -> fileMetadataService.removeRecord(directory, rel));
@@ -80,10 +80,28 @@ public class RootDirService {
      * Returns all sync-state entries, each containing a directory name and the last
      * sync version acknowledged by this client.
      *
-     * @return list of {@link SyncHandshakeEntry} records
+     * @return list of {@link ClientRootDir} records
      */
-    public List<SyncHandshakeEntry> findAll() {
+    public List<ClientRootDir> findAll() {
         return rootDirRepository.findAll();
+    }
+
+    /**
+     * Resolves the local filesystem path files for {@code dirName} should be written to.
+     * If the directory was subscribed with a custom local path, that path is returned;
+     * otherwise the default {@code mirrorDir/dirName} location is used.
+     *
+     * <p>This is the single source of truth for per-dir path resolution — all consumers
+     * (poll loop, stale-dir cleanup, directory removal) must call this instead of
+     * hardcoding the mirror-dir default.
+     *
+     * @param dirName the directory name to resolve
+     * @return the resolved local path
+     */
+    public Path resolveLocalPath(String dirName) {
+        return rootDirRepository.findCustomPath(dirName)
+                .map(Path::of)
+                .orElseGet(() -> Path.of(mirrorDirPath).resolve(dirName));
     }
 
     /**
@@ -102,8 +120,21 @@ public class RootDirService {
      *
      * @param dirName the directory name to register
      */
-    public void registerIfAbsent(String dirName) {
+    public void registerWithDefaultPath(String dirName) {
         rootDirRepository.registerIfAbsent(dirName);
+    }
+
+    /**
+     * Registers a directory in the local sync state with a starting sync version of
+     * {@code -1} and the given custom local mirror path. If the directory is already
+     * registered, only its {@code custom_path} is updated.
+     *
+     * @param dirName    the directory name to register
+     * @param customPath absolute local path chosen by the user for this directory
+     */
+    public void registerWithCustomPath(String dirName, String customPath) {
+        rootDirRepository.registerWithCustomPath(dirName, customPath);
+        log.info("Registered dir '{}' with custom local path '{}'", dirName, customPath);
     }
 
     /**

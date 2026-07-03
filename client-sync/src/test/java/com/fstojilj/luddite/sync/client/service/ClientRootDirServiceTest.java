@@ -1,7 +1,11 @@
 package com.fstojilj.luddite.sync.client.service;
 
+import com.fstojilj.luddite.sync.client.model.ClientRootDir;
 import com.fstojilj.luddite.sync.client.repository.RootDirRepository;
-import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
@@ -9,10 +13,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
-
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.never;
@@ -43,8 +43,8 @@ class ClientRootDirServiceTest {
     @Test
     void retrieveAllInSyncDirs_returnsDirNames() {
         when(rootDirRepository.findAll()).thenReturn(List.of(
-                new SyncHandshakeEntry("photos", 1L),
-                new SyncHandshakeEntry("docs", 2L)
+                new ClientRootDir("photos", 1L, null),
+                new ClientRootDir("docs", 2L, null)
         ));
         List<String> dirs = rootDirService.retrieveAllInSyncDirs();
         assertThat(dirs).containsExactlyInAnyOrder("photos", "docs");
@@ -54,7 +54,7 @@ class ClientRootDirServiceTest {
 
     @Test
     void findAll_delegatesToRepository() {
-        List<SyncHandshakeEntry> entries = List.of(new SyncHandshakeEntry("photos", 5L));
+        List<ClientRootDir> entries = List.of(new ClientRootDir("photos", 5L, null));
         when(rootDirRepository.findAll()).thenReturn(entries);
         assertThat(rootDirService.findAll()).isSameAs(entries);
     }
@@ -62,9 +62,33 @@ class ClientRootDirServiceTest {
     // ── registerIfAbsent ──────────────────────────────────────────────────────
 
     @Test
-    void registerIfAbsent_delegatesToRepository() {
-        rootDirService.registerIfAbsent("photos");
+    void registerWithDefaultPath_delegatesToRepository() {
+        rootDirService.registerWithDefaultPath("photos");
         verify(rootDirRepository).registerIfAbsent("photos");
+    }
+
+    // ── registerWithCustomPath ────────────────────────────────────────────────
+
+    @Test
+    void registerWithCustomPath_delegatesToRepository() {
+        rootDirService.registerWithCustomPath("photos", "/custom/photos");
+        verify(rootDirRepository).registerWithCustomPath("photos", "/custom/photos");
+    }
+
+    // ── resolveLocalPath ──────────────────────────────────────────────────────
+
+    @Test
+    void resolveLocalPath_withCustomPath_returnsStoredPath() {
+        setMirrorDir(tempDir.toString());
+        when(rootDirRepository.findCustomPath("photos")).thenReturn(Optional.of("/custom/photos"));
+        assertThat(rootDirService.resolveLocalPath("photos")).isEqualTo(Path.of("/custom/photos"));
+    }
+
+    @Test
+    void resolveLocalPath_withNullPath_returnsMirrorDirDefault() {
+        setMirrorDir(tempDir.toString());
+        when(rootDirRepository.findCustomPath("photos")).thenReturn(Optional.empty());
+        assertThat(rootDirService.resolveLocalPath("photos")).isEqualTo(tempDir.resolve("photos"));
     }
 
     // ── updateSyncVersion ─────────────────────────────────────────────────────
@@ -88,6 +112,7 @@ class ClientRootDirServiceTest {
     @Test
     void removeDirectory_deletesLocalDirAndCallsRepository() throws Exception {
         setMirrorDir(tempDir.toString());
+        when(rootDirRepository.findCustomPath("photos")).thenReturn(Optional.empty());
         Path photosDir = Files.createDirectory(tempDir.resolve("photos"));
         Files.writeString(photosDir.resolve("file.jpg"), "data");
 
@@ -97,11 +122,25 @@ class ClientRootDirServiceTest {
         assertThat(photosDir).doesNotExist();
     }
 
+    @Test
+    void removeDirectory_withCustomPath_deletesFromCustomLocation() throws Exception {
+        setMirrorDir(tempDir.toString());
+        Path customDir = Files.createDirectory(tempDir.resolve("custom-photos"));
+        Files.writeString(customDir.resolve("file.jpg"), "data");
+        when(rootDirRepository.findCustomPath("photos")).thenReturn(Optional.of(customDir.toString()));
+
+        rootDirService.removeDirectory("photos", true);
+
+        verify(rootDirRepository).remove("photos");
+        assertThat(customDir).doesNotExist();
+    }
+
     // ── removeStaleDirs ───────────────────────────────────────────────────────
 
     @Test
     void removeStaleDirs_retainFalse_deletesFromDisk() throws Exception {
         setMirrorDir(tempDir.toString());
+        when(rootDirRepository.findCustomPath("stale")).thenReturn(Optional.empty());
         Path staleDir = Files.createDirectory(tempDir.resolve("stale"));
         Files.writeString(staleDir.resolve("old.jpg"), "data");
 
@@ -116,6 +155,7 @@ class ClientRootDirServiceTest {
     void removeStaleDirs_retainTrue_doesNotDeleteFromDisk() throws Exception {
         ReflectionTestUtils.setField(rootDirService, "mirrorDirPath", tempDir.toString());
         ReflectionTestUtils.setField(rootDirService, "retainLocalDirectory", true);
+        when(rootDirRepository.findCustomPath("stale")).thenReturn(Optional.empty());
         Path staleDir = Files.createDirectory(tempDir.resolve("stale"));
 
         rootDirService.removeStaleDirs(List.of("stale"));
@@ -131,4 +171,5 @@ class ClientRootDirServiceTest {
         verify(rootDirRepository, never()).remove(org.mockito.ArgumentMatchers.any());
     }
 }
+
 
