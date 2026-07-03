@@ -7,6 +7,7 @@ import com.fstojilj.luddite.sync.common.dto.DirVersionCheckResponse;
 import com.fstojilj.luddite.sync.common.dto.DirVersionEntry;
 import com.fstojilj.luddite.sync.common.dto.TreeResponse;
 import com.fstojilj.luddite.sync.common.model.RootDir;
+import com.fstojilj.luddite.sync.server.service.AuthCacheService;
 import com.fstojilj.luddite.sync.server.service.FileMetadataService;
 import com.fstojilj.luddite.sync.server.service.RootDirService;
 import java.util.HashMap;
@@ -28,9 +29,10 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * REST API for directory operations.
  *
- * <p>This controller is an additive layer — the existing socket-based {@code PushService}
- * continues to run unchanged on its own port. File byte transfer and delete ACKs remain
- * on the socket; everything else is progressively migrated to HTTP.
+ * <p>Handles HTTP negotiation (directory listing, version check, private-dir auth).
+ * File byte transfer and delete ACKs are handled by the binary TCP socket in
+ * {@code FileSocketService}. When a client authenticates a private directory here,
+ * {@code AuthCacheService} is populated so the socket service can gate access accordingly.
  */
 @RestController
 @RequestMapping("/api/dirs")
@@ -40,6 +42,7 @@ public class DirsController {
 
     private final RootDirService rootDirService;
     private final FileMetadataService fileMetadataService;
+    private final AuthCacheService authCacheService;
 
     /**
      * Lists all public (non-private) root directory names.
@@ -109,6 +112,7 @@ public class DirsController {
         boolean granted = dir.getPassword() != null && dir.getPassword().equals(request.passwordHash());
         if (granted) {
             log.info("POST /api/dirs/{}/auth — GRANTED", name);
+            authCacheService.grantAccess(request.clientId(), name);
             return ResponseEntity.ok().build();
         } else {
             log.warn("POST /api/dirs/{}/auth — DENIED (wrong password)", name);

@@ -107,6 +107,7 @@ public class ClientCli {
                 }
                 List<String> dirs = registerDirs(arg);
                 System.out.printf("  Subscribed to: %s%n", dirs);
+                clientSyncService.reconnect();
             }
             case "remove" -> {
                 if (arg.isEmpty()) {
@@ -120,6 +121,7 @@ public class ClientCli {
 
                 rootDirService.removeDirectory(arg, false);
                 System.out.printf("  Unsubscribed from: %s%n", arg);
+                clientSyncService.reconnect();
             }
             case "refresh" -> {
                 System.out.println("  Reconnecting to server to re-poll available directories...");

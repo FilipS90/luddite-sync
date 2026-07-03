@@ -10,7 +10,7 @@ rem Switch console to UTF-8 so Cyrillic (and other non-ASCII) paths work correct
 chcp 65001 >nul
 
 if "%KEYSTORE_PASSWORD%"=="" (
-    set /p KEYSTORE_PASSWORD="[luddite] Enter keystore password: "
+    set KEYSTORE_PASSWORD=test123
 )
 
 set SCRIPT_DIR=%~dp0

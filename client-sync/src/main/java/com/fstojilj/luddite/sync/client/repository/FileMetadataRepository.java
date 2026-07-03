@@ -1,10 +1,9 @@
 package com.fstojilj.luddite.sync.client.repository;
 
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
-
-import java.util.List;
 
 /**
  * Tracks which files have been successfully synced to the local mirror disk.
@@ -43,6 +42,17 @@ public class FileMetadataRepository {
         jdbcTemplate.update("""
                 DELETE FROM file_metadata WHERE dir_name = ? AND relative_path = ?
                 """, dirName, relativePath);
+    }
+
+    /**
+     * Removes all file records for a given directory.
+     *
+     * @param dirName server-side directory name
+     */
+    public void deleteAllByDir(String dirName) {
+        jdbcTemplate.update("""
+                DELETE FROM file_metadata WHERE dir_name = ?
+                """, dirName);
     }
 
     /**

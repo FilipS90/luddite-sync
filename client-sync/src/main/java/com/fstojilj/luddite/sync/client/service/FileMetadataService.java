@@ -1,15 +1,14 @@
 package com.fstojilj.luddite.sync.client.service;
 
 import com.fstojilj.luddite.sync.client.repository.FileMetadataRepository;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
 
 /**
  * Manages the client-side record of files that have been successfully synced to disk.
@@ -83,6 +82,17 @@ public class FileMetadataService {
             // the file will be re-synced on the next poll if it reappears on the server.
             log.warn("DB record removed but could not delete local file '{}': {}", target, e.getMessage());
         }
+    }
+
+    /**
+     * Removes all file records for a given directory.
+     * Use this when the directory is being removed from sync state (e.g. user request).
+     *
+     * @param dirName server-side directory name
+     */
+    public void purgeAllFilesForDir(String dirName) {
+        fileMetadataRepository.deleteAllByDir(dirName);
+        log.debug("Purged all DB records for dir '{}'", dirName);
     }
 
     /**

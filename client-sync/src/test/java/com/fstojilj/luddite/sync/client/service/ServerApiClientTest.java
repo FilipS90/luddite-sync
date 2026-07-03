@@ -125,7 +125,7 @@ class ServerApiClientTest {
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess());
 
-        boolean result = client.authenticate("Secrets", "abc123");
+        boolean result = client.authenticate("client-1", "Secrets", "abc123");
 
         assertThat(result).isTrue();
         mockServer.verify();
@@ -137,7 +137,7 @@ class ServerApiClientTest {
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withStatus(HttpStatus.FORBIDDEN));
 
-        boolean result = client.authenticate("Secrets", "wronghash");
+        boolean result = client.authenticate("client-1", "Secrets", "wronghash");
 
         assertThat(result).isFalse();
         mockServer.verify();
@@ -148,7 +148,7 @@ class ServerApiClientTest {
         mockServer.expect(requestTo(BASE_URL + "/api/dirs/Secrets/auth"))
                 .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
 
-        boolean result = client.authenticate("Secrets", "hash");
+        boolean result = client.authenticate("client-1", "Secrets", "hash");
 
         assertThat(result).isFalse();
         mockServer.verify();

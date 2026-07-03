@@ -9,7 +9,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.context.ApplicationContext;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -34,17 +33,17 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class PushServiceTest {
+class FileSocketServiceTest {
 
     @Mock
     private FileMetadataService fileMetadataService;
     @Mock
     private RootDirRepository rootDirRepository;
     @Mock
-    private ApplicationContext applicationContext;
+    private AuthCacheService authCacheService;
 
     @InjectMocks
-    private PushService pushService;
+    private FileSocketService fileSocketService;
 
     @TempDir
     Path tempDir;
@@ -120,35 +119,62 @@ class PushServiceTest {
                 .isInstanceOf(IOException.class);
     }
 
-    // ── handlePoll — unknown dir ──────────────────────────────────────────────
+    // ── handleSync — unknown dir ──────────────────────────────────────────────
 
     @Test
-    void handlePoll_unknownDir_sendsZeroRecordCount() throws Exception {
+    void handleSync_unknownDir_sendsZeroRecordCount() throws Exception {
         when(rootDirRepository.findByName("unknown")).thenReturn(Optional.empty());
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        invokeHandlePoll(new DataOutputStream(baos), "unknown", 0L, "hw-1");
+        invokeHandleSync(new DataOutputStream(baos), "unknown", 0L, "hw-1");
 
         assertThat(toDataIn(baos).readInt()).isZero();
     }
 
-    // ── handlePoll — empty change set ────────────────────────────────────────
+    // ── handleSync — empty change set ────────────────────────────────────────
 
     @Test
-    void handlePoll_noChangedRecords_sendsZeroRecordCount() throws Exception {
+    void handleSync_noChangedRecords_sendsZeroRecordCount() throws Exception {
         setupRootDir("photos", 1, tempDir.toString());
         when(fileMetadataService.findChangedSince(1, 0L, 100)).thenReturn(List.of());
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        invokeHandlePoll(new DataOutputStream(baos), "photos", 0L, "hw-1");
+        invokeHandleSync(new DataOutputStream(baos), "photos", 0L, "hw-1");
 
         assertThat(toDataIn(baos).readInt()).isZero();
     }
 
-    // ── handlePoll — live file wire format ───────────────────────────────────
+    // ── handleSync — private dir auth ─────────────────────────────────────────
 
     @Test
-    void handlePoll_liveFile_sendsCorrectWireFormat() throws Exception {
+    void handleSync_privateDir_unauthorizedClient_sendsZeroRecordCount() throws Exception {
+        RootDir privateDir = RootDir.builder().id(1).name("vault").isPrivate(true)
+                .password("hash").absolutePath(tempDir.toString()).build();
+        when(rootDirRepository.findByName("vault")).thenReturn(Optional.of(privateDir));
+        when(authCacheService.isAuthorized("client-1", "vault")).thenReturn(false);
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        invokeHandleSync(new DataOutputStream(baos), "vault", 0L, "client-1");
+
+        assertThat(toDataIn(baos).readInt()).isZero();
+    }
+
+    @Test
+    void handleSync_publicDir_noAuthCheck_sendsRecords() throws Exception {
+        setupRootDir("photos", 1, tempDir.toString());
+        when(fileMetadataService.findChangedSince(1, 0L, 100)).thenReturn(List.of());
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        invokeHandleSync(new DataOutputStream(baos), "photos", 0L, "client-1");
+
+        assertThat(toDataIn(baos).readInt()).isZero();
+        verify(authCacheService, never()).isAuthorized(anyString(), anyString());
+    }
+
+    // ── handleSync — live file wire format ────────────────────────────────────
+
+    @Test
+    void handleSync_liveFile_sendsCorrectWireFormat() throws Exception {
         byte[] content = "photo bytes".getBytes(StandardCharsets.UTF_8);
         Files.write(tempDir.resolve("photo.jpg"), content);
 
@@ -157,7 +183,7 @@ class PushServiceTest {
                 .thenReturn(List.of(liveFile("photo.jpg", 5L)));
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        invokeHandlePoll(new DataOutputStream(baos), "photos", 0L, "hw-1");
+        invokeHandleSync(new DataOutputStream(baos), "photos", 0L, "hw-1");
 
         DataInputStream in = toDataIn(baos);
 
@@ -178,16 +204,16 @@ class PushServiceTest {
         assertThat(in.readNBytes((int) wireFileSize)).isEqualTo(content);      // file bytes
     }
 
-    // ── handlePoll — deleted record ───────────────────────────────────────────
+    // ── handleSync — deleted record ───────────────────────────────────────────
 
     @Test
-    void handlePoll_deletedRecord_sendsDeletedFlagZeroSizeAndNoContent() throws Exception {
+    void handleSync_deletedRecord_sendsDeletedFlagZeroSizeAndNoContent() throws Exception {
         setupRootDir("photos", 1, tempDir.toString());
         when(fileMetadataService.findChangedSince(1, 0L, 100))
                 .thenReturn(List.of(deletedFile("photo.jpg", 7L)));
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        invokeHandlePoll(new DataOutputStream(baos), "photos", 0L, "hw-1");
+        invokeHandleSync(new DataOutputStream(baos), "photos", 0L, "hw-1");
 
         DataInputStream in = toDataIn(baos);
 
@@ -205,8 +231,7 @@ class PushServiceTest {
     }
 
     @Test
-    void handlePoll_deletedRecord_doesNotCallSendFileBytes() throws Exception {
-        // Deleted record must NOT attempt Files.size / sendFileBytes — the file no longer exists.
+    void handleSync_deletedRecord_doesNotCallSendFileBytes() throws Exception {
         setupRootDir("photos", 1, tempDir.toString());
         // "deleted.jpg" is intentionally absent from tempDir
         when(fileMetadataService.findChangedSince(1, 0L, 100))
@@ -214,16 +239,16 @@ class PushServiceTest {
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         // Must not throw even though the file is absent
-        invokeHandlePoll(new DataOutputStream(baos), "photos", 0L, "hw-1");
+        invokeHandleSync(new DataOutputStream(baos), "photos", 0L, "hw-1");
 
         DataInputStream in = toDataIn(baos);
         assertThat(in.readInt()).isEqualTo(1);
     }
 
-    // ── handlePoll — syncVersion stamping ────────────────────────────────────
+    // ── handleSync — syncVersion stamping ────────────────────────────────────
 
     @Test
-    void handlePoll_unversionedRecord_stampsAssignedVersion() throws Exception {
+    void handleSync_unversionedRecord_stampsAssignedVersion() throws Exception {
         Files.write(tempDir.resolve("new.jpg"), "x".getBytes(StandardCharsets.UTF_8));
 
         setupRootDir("photos", 1, tempDir.toString());
@@ -235,28 +260,28 @@ class PushServiceTest {
         when(fileMetadataService.findChangedSince(1, 0L, 100)).thenReturn(List.of(unversioned));
         when(fileMetadataService.nextSyncVersion(1)).thenReturn(42L);
 
-        invokeHandlePoll(new DataOutputStream(new ByteArrayOutputStream()), "photos", 0L, "hw-1");
+        invokeHandleSync(new DataOutputStream(new ByteArrayOutputStream()), "photos", 0L, "hw-1");
 
         verify(fileMetadataService).stampSyncVersion(1, "new.jpg", 42L);
     }
 
     @Test
-    void handlePoll_alreadyVersionedRecord_doesNotStampAgain() throws Exception {
+    void handleSync_alreadyVersionedRecord_doesNotStampAgain() throws Exception {
         Files.write(tempDir.resolve("existing.jpg"), "x".getBytes(StandardCharsets.UTF_8));
 
         setupRootDir("photos", 1, tempDir.toString());
         when(fileMetadataService.findChangedSince(1, 0L, 100))
                 .thenReturn(List.of(liveFile("existing.jpg", 10L)));
 
-        invokeHandlePoll(new DataOutputStream(new ByteArrayOutputStream()), "photos", 0L, "hw-1");
+        invokeHandleSync(new DataOutputStream(new ByteArrayOutputStream()), "photos", 0L, "hw-1");
 
         verify(fileMetadataService, never()).stampSyncVersion(anyInt(), anyString(), anyLong());
     }
 
-    // ── handlePoll — multiple records ────────────────────────────────────────
+    // ── handleSync — multiple records ────────────────────────────────────────
 
     @Test
-    void handlePoll_multipleRecords_allWrittenWithCorrectCount() throws Exception {
+    void handleSync_multipleRecords_allWrittenWithCorrectCount() throws Exception {
         byte[] contentA = "file-a".getBytes(StandardCharsets.UTF_8);
         byte[] contentB = "file-b".getBytes(StandardCharsets.UTF_8);
         Files.write(tempDir.resolve("a.jpg"), contentA);
@@ -269,21 +294,105 @@ class PushServiceTest {
         ));
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        invokeHandlePoll(new DataOutputStream(baos), "photos", 0L, "hw-1");
+        invokeHandleSync(new DataOutputStream(baos), "photos", 0L, "hw-1");
 
         DataInputStream in = toDataIn(baos);
         assertThat(in.readInt()).isEqualTo(2); // both records written
+    }
+
+    // ── handleFile ────────────────────────────────────────────────────────────
+
+    @Test
+    void handleFile_malformedPath_sendsMinusOne() throws Exception {
+        ByteArrayOutputStream inputBuffer = new ByteArrayOutputStream();
+        DataOutputStream inputData = new DataOutputStream(inputBuffer);
+        String qualifiedPath = "noslash";
+        byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
+        inputData.writeInt(pathBytes.length);
+        inputData.write(pathBytes);
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        invokeHandleFile(
+                new DataInputStream(new ByteArrayInputStream(inputBuffer.toByteArray())),
+                new DataOutputStream(baos), "client-1");
+
+        assertThat(toDataIn(baos).readLong()).isEqualTo(-1L);
+    }
+
+    @Test
+    void handleFile_fileNotFound_sendsMinusOne() throws Exception {
+        setupRootDir("photos", 1, tempDir.toString());
+
+        ByteArrayOutputStream inputBuffer = new ByteArrayOutputStream();
+        DataOutputStream inputData = new DataOutputStream(inputBuffer);
+        String qualifiedPath = "photos/nonexistent.jpg";
+        byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
+        inputData.writeInt(pathBytes.length);
+        inputData.write(pathBytes);
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        invokeHandleFile(
+                new DataInputStream(new ByteArrayInputStream(inputBuffer.toByteArray())),
+                new DataOutputStream(baos), "client-1");
+
+        assertThat(toDataIn(baos).readLong()).isEqualTo(-1L);
+    }
+
+    @Test
+    void handleFile_unauthorizedPrivateDir_sendsMinusOne() throws Exception {
+        RootDir privateDir = RootDir.builder().id(1).name("vault").isPrivate(true)
+                .password("hash").absolutePath(tempDir.toString()).build();
+        when(rootDirRepository.findByName("vault")).thenReturn(Optional.of(privateDir));
+        when(authCacheService.isAuthorized("client-1", "vault")).thenReturn(false);
+
+        ByteArrayOutputStream inputBuffer = new ByteArrayOutputStream();
+        DataOutputStream inputData = new DataOutputStream(inputBuffer);
+        String qualifiedPath = "vault/secret.jpg";
+        byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
+        inputData.writeInt(pathBytes.length);
+        inputData.write(pathBytes);
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        invokeHandleFile(
+                new DataInputStream(new ByteArrayInputStream(inputBuffer.toByteArray())),
+                new DataOutputStream(baos), "client-1");
+
+        assertThat(toDataIn(baos).readLong()).isEqualTo(-1L);
+    }
+
+    @Test
+    void handleFile_validPublicFile_sendsFileSizeThenBytes() throws Exception {
+        byte[] content = "photo bytes".getBytes(StandardCharsets.UTF_8);
+        Files.write(tempDir.resolve("photo.jpg"), content);
+        setupRootDir("photos", 1, tempDir.toString());
+
+        ByteArrayOutputStream inputBuffer = new ByteArrayOutputStream();
+        DataOutputStream inputData = new DataOutputStream(inputBuffer);
+        String qualifiedPath = "photos/photo.jpg";
+        byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
+        inputData.writeInt(pathBytes.length);
+        inputData.write(pathBytes);
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        invokeHandleFile(
+                new DataInputStream(new ByteArrayInputStream(inputBuffer.toByteArray())),
+                new DataOutputStream(baos), "client-1");
+
+        DataInputStream result = toDataIn(baos);
+        long fileSize = result.readLong();
+        assertThat(fileSize).isEqualTo(content.length);
+        assertThat(result.readNBytes((int) fileSize)).isEqualTo(content);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private void invokeSendFileBytes(DataOutputStream out, Path absPath, long fileBytesSize)
             throws Exception {
-        Method m = PushService.class.getDeclaredMethod(
+        Method m = FileSocketService.class.getDeclaredMethod(
                 "sendFileBytes", DataOutputStream.class, Path.class, long.class);
         m.setAccessible(true);
         try {
-            m.invoke(pushService, out, absPath, fileBytesSize);
+            m.invoke(fileSocketService, out, absPath, fileBytesSize);
         } catch (InvocationTargetException e) {
             Throwable cause = e.getCause();
             if (cause instanceof IOException ex) throw ex;
@@ -292,95 +401,28 @@ class PushServiceTest {
         }
     }
 
-    // ── handlePrivateAuth ─────────────────────────────────────────────────────
-
-    @Test
-    void handlePrivateAuth_correctHash_writesGrantedAndAddsToSubscribedIds() throws Exception {
-        String hash = com.fstojilj.luddite.sync.common.util.PasswordUtils.hash("secret");
-        RootDir dir = RootDir.builder().id(42).name("vault").isPrivate(true).password(hash).absolutePath("/vault").build();
-        when(rootDirRepository.findByName("vault")).thenReturn(Optional.of(dir));
-
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        DataOutputStream out = new DataOutputStream(baos);
-        java.util.Set<Integer> subscribedIds = new java.util.HashSet<>();
-
-        invokeHandlePrivateAuth(out, "vault", hash, subscribedIds, "client-1");
-
-        assertThat(baos.toByteArray()).isEqualTo(new byte[]{0x10});
-        assertThat(subscribedIds).containsExactly(42);
-    }
-
-    @Test
-    void handlePrivateAuth_wrongHash_writesDeniedAndDoesNotSubscribe() throws Exception {
-        String correctHash = com.fstojilj.luddite.sync.common.util.PasswordUtils.hash("secret");
-        String wrongHash = com.fstojilj.luddite.sync.common.util.PasswordUtils.hash("wrong");
-        RootDir dir = RootDir.builder().id(42).name("vault").isPrivate(true).password(correctHash).absolutePath("/vault").build();
-        when(rootDirRepository.findByName("vault")).thenReturn(Optional.of(dir));
-
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        DataOutputStream out = new DataOutputStream(baos);
-        java.util.Set<Integer> subscribedIds = new java.util.HashSet<>();
-
-        invokeHandlePrivateAuth(out, "vault", wrongHash, subscribedIds, "client-1");
-
-        assertThat(baos.toByteArray()).isEqualTo(new byte[]{0x11});
-        assertThat(subscribedIds).isEmpty();
-    }
-
-    @Test
-    void handlePrivateAuth_unknownDir_writesDenied() throws Exception {
-        when(rootDirRepository.findByName("ghost")).thenReturn(Optional.empty());
-
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        DataOutputStream out = new DataOutputStream(baos);
-        java.util.Set<Integer> subscribedIds = new java.util.HashSet<>();
-
-        invokeHandlePrivateAuth(out, "ghost", "anyhash", subscribedIds, "client-1");
-
-        assertThat(baos.toByteArray()).isEqualTo(new byte[]{0x11});
-        assertThat(subscribedIds).isEmpty();
-    }
-
-    @Test
-    void handlePrivateAuth_publicDir_writesDenied() throws Exception {
-        RootDir dir = RootDir.builder().id(7).name("public").isPrivate(false).password(null).absolutePath("/public").build();
-        when(rootDirRepository.findByName("public")).thenReturn(Optional.of(dir));
-
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        DataOutputStream out = new DataOutputStream(baos);
-        java.util.Set<Integer> subscribedIds = new java.util.HashSet<>();
-
-        invokeHandlePrivateAuth(out, "public", "anyhash", subscribedIds, "client-1");
-
-        assertThat(baos.toByteArray()).isEqualTo(new byte[]{0x11});
-        assertThat(subscribedIds).isEmpty();
-    }
-
-    // ── helpers ───────────────────────────────────────────────────────────────
-
-    private void invokeHandlePrivateAuth(DataOutputStream out, String dirName, String passwordHash,
-                                          java.util.Set<Integer> subscribedIds, String clientId) throws Exception {
-        Method m = PushService.class.getDeclaredMethod(
-                "handlePrivateAuth", DataOutputStream.class, String.class, String.class,
-                java.util.Set.class, String.class);
-        m.setAccessible(true);
-        try {
-            m.invoke(pushService, out, dirName, passwordHash, subscribedIds, clientId);
-        } catch (InvocationTargetException e) {
-            Throwable cause = e.getCause();
-            if (cause instanceof IOException ex) throw ex;
-            if (cause instanceof RuntimeException ex) throw ex;
-            throw e;
-        }
-    }
-
-    private void invokeHandlePoll(DataOutputStream out, String dirName,
+    private void invokeHandleSync(DataOutputStream out, String dirName,
                                   Long lastSyncVersion, String clientId) throws Exception {
-        Method m = PushService.class.getDeclaredMethod(
-                "handlePoll", DataOutputStream.class, String.class, Long.class, String.class);
+        Method m = FileSocketService.class.getDeclaredMethod(
+                "handleSync", DataOutputStream.class, String.class, Long.class, String.class);
         m.setAccessible(true);
         try {
-            m.invoke(pushService, out, dirName, lastSyncVersion, clientId);
+            m.invoke(fileSocketService, out, dirName, lastSyncVersion, clientId);
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof IOException ex) throw ex;
+            if (cause instanceof RuntimeException ex) throw ex;
+            throw e;
+        }
+    }
+
+    private void invokeHandleFile(DataInputStream in, DataOutputStream out,
+                                  String clientId) throws Exception {
+        Method m = FileSocketService.class.getDeclaredMethod(
+                "handleFile", DataInputStream.class, DataOutputStream.class, String.class);
+        m.setAccessible(true);
+        try {
+            m.invoke(fileSocketService, in, out, clientId);
         } catch (InvocationTargetException e) {
             Throwable cause = e.getCause();
             if (cause instanceof IOException ex) throw ex;
@@ -414,4 +456,3 @@ class PushServiceTest {
         return new DataInputStream(new ByteArrayInputStream(baos.toByteArray()));
     }
 }
-

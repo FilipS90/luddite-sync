@@ -2,7 +2,7 @@ package com.fstojilj.luddite.sync.server.cli;
 
 import com.fstojilj.luddite.sync.common.model.RootDir;
 import com.fstojilj.luddite.sync.common.util.PasswordUtils;
-import com.fstojilj.luddite.sync.server.service.PushService;
+import com.fstojilj.luddite.sync.server.service.FileSocketService;
 import com.fstojilj.luddite.sync.server.service.RootDirService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,7 +27,7 @@ class AdminCliTest {
     @Mock
     private RootDirService rootDirService;
     @Mock
-    private PushService pushService;
+    private FileSocketService fileSocketService;
 
     @InjectMocks
     private AdminCli adminCli;
@@ -75,14 +75,14 @@ class AdminCliTest {
 
     @Test
     void handle_listc_noClients_shouldPrintNone() throws Exception {
-        when(pushService.listConnectedClients()).thenReturn(List.of());
+        when(fileSocketService.listConnectedClients()).thenReturn(List.of());
         handle("listc");
         assertThat(output()).contains("no clients");
     }
 
     @Test
     void handle_listc_withClients_shouldPrintClients() throws Exception {
-        when(pushService.listConnectedClients()).thenReturn(List.of("hw-id-abc123"));
+        when(fileSocketService.listConnectedClients()).thenReturn(List.of("hw-id-abc123"));
         handle("listc");
         assertThat(output()).contains("hw-id-abc123");
     }

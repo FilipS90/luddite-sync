@@ -4,14 +4,25 @@ import com.fstojilj.luddite.sync.client.service.ClientSyncService;
 import com.fstojilj.luddite.sync.client.service.RootDirService;
 import com.fstojilj.luddite.sync.client.service.ServerApiClient;
 import jakarta.annotation.PostConstruct;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.context.ApplicationContext;
-import org.springframework.stereotype.Component;
-
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Cursor;
+import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.awt.Font;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+import java.io.ByteArrayOutputStream;
+import java.io.OutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
@@ -34,25 +45,13 @@ import javax.swing.UIManager;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
 import javax.swing.border.TitledBorder;
-import java.awt.BorderLayout;
-import java.awt.Color;
-import java.awt.Cursor;
-import java.awt.Dimension;
-import java.awt.FlowLayout;
-import java.awt.Font;
-import java.awt.Graphics;
-import java.awt.Graphics2D;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
-import java.awt.event.WindowAdapter;
-import java.awt.event.WindowEvent;
-import java.io.ByteArrayOutputStream;
-import java.io.OutputStream;
-import java.io.PrintStream;
-import java.nio.charset.StandardCharsets;
-import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
-import java.util.List;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.ApplicationContext;
+import org.springframework.stereotype.Component;
 
 /**
  * Minimalistic retro-terminal Swing UI for the Luddite Sync client.
@@ -91,13 +90,16 @@ public class ClientUI {
 
     // ── Tree item model ───────────────────────────────────────────────────────
 
-    /** Represents one row in the left tree panel. */
+    /**
+     * Represents one row in the left tree panel.
+     */
     private record TreeItem(String rootDirName, String fullRelPath, int depth, boolean isRootDir, boolean isFile) {
         String displayName() {
             if (isRootDir) return rootDirName;
             int slash = fullRelPath.lastIndexOf('/');
             return slash < 0 ? fullRelPath : fullRelPath.substring(slash + 1);
         }
+
         String key() {
             return isRootDir ? rootDirName : rootDirName + ":" + fullRelPath;
         }
@@ -290,7 +292,7 @@ public class ClientUI {
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 6));
         panel.setBackground(BG);
         btnStartSync = retroButton("[ START SYNC >> ]", FG, this::subscribeSelected);
-        btnDownload  = retroButton("[ DOWNLOAD ]", FG_DIM, this::downloadSelected);
+        btnDownload = retroButton("[ DOWNLOAD ]", FG_DIM, this::downloadSelected);
         btnDownload.setEnabled(false);
         panel.add(btnStartSync);
         panel.add(btnDownload);
@@ -366,6 +368,7 @@ public class ClientUI {
                 protected com.fstojilj.luddite.sync.common.dto.TreeResponse doInBackground() {
                     return serverApiClient.fetchTree(item.rootDirName(), subPath, passwordHash);
                 }
+
                 @Override
                 protected void done() {
                     try {
@@ -576,8 +579,8 @@ public class ClientUI {
         new SwingWorker<RefreshSnapshot, Void>() {
             @Override
             protected RefreshSnapshot doInBackground() {
-                java.util.List<String> srv = serverApiClient.fetchPublicDirs();
-                java.util.List<String> subs = rootDirService.retrieveAllInSyncDirs();
+                List<String> srv = serverApiClient.fetchPublicDirs();
+                List<String> subs = rootDirService.retrieveAllInSyncDirs();
                 boolean connected = clientSyncService.isConnected();
                 return new RefreshSnapshot(srv, subs, connected);
             }
@@ -632,7 +635,8 @@ public class ClientUI {
 
     private record RefreshSnapshot(java.util.List<String> serverDirs,
                                    java.util.List<String> subscribedDirs,
-                                   boolean connected) {}
+                                   boolean connected) {
+    }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
