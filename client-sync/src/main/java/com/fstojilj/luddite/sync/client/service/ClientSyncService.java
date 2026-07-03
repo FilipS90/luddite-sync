@@ -1,7 +1,7 @@
 package com.fstojilj.luddite.sync.client.service;
 
+import com.fstojilj.luddite.sync.client.model.ClientRootDir;
 import com.fstojilj.luddite.sync.common.model.SocketOperation;
-import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
 import com.fstojilj.luddite.sync.common.util.PasswordUtils;
 import jakarta.annotation.PreDestroy;
 import java.io.DataInputStream;
@@ -13,8 +13,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyStore;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -90,9 +92,6 @@ public class ClientSyncService implements ApplicationRunner {
 
     @Value("${sync.server.port:8888}")
     private int serverPort;
-
-    @Value("${sync.client.mirror-dir}")
-    private String mirrorDir;
 
     @Value("${sync.socket.keystore:classpath:client-keystore.p12}")
     private Resource keystoreResource;
@@ -220,7 +219,7 @@ public class ClientSyncService implements ApplicationRunner {
 
                 sendClientId(out, clientId);
 
-                executeOperations(in, out, operations);
+                executeOperations(in, out, operations, serverPublicDirs, privateDirsToSync);
 
             } catch (IOException e) {
                 if (running) {
@@ -304,24 +303,27 @@ public class ClientSyncService implements ApplicationRunner {
      * Executes all operations in order: downloads first, then enters the continuous
      * sync poll loop for all SYNC operations.
      *
-     * @param in         the server input stream
-     * @param out        the server output stream
-     * @param operations the list of operations to execute
+     * @param in                    the server input stream
+     * @param out                   the server output stream
+     * @param operations            the list of operations to execute
+     * @param serverPublicDirs      all public directories currently advertised by the server;
+     *                              used by {@link #pollLoop} to detect newly subscribed dirs
+     *                              without needing a reconnect
+     * @param authorizedPrivateDirs private directories authorized via HTTP for this connection
      * @throws IOException if any IO operation fails
      */
     private void executeOperations(DataInputStream in, DataOutputStream out,
-                                   List<SocketOperation> operations) throws IOException {
+                                   List<SocketOperation> operations,
+                                   List<String> serverPublicDirs,
+                                   List<String> authorizedPrivateDirs) throws IOException {
         for (SocketOperation op : operations) {
             if (op instanceof SocketOperation.Download download) {
                 executeDownload(in, out, download);
             }
         }
-        List<String> syncDirs = operations.stream()
-                .filter(op -> op instanceof SocketOperation.Sync)
-                .map(op -> ((SocketOperation.Sync) op).dirName())
-                .toList();
-        if (!syncDirs.isEmpty()) {
-            pollLoop(in, out, syncDirs);
+        boolean hasSyncOps = operations.stream().anyMatch(op -> op instanceof SocketOperation.Sync);
+        if (hasSyncOps) {
+            pollLoop(in, out, serverPublicDirs, authorizedPrivateDirs);
         }
     }
 
@@ -345,7 +347,7 @@ public class ClientSyncService implements ApplicationRunner {
      * @param dirs list of directory names to register
      */
     private void registerDirs(List<String> dirs) {
-        dirs.forEach(rootDirService::registerIfAbsent);
+        dirs.forEach(rootDirService::registerWithDefaultPath);
     }
 
     /**
@@ -356,12 +358,11 @@ public class ClientSyncService implements ApplicationRunner {
      * @param dirs list of directory names to audit
      */
     private void auditMissingFiles(List<String> dirs) {
-        Path mirrorRoot = Path.of(mirrorDir);
         for (String dirName : dirs) {
-            Path dirPath = mirrorRoot.resolve(dirName);
+            Path dirBase = rootDirService.resolveLocalPath(dirName);
 
             // If the entire directory is absent, reset everything for this dir
-            if (!Files.exists(dirPath)) {
+            if (!Files.exists(dirBase)) {
                 log.warn("Dir '{}': mirror directory missing entirely — resetting sync version", dirName);
                 rootDirService.resetSyncVersionForDir(dirName);
                 fileMetadataService.findAllByDir(dirName)
@@ -373,9 +374,9 @@ public class ClientSyncService implements ApplicationRunner {
             List<String> recorded = fileMetadataService.findAllByDir(dirName);
             List<String> missing = recorded.stream()
                     .filter(rel -> {
-                        // rel is a qualified path like "dirName/subdir/file.txt"
-                        // resolve it under mirrorRoot to get the full path
-                        Path filePath = mirrorRoot.resolve(rel).normalize();
+                        // rel is a qualified path like "dirName/subdir/file.txt"; strip the
+                        // dirName prefix and resolve the remainder under this dir's own base
+                        Path filePath = dirBase.resolve(stripDirPrefix(dirName, rel)).normalize();
                         return !Files.exists(filePath);
                     })
                     .toList();
@@ -391,7 +392,19 @@ public class ClientSyncService implements ApplicationRunner {
 
     /**
      * Polls the server every {@value #POLL_INTERVAL_MS} ms for each subscribed directory.
-     * For each directory:
+     *
+     * <p>The set of directories to poll is recomputed on <em>every</em> iteration from
+     * {@link RootDirService#retrieveAllInSyncDirs()} intersected with {@code serverPublicDirs},
+     * unioned with {@code authorizedPrivateDirs}. This means a directory subscribed after this
+     * connection was already established (e.g. a second {@code [ START SYNC >> ]} or CLI
+     * {@code add}) is picked up on the very next tick — no socket reconnect required. A
+     * directory is unsubscribed just as immediately by dropping out of
+     * {@code retrieveAllInSyncDirs()}.
+     *
+     * <p>Directories seen for the first time in this connection (including the initial batch)
+     * are registered and audited for missing local files before their first poll.
+     *
+     * <p>For each directory polled:
      * <ol>
      *   <li>Sends a {@code SYNC} request with the last known sync version.</li>
      *   <li>Reads the response records.</li>
@@ -400,18 +413,33 @@ public class ClientSyncService implements ApplicationRunner {
      *   <li>Persists the highest received {@code syncVersion}.</li>
      * </ol>
      *
-     * @param in         the server input stream
-     * @param out        the server output stream
-     * @param dirsToSync the directories to poll
+     * @param in                    the server input stream
+     * @param out                   the server output stream
+     * @param serverPublicDirs      all public directories currently advertised by the server
+     * @param authorizedPrivateDirs private directories authorized via HTTP for this connection
      * @throws IOException if reading or writing fails (triggers reconnect)
      */
     private void pollLoop(DataInputStream in, DataOutputStream out,
-                          List<String> dirsToSync) throws IOException {
+                          List<String> serverPublicDirs, List<String> authorizedPrivateDirs) throws IOException {
+        Set<String> seenDirs = new HashSet<>();
         while (running) {
+            List<String> clientDirs = rootDirService.retrieveAllInSyncDirs();
+            List<String> dirsToSync = Stream.concat(
+                    serverPublicDirs.stream().filter(clientDirs::contains),
+                    authorizedPrivateDirs.stream()
+            ).distinct().toList();
+
+            List<String> newDirs = dirsToSync.stream().filter(d -> !seenDirs.contains(d)).toList();
+            if (!newDirs.isEmpty()) {
+                registerDirs(newDirs);
+                auditMissingFiles(newDirs);
+                seenDirs.addAll(newDirs);
+            }
+
             for (String dirName : dirsToSync) {
                 long lastVersion = rootDirService.findAll().stream()
                         .filter(e -> e.dirName().equals(dirName))
-                        .mapToLong(SyncHandshakeEntry::lastSyncVersion)
+                        .mapToLong(ClientRootDir::lastSyncVersion)
                         .findFirst()
                         .orElse(-1L);
 
@@ -427,7 +455,7 @@ public class ClientSyncService implements ApplicationRunner {
                 int count = in.readInt();
                 long highestVersion = lastVersion;
 
-                Path mirrorRoot = Path.of(mirrorDir).toAbsolutePath().normalize();
+                Path dirBase = rootDirService.resolveLocalPath(dirName).toAbsolutePath().normalize();
 
                 for (int i = 0; i < count; i++) {
                     byte flags = in.readByte();
@@ -439,10 +467,10 @@ public class ClientSyncService implements ApplicationRunner {
 
                     boolean deleted = (flags & FLAG_DELETED) != 0;
 
-                    Path target = mirrorRoot.resolve(relPath).normalize();
+                    Path target = dirBase.resolve(stripDirPrefix(dirName, relPath)).normalize();
 
-                    // Reject any path whose canonical form is not a descendant of mirrorRoot.
-                    if (!target.startsWith(mirrorRoot)) {
+                    // Reject any path whose canonical form is not a descendant of dirBase.
+                    if (!target.startsWith(dirBase)) {
                         log.error("Path traversal blocked — server sent path outside mirror dir: '{}'", relPath);
                         // Must drain bytes from stream to keep it in sync before continuing
                         if (!deleted && fileSizeBytes > 0) {
@@ -644,5 +672,26 @@ public class ClientSyncService implements ApplicationRunner {
         }
 
         return relativePath.replace("\\", "/");
+    }
+
+    /**
+     * Strips the leading {@code dirName} segment from a qualified path (e.g.
+     * {@code "photos/2024/img.jpg"} with {@code dirName="photos"} becomes {@code "2024/img.jpg"}),
+     * so the remainder can be resolved relative to that directory's own local base — which may
+     * be a custom path rather than {@code mirrorDir/dirName}.
+     *
+     * <p>If the first segment does not match {@code dirName} the path is returned unchanged,
+     * as a defensive fallback.
+     *
+     * @param dirName       the root directory name (expected first path segment)
+     * @param qualifiedPath the qualified path "dirName/relativePath", already OS-adjusted
+     * @return the path relative to the directory root
+     */
+    private Path stripDirPrefix(String dirName, String qualifiedPath) {
+        Path path = Path.of(qualifiedPath);
+        if (path.getNameCount() > 1 && path.getName(0).toString().equals(dirName)) {
+            return path.subpath(1, path.getNameCount());
+        }
+        return path;
     }
 }

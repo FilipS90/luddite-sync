@@ -20,19 +20,26 @@ import java.io.ByteArrayOutputStream;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Optional;
 import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.ButtonGroup;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JComponent;
+import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
+import javax.swing.JRadioButton;
 import javax.swing.JScrollPane;
 import javax.swing.JSeparator;
 import javax.swing.JSplitPane;
@@ -435,14 +442,110 @@ public class ClientUI {
             return;
         }
         String dir = item.rootDirName();
-        java.util.List<String> current = rootDirService.retrieveAllInSyncDirs();
+        List<String> current = rootDirService.retrieveAllInSyncDirs();
         if (current.contains(dir)) {
             appendLog("[INFO] Already subscribed to: " + dir);
             return;
         }
-        rootDirService.registerIfAbsent(dir);
-        appendLog("[OK]   Subscribed to: " + dir);
+
+        Optional<Path> chosen = showSubscribeLocationDialog(dir);
+        if (chosen.isEmpty()) {
+            appendLog("[INFO] Subscribe cancelled for: " + dir);
+            return;
+        }
+
+        Path defaultPath = Path.of(mirrorDir).resolve(dir).normalize();
+        Path selected = chosen.get().normalize();
+        if (selected.equals(defaultPath)) {
+            rootDirService.registerWithDefaultPath(dir);
+        } else {
+            rootDirService.registerWithCustomPath(dir, selected.toString());
+        }
+        appendLog("[OK]   Subscribed to: " + dir + " -> " + selected);
         refreshData();
+    }
+
+    /**
+     * Shows a modal dialog letting the user choose where {@code dirName} should be
+     * mirrored locally: the default {@code mirrorDir/dirName} location, or a custom
+     * directory picked via a {@link JFileChooser}.
+     *
+     * @param dirName the server directory name being subscribed to
+     * @return {@link Optional#empty()} if the user cancelled; otherwise the chosen
+     * local path (default or custom)
+     */
+    private Optional<Path> showSubscribeLocationDialog(String dirName) {
+        Path defaultPath = Path.of(mirrorDir).resolve(dirName);
+        
+        JRadioButton defaultRadio = new JRadioButton("DEFAULT: " + defaultPath, true);
+        JRadioButton customRadio = new JRadioButton("CUSTOM:");
+        styleRadio(defaultRadio);
+        styleRadio(customRadio);
+        ButtonGroup group = new ButtonGroup();
+        group.add(defaultRadio);
+        group.add(customRadio);
+
+        JTextField customField = new JTextField(22);
+        customField.setBackground(new Color(0x1A, 0x1A, 0x1A));
+        customField.setForeground(FG);
+        customField.setCaretColor(FG);
+        customField.setFont(MONO_SM);
+        customField.setBorder(new LineBorder(BORDER_CLR, 1));
+        customField.setEnabled(false);
+
+        JButton browseBtn = retroButton("[ BROWSE... ]", FG_AMBER, () -> {
+            JFileChooser chooser = new JFileChooser();
+            chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+            chooser.setDialogTitle("SELECT SYNC LOCATION");
+            if (chooser.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION) {
+                customField.setText(chooser.getSelectedFile().getAbsolutePath());
+            }
+        });
+        browseBtn.setEnabled(false);
+
+        defaultRadio.addActionListener(e -> {
+            customField.setEnabled(false);
+            browseBtn.setEnabled(false);
+        });
+        customRadio.addActionListener(e -> {
+            customField.setEnabled(true);
+            browseBtn.setEnabled(true);
+        });
+
+        JPanel customRow = new JPanel(new BorderLayout(4, 0));
+        customRow.setBackground(BG);
+        customRow.add(customField, BorderLayout.CENTER);
+        customRow.add(browseBtn, BorderLayout.EAST);
+
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBackground(BG);
+        panel.add(label("SYNC LOCATION FOR: " + dirName, MONO_SM, FG_DIM));
+        panel.add(Box.createVerticalStrut(6));
+        panel.add(defaultRadio);
+        panel.add(Box.createVerticalStrut(4));
+        panel.add(customRadio);
+        panel.add(customRow);
+
+        int result = JOptionPane.showConfirmDialog(frame, panel,
+                "SUBSCRIBE: " + dirName, JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+
+        if (result != JOptionPane.OK_OPTION) return Optional.empty();
+
+        if (customRadio.isSelected()) {
+            String text = customField.getText().trim();
+            if (!text.isEmpty()) {
+                return Optional.of(Path.of(text));
+            }
+        }
+        return Optional.of(defaultPath);
+    }
+
+    private static void styleRadio(JRadioButton radio) {
+        radio.setFont(MONO_SM);
+        radio.setForeground(FG);
+        radio.setBackground(BG);
+        radio.setFocusPainted(false);
     }
 
     private void downloadSelected() {

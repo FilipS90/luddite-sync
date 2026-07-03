@@ -1,9 +1,14 @@
 package com.fstojilj.luddite.sync.client.cli;
 
+import com.fstojilj.luddite.sync.client.model.ClientRootDir;
 import com.fstojilj.luddite.sync.client.service.ClientSyncService;
 import com.fstojilj.luddite.sync.client.service.RootDirService;
-import com.fstojilj.luddite.sync.common.model.SyncHandshakeEntry;
 import jakarta.annotation.PostConstruct;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -12,12 +17,6 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Component;
-
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
-import java.util.List;
 
 import static com.fstojilj.luddite.sync.client.service.ClientSyncService.serverDirs;
 import static java.lang.Thread.sleep;
@@ -79,7 +78,7 @@ public class ClientCli {
         System.out.println(arg);
 
         var entries = rootDirService.findAll();
-        dirNames = entries.stream().map(SyncHandshakeEntry::dirName).toList();
+        dirNames = entries.stream().map(ClientRootDir::dirName).toList();
 
         switch (command) {
             case "list" -> {
@@ -163,7 +162,7 @@ public class ClientCli {
             if (dirNames.contains(name)) {
                 System.out.printf("  Already subscribed to: %s%n", name);
             } else {
-                rootDirService.registerIfAbsent(name);
+                rootDirService.registerWithDefaultPath(name);
                 System.out.printf("  Subscribed to: %s%n", name);
             }
         });
