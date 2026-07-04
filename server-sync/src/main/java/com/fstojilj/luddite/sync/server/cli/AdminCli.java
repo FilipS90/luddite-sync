@@ -38,6 +38,9 @@ public class AdminCli {
     private final FileSocketService fileSocketService;
     private final ApplicationContext applicationContext;
 
+    private final String PSWD_FLAG = "--pswd";
+    private final String PRIVATE_FLAG = "--private";
+
     @PostConstruct
     public void start() {
         Thread.ofVirtual().name("admin-cli").start(this::runLoop);
@@ -87,11 +90,11 @@ public class AdminCli {
             case "add" -> {
                 if (arg.isEmpty()) {
                     System.out.println("  Usage: add <absolute-path>");
-                    System.out.println("  Available flags: --private, for private dirs --pswd <password> is mandatory");
+                    System.out.println("  Available flags: " + PRIVATE_FLAG + ", for private dirs " + PSWD_FLAG + " <password> is mandatory");
                     return;
                 }
-                boolean isPrivate = arg.contains("--private");
-                if (isPrivate && !arg.contains("--pswd")) {
+                boolean isPrivate = arg.contains(PRIVATE_FLAG);
+                if (isPrivate && !arg.contains(PSWD_FLAG)) {
                     System.out.println("  Error: Private root dirs require a password. Use --pswd <password> to specify it.");
                     return;
                 }
@@ -103,7 +106,7 @@ public class AdminCli {
                     return;
                 }
 
-                String absolutePath = arg.split("\\s+")[0];
+                String absolutePath = extractDirPath(arg, isPrivate);
                 System.out.println("  Adding root dir: " + absolutePath);
 
                 String passwordHash = password != null ? PasswordUtils.hash(password) : null;
@@ -155,21 +158,20 @@ public class AdminCli {
     }
 
     private Optional<String> extractPassword(String args) {
-        String pswdFlag = "--pswd";
-        int startIndex = args.indexOf(pswdFlag);
+        int startIndex = args.indexOf(PSWD_FLAG);
 
         if (startIndex == -1) {
             return Optional.empty();
         }
 
-        startIndex += pswdFlag.length();
+        startIndex += PSWD_FLAG.length();
 
         String password = null;
 
         for (int i = startIndex; i < args.length(); i++) {
             char c = args.charAt(i);
             if (c != ' ' && i == startIndex) {
-                log.error("Malformed password flag, use --pswd <password> format");
+                log.error("Malformed password flag, use {} <password> format", PSWD_FLAG);
                 return Optional.empty();
             }
 
@@ -183,5 +185,18 @@ public class AdminCli {
         }
 
         return Optional.ofNullable(password);
+    }
+
+    // TODO possible edge case where '--private' or '--pswd' is contained within path
+    // would cause failure of this logic, very low probability, prioritizing more important issues
+    private String extractDirPath(String args, boolean isPrivate) {
+        if (!isPrivate) {
+            return args;
+        }
+
+        int privateIdx = args.indexOf(PRIVATE_FLAG);
+        int pswdIdx = args.indexOf(PSWD_FLAG);
+
+        return args.substring(0, Math.min(privateIdx, pswdIdx)).trim();
     }
 }

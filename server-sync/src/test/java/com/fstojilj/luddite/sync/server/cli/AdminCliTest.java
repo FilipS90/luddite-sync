@@ -95,22 +95,43 @@ class AdminCliTest {
 
     @Test
     void handle_add_withPath_shouldAddAndPrint() throws Exception {
-        handle("add /home/user/photos");
-        verify(rootDirService).addRootDir("/home/user/photos", false, null);
+        handle("add /home/user and marry/photos");
+        verify(rootDirService).addRootDir("/home/user and marry/photos", false, null);
         assertThat(output()).contains("Added and watching");
     }
 
     @Test
     void handle_add_withPathAndFlags_shouldAddAndPrint() throws Exception {
+        handle("add /home/user/photos and stuff/n some more --private --pswd admin123");
+        verify(rootDirService).addRootDir("/home/user/photos and stuff/n some more", true, PasswordUtils.hash("admin123"));
+        assertThat(output()).contains("Added and watching");
+    }
+
+    @Test
+    void handle_add_withPathAndFlags2_shouldAddAndPrint() throws Exception {
+        handle("add /home/user/photos n stuff --pswd admin123 --private");
+        verify(rootDirService).addRootDir("/home/user/photos n stuff", true, PasswordUtils.hash("admin123"));
+        assertThat(output()).contains("Added and watching");
+    }
+
+    @Test
+    void handle_add_withPathAndFlagsInverted_shouldAddAndPrint() throws Exception {
         handle("add /home/user/photos --private --pswd admin123");
         verify(rootDirService).addRootDir("/home/user/photos", true, PasswordUtils.hash("admin123"));
         assertThat(output()).contains("Added and watching");
     }
 
     @Test
-    void handle_add_withPathAndFlags2_shouldAddAndPrint() throws Exception {
-        handle("add /home/user/photos --pswd admin123 --private");
-        verify(rootDirService).addRootDir("/home/user/photos", true, PasswordUtils.hash("admin123"));
+    void handle_add_withPathAndFlagsWin_shouldAddAndPrint() throws Exception {
+        handle("add P:\\home\\Users\\fich and maia\\photos n stuff --pswd admin123 --private");
+        verify(rootDirService).addRootDir("P:\\home\\Users\\fich and maia\\photos n stuff", true, PasswordUtils.hash("admin123"));
+        assertThat(output()).contains("Added and watching");
+    }
+
+    @Test
+    void handle_add_withPathAndFlagsInvertedWin_shouldAddAndPrint() throws Exception {
+        handle("add P:\\home\\Users\\fich\\photos --private --pswd admin123");
+        verify(rootDirService).addRootDir("P:\\home\\Users\\fich\\photos", true, PasswordUtils.hash("admin123"));
         assertThat(output()).contains("Added and watching");
     }
 
