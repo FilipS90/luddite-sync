@@ -13,11 +13,10 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-
-import java.util.ArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -135,10 +134,10 @@ class FileMetadataServiceTest {
     // ── softDeleteFileMetadata ────────────────────────────────────────────────
 
     @Test
-    void softDeleteFileMetadata_noClientsConnected_shouldHardDelete() {
-        fileMetadataService.softDeleteFileMetadata(1, "photo.jpg", "");
+    void softDeleteFileMetadata_LastClientProcessed_shouldHardDelete() {
+        fileMetadataService.softDeleteFileMetadata(1, "photo.jpg", "hw-id-1");
+        verify(fileMetadataRepository).softDelete(any(Long.class), any(), any(Long.class), any());
         verify(fileMetadataRepository).delete(1, "photo.jpg");
-        verify(fileMetadataRepository, never()).softDelete(any(Long.class), any(), any(Long.class), any());
     }
 
     @Test
@@ -189,7 +188,10 @@ class FileMetadataServiceTest {
         Files.writeString(subDir.resolve("img.jpg"), "data");
 
         List<FileMetadata> captured = new ArrayList<>();
-        doAnswer(inv -> { captured.addAll(inv.getArgument(0)); return null; })
+        doAnswer(inv -> {
+            captured.addAll(inv.getArgument(0));
+            return null;
+        })
                 .when(fileMetadataRepository).addAll(anyList());
 
         fileMetadataService.addAllFileMetadataForRoot(tempDir.toString(), 1);

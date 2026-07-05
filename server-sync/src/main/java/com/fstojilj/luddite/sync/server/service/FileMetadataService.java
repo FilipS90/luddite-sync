@@ -2,13 +2,6 @@ package com.fstojilj.luddite.sync.server.service;
 
 import com.fstojilj.luddite.sync.common.model.FileMetadata;
 import com.fstojilj.luddite.sync.server.repository.FileMetadataRepository;
-import java.io.File;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
@@ -16,6 +9,14 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.io.File;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 import static com.fstojilj.luddite.sync.server.utils.FileChecksumUtils.calculateFileChecksum;
 import static com.fstojilj.luddite.sync.server.utils.FileSystemUtils.listAllFilesForDir;
@@ -137,14 +138,13 @@ public class FileMetadataService implements ApplicationRunner {
     @Transactional
     public void softDeleteFileMetadata(int rootDirId, String relativeFilePath, String connectedClientIds) {
         long version = nextSyncVersion(rootDirId);
-        if (connectedClientIds.isBlank()) {
-            // No clients connected — hard-delete immediately, nothing to replicate
+        fileMetadataRepository.softDelete(rootDirId, relativeFilePath, version, connectedClientIds);
+        log.info("Soft-deleted (v{}) rootDirId={} '{}', pending clients: [{}]",
+                version, rootDirId, relativeFilePath, connectedClientIds);
+
+        if (!connectedClientIds.contains(",")) {
             fileMetadataRepository.delete(rootDirId, relativeFilePath);
             log.info("Hard-deleted (no clients connected) rootDirId={} '{}'", rootDirId, relativeFilePath);
-        } else {
-            fileMetadataRepository.softDelete(rootDirId, relativeFilePath, version, connectedClientIds);
-            log.info("Soft-deleted (v{}) rootDirId={} '{}', pending clients: [{}]",
-                    version, rootDirId, relativeFilePath, connectedClientIds);
         }
     }
 
