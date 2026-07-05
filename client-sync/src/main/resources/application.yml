@@ -10,7 +10,7 @@ spring:
 
 sync:
   server:
-    host: localhost
+    host: win-server
     port: 8888
     api-url: http://${sync.server.host}:8080
   client:
