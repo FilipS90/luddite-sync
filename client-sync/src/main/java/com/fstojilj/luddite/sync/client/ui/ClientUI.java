@@ -5,6 +5,7 @@ import com.fstojilj.luddite.sync.client.service.RootDirService;
 import com.fstojilj.luddite.sync.client.service.ServerApiClient;
 import com.fstojilj.luddite.sync.common.dto.TreeResponse;
 import jakarta.annotation.PostConstruct;
+import javax.swing.JDialog;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -523,20 +524,48 @@ public class ClientUI {
         customRow.add(customField, BorderLayout.CENTER);
         customRow.add(browseBtn, BorderLayout.EAST);
 
-        JPanel panel = new JPanel();
-        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setBackground(BG);
-        panel.add(label("SYNC LOCATION FOR: " + dirName, MONO_SM, FG_DIM));
-        panel.add(Box.createVerticalStrut(6));
-        panel.add(defaultRadio);
-        panel.add(Box.createVerticalStrut(4));
-        panel.add(customRadio);
-        panel.add(customRow);
+        JPanel content = new JPanel();
+        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+        content.setBackground(BG);
+        content.setBorder(BorderFactory.createEmptyBorder(12, 14, 12, 14));
+        content.add(label("SYNC LOCATION FOR: " + dirName, MONO_SM, FG_DIM));
+        content.add(Box.createVerticalStrut(6));
+        content.add(defaultRadio);
+        content.add(Box.createVerticalStrut(4));
+        content.add(customRadio);
+        content.add(customRow);
 
-        int result = JOptionPane.showConfirmDialog(frame, panel,
-                "SUBSCRIBE: " + dirName, JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        // --- custom button row, replacing JOptionPane's default OK/Cancel ---
+        final boolean[] confirmed = {false};
 
-        if (result != JOptionPane.OK_OPTION) return Optional.empty();
+        JDialog dialog = new JDialog(frame, "SUBSCRIBE: " + dirName, true);
+        dialog.getContentPane().setBackground(BG);
+        dialog.getRootPane().setBorder(new LineBorder(BORDER_CLR, 1));
+
+        JButton okBtn = retroButton("OK", FG, () -> {
+            confirmed[0] = true;
+            dialog.dispose();
+        });
+        JButton cancelBtn = retroButton("Cancel", FG, dialog::dispose);
+
+        JPanel buttonRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
+        buttonRow.setBackground(BG);
+        buttonRow.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
+        buttonRow.add(okBtn);
+        buttonRow.add(cancelBtn);
+
+        JPanel root = new JPanel(new BorderLayout());
+        root.setBackground(BG);
+        root.add(content, BorderLayout.CENTER);
+        root.add(buttonRow, BorderLayout.SOUTH);
+
+        dialog.setContentPane(root);
+        dialog.pack();
+        dialog.setLocationRelativeTo(frame);
+        dialog.setResizable(false);
+        dialog.setVisible(true); // blocks until dispose()
+
+        if (!confirmed[0]) return Optional.empty();
 
         if (customRadio.isSelected()) {
             String text = customField.getText().trim();
@@ -631,7 +660,7 @@ public class ClientUI {
         clientSyncService.requestPrivateDir(dirName, password);
 
         // Poll the auth result after a short delay to let the reconnect complete
-        new javax.swing.SwingWorker<Boolean, Void>() {
+        new SwingWorker<Boolean, Void>() {
             @Override
             protected Boolean doInBackground() throws Exception {
                 // Wait long enough for the reconnect + auth round-trip (max 8 s)
@@ -810,7 +839,8 @@ public class ClientUI {
             @Override
             protected void paintComponent(Graphics g) {
                 Graphics2D g2 = (Graphics2D) g.create();
-                g2.setColor(getModel().isPressed() ? fg.darker() : BG_CELL);
+                Color base = isEnabled() ? BG_CELL : BG_CELL.darker();
+                g2.setColor(getModel().isPressed() ? fg.darker() : base);
                 g2.fillRect(0, 0, getWidth(), getHeight());
                 g2.dispose();
                 super.paintComponent(g);
@@ -828,12 +858,14 @@ public class ClientUI {
         btn.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseEntered(MouseEvent e) {
+                if (!btn.isEnabled()) return;
                 btn.setBorder(new LineBorder(fg, 1));
                 btn.setForeground(fg.brighter());
             }
 
             @Override
             public void mouseExited(MouseEvent e) {
+                if (!btn.isEnabled()) return;
                 btn.setBorder(new LineBorder(fg.darker(), 1));
                 btn.setForeground(fg);
             }
