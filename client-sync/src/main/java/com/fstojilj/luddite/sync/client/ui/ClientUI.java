@@ -304,7 +304,7 @@ public class ClientUI {
     private JPanel buildActionButtons() {
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 6));
         panel.setBackground(BG);
-        btnStartSync = retroButton("[ START SYNC >> ]", FG, this::subscribeSelected);
+        btnStartSync = retroButton("[ START SYNC ]", FG, this::subscribeSelected);
         btnDownload = retroButton("[ DOWNLOAD ]", FG_DIM, this::downloadSelected);
         btnDownload.setEnabled(false);
         panel.add(btnStartSync);
