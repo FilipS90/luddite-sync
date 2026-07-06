@@ -3,28 +3,17 @@ package com.fstojilj.luddite.sync.client.ui;
 import com.fstojilj.luddite.sync.client.service.ClientSyncService;
 import com.fstojilj.luddite.sync.client.service.RootDirService;
 import com.fstojilj.luddite.sync.client.service.ServerApiClient;
+import com.fstojilj.luddite.sync.common.dto.TreeResponse;
 import jakarta.annotation.PostConstruct;
-import java.awt.BorderLayout;
-import java.awt.Color;
-import java.awt.Cursor;
-import java.awt.Dimension;
-import java.awt.FlowLayout;
-import java.awt.Font;
-import java.awt.Graphics;
-import java.awt.Graphics2D;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
-import java.awt.event.WindowAdapter;
-import java.awt.event.WindowEvent;
-import java.io.ByteArrayOutputStream;
-import java.io.OutputStream;
-import java.io.PrintStream;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
-import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
-import java.util.List;
-import java.util.Optional;
+import javax.swing.JDialog;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.ApplicationContext;
+import org.springframework.stereotype.Component;
+
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -45,6 +34,7 @@ import javax.swing.JSeparator;
 import javax.swing.JSplitPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
+import javax.swing.ListCellRenderer;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.Timer;
@@ -52,13 +42,30 @@ import javax.swing.UIManager;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
 import javax.swing.border.TitledBorder;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.context.ApplicationContext;
-import org.springframework.stereotype.Component;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Cursor;
+import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.awt.Font;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+import java.io.ByteArrayOutputStream;
+import java.io.OutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 /**
  * Minimalistic retro-terminal Swing UI for the Luddite Sync client.
@@ -124,7 +131,7 @@ public class ClientUI {
     private JButton btnDownload;
     private JTextArea logArea;
     private Timer refreshTimer;
-    private final java.util.Set<String> expandedKeys = new java.util.HashSet<>();
+    private final Set<String> expandedKeys = new HashSet<>();
     private long lastSubscribedClickMs = 0;
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -277,7 +284,7 @@ public class ClientUI {
         return panel;
     }
 
-    private javax.swing.ListCellRenderer<TreeItem> buildTreeCellRenderer() {
+    private ListCellRenderer<TreeItem> buildTreeCellRenderer() {
         return (list, value, index, isSelected, cellHasFocus) -> {
             JLabel lbl = new JLabel();
             lbl.setOpaque(true);
@@ -298,7 +305,7 @@ public class ClientUI {
     private JPanel buildActionButtons() {
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 6));
         panel.setBackground(BG);
-        btnStartSync = retroButton("[ START SYNC >> ]", FG, this::subscribeSelected);
+        btnStartSync = retroButton("[ START SYNC ]", FG, this::subscribeSelected);
         btnDownload = retroButton("[ DOWNLOAD ]", FG_DIM, this::downloadSelected);
         btnDownload.setEnabled(false);
         panel.add(btnStartSync);
@@ -370,9 +377,9 @@ public class ClientUI {
         } else {
             String subPath = item.isRootDir() ? "" : item.fullRelPath();
             String passwordHash = item.isRootDir() ? null : rootDirService.getPasswordHash(item.rootDirName());
-            new SwingWorker<com.fstojilj.luddite.sync.common.dto.TreeResponse, Void>() {
+            new SwingWorker<TreeResponse, Void>() {
                 @Override
-                protected com.fstojilj.luddite.sync.common.dto.TreeResponse doInBackground() {
+                protected TreeResponse doInBackground() {
                     return serverApiClient.fetchTree(item.rootDirName(), subPath, passwordHash);
                 }
 
@@ -476,7 +483,7 @@ public class ClientUI {
      */
     private Optional<Path> showSubscribeLocationDialog(String dirName) {
         Path defaultPath = Path.of(mirrorDir).resolve(dirName);
-        
+
         JRadioButton defaultRadio = new JRadioButton("DEFAULT: " + defaultPath, true);
         JRadioButton customRadio = new JRadioButton("CUSTOM:");
         styleRadio(defaultRadio);
@@ -517,20 +524,48 @@ public class ClientUI {
         customRow.add(customField, BorderLayout.CENTER);
         customRow.add(browseBtn, BorderLayout.EAST);
 
-        JPanel panel = new JPanel();
-        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setBackground(BG);
-        panel.add(label("SYNC LOCATION FOR: " + dirName, MONO_SM, FG_DIM));
-        panel.add(Box.createVerticalStrut(6));
-        panel.add(defaultRadio);
-        panel.add(Box.createVerticalStrut(4));
-        panel.add(customRadio);
-        panel.add(customRow);
+        JPanel content = new JPanel();
+        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+        content.setBackground(BG);
+        content.setBorder(BorderFactory.createEmptyBorder(12, 14, 12, 14));
+        content.add(label("SYNC LOCATION FOR: " + dirName, MONO_SM, FG_DIM));
+        content.add(Box.createVerticalStrut(6));
+        content.add(defaultRadio);
+        content.add(Box.createVerticalStrut(4));
+        content.add(customRadio);
+        content.add(customRow);
 
-        int result = JOptionPane.showConfirmDialog(frame, panel,
-                "SUBSCRIBE: " + dirName, JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        // --- custom button row, replacing JOptionPane's default OK/Cancel ---
+        final boolean[] confirmed = {false};
 
-        if (result != JOptionPane.OK_OPTION) return Optional.empty();
+        JDialog dialog = new JDialog(frame, "SUBSCRIBE: " + dirName, true);
+        dialog.getContentPane().setBackground(BG);
+        dialog.getRootPane().setBorder(new LineBorder(BORDER_CLR, 1));
+
+        JButton okBtn = retroButton("OK", FG, () -> {
+            confirmed[0] = true;
+            dialog.dispose();
+        });
+        JButton cancelBtn = retroButton("Cancel", FG, dialog::dispose);
+
+        JPanel buttonRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
+        buttonRow.setBackground(BG);
+        buttonRow.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
+        buttonRow.add(okBtn);
+        buttonRow.add(cancelBtn);
+
+        JPanel root = new JPanel(new BorderLayout());
+        root.setBackground(BG);
+        root.add(content, BorderLayout.CENTER);
+        root.add(buttonRow, BorderLayout.SOUTH);
+
+        dialog.setContentPane(root);
+        dialog.pack();
+        dialog.setLocationRelativeTo(frame);
+        dialog.setResizable(false);
+        dialog.setVisible(true); // blocks until dispose()
+
+        if (!confirmed[0]) return Optional.empty();
 
         if (customRadio.isSelected()) {
             String text = customField.getText().trim();
@@ -625,13 +660,13 @@ public class ClientUI {
         clientSyncService.requestPrivateDir(dirName, password);
 
         // Poll the auth result after a short delay to let the reconnect complete
-        new javax.swing.SwingWorker<Boolean, Void>() {
+        new SwingWorker<Boolean, Void>() {
             @Override
             protected Boolean doInBackground() throws Exception {
                 // Wait long enough for the reconnect + auth round-trip (max 8 s)
                 for (int i = 0; i < 16; i++) {
                     Thread.sleep(500);
-                    java.util.Map<String, Boolean> results = clientSyncService.getPrivateAuthResults();
+                    Map<String, Boolean> results = clientSyncService.getPrivateAuthResults();
                     if (results.containsKey(dirName)) {
                         return results.get(dirName);
                     }
@@ -694,7 +729,7 @@ public class ClientUI {
                     RefreshSnapshot snap = get();
 
                     // Update left panel: add new root dirs, remove gone ones
-                    java.util.Set<String> currentRoots = new java.util.HashSet<>();
+                    Set<String> currentRoots = new HashSet<>();
                     for (int i = 0; i < treeListModel.size(); i++) {
                         TreeItem item = treeListModel.getElementAt(i);
                         if (item.isRootDir()) currentRoots.add(item.rootDirName());
@@ -704,7 +739,7 @@ public class ClientUI {
                             treeListModel.addElement(new TreeItem(dir, dir, 0, true, false));
                         }
                     }
-                    java.util.Set<String> newRoots = new java.util.HashSet<>(snap.serverDirs());
+                    Set<String> newRoots = new HashSet<>(snap.serverDirs());
                     for (int i = treeListModel.size() - 1; i >= 0; i--) {
                         TreeItem item = treeListModel.getElementAt(i);
                         if (item.isRootDir() && !newRoots.contains(item.rootDirName())) {
@@ -736,8 +771,8 @@ public class ClientUI {
         }.execute();
     }
 
-    private record RefreshSnapshot(java.util.List<String> serverDirs,
-                                   java.util.List<String> subscribedDirs,
+    private record RefreshSnapshot(List<String> serverDirs,
+                                   List<String> subscribedDirs,
                                    boolean connected) {
     }
 
@@ -804,7 +839,8 @@ public class ClientUI {
             @Override
             protected void paintComponent(Graphics g) {
                 Graphics2D g2 = (Graphics2D) g.create();
-                g2.setColor(getModel().isPressed() ? fg.darker() : BG_CELL);
+                Color base = isEnabled() ? BG_CELL : BG_CELL.darker();
+                g2.setColor(getModel().isPressed() ? fg.darker() : base);
                 g2.fillRect(0, 0, getWidth(), getHeight());
                 g2.dispose();
                 super.paintComponent(g);
@@ -822,12 +858,14 @@ public class ClientUI {
         btn.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseEntered(MouseEvent e) {
+                if (!btn.isEnabled()) return;
                 btn.setBorder(new LineBorder(fg, 1));
                 btn.setForeground(fg.brighter());
             }
 
             @Override
             public void mouseExited(MouseEvent e) {
+                if (!btn.isEnabled()) return;
                 btn.setBorder(new LineBorder(fg.darker(), 1));
                 btn.setForeground(fg);
             }
