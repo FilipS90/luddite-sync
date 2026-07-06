@@ -670,12 +670,41 @@ public class ClientUI {
         inputPanel.add(label("PASSWORD:", MONO_SM, FG_DIM));
         inputPanel.add(passField);
 
-        int result = JOptionPane.showConfirmDialog(frame, inputPanel,
-                "SYNC PRIVATE DIRECTORY",
-                JOptionPane.OK_CANCEL_OPTION,
-                JOptionPane.PLAIN_MESSAGE);
+        JPanel content = new JPanel(new BorderLayout());
+        content.setBackground(BG);
+        content.setBorder(BorderFactory.createEmptyBorder(12, 14, 12, 14));
+        content.add(inputPanel, BorderLayout.CENTER);
 
-        if (result != JOptionPane.OK_OPTION) return;
+        final boolean[] confirmed = {false};
+
+        JDialog dialog = new JDialog(frame, "SYNC PRIVATE DIRECTORY", true);
+        dialog.getContentPane().setBackground(BG);
+        dialog.getRootPane().setBorder(new LineBorder(BORDER_CLR, 1));
+
+        JButton okBtn = retroButton("OK", FG, () -> {
+            confirmed[0] = true;
+            dialog.dispose();
+        });
+        JButton cancelBtn = retroButton("Cancel", FG, dialog::dispose);
+
+        JPanel buttonRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
+        buttonRow.setBackground(BG);
+        buttonRow.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
+        buttonRow.add(okBtn);
+        buttonRow.add(cancelBtn);
+
+        JPanel root = new JPanel(new BorderLayout());
+        root.setBackground(BG);
+        root.add(content, BorderLayout.CENTER);
+        root.add(buttonRow, BorderLayout.SOUTH);
+
+        dialog.setContentPane(root);
+        dialog.pack();
+        dialog.setLocationRelativeTo(frame);
+        dialog.setResizable(false);
+        dialog.setVisible(true); // blocks until dispose()
+
+        if (!confirmed[0]) return;
 
         String dirName = dirField.getText().trim();
         String password = new String(passField.getPassword());
