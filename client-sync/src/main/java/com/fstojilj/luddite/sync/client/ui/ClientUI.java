@@ -6,6 +6,8 @@ import com.fstojilj.luddite.sync.client.service.ServerApiClient;
 import com.fstojilj.luddite.sync.common.dto.TreeResponse;
 import jakarta.annotation.PostConstruct;
 import javax.swing.JDialog;
+import javax.swing.plaf.basic.BasicSplitPaneDivider;
+import javax.swing.plaf.basic.BasicSplitPaneUI;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -222,6 +224,20 @@ public class ClientUI {
         split.setBackground(BG);
         split.setBorder(null);
         split.setOpaque(true);
+
+        split.setUI(new BasicSplitPaneUI() {
+            @Override
+            public BasicSplitPaneDivider createDefaultDivider() {
+                return new BasicSplitPaneDivider(this) {
+                    @Override
+                    public void paint(Graphics g) {
+                        g.setColor(BG);
+                        g.fillRect(0, 0, getWidth(), getHeight());
+                    }
+                };
+            }
+        });
+
         return split;
     }
 
@@ -278,6 +294,19 @@ public class ClientUI {
         dirSplit.setDividerSize(4);
         dirSplit.setBackground(BG);
         dirSplit.setBorder(null);
+
+        dirSplit.setUI(new BasicSplitPaneUI() {
+            @Override
+            public BasicSplitPaneDivider createDefaultDivider() {
+                return new BasicSplitPaneDivider(this) {
+                    @Override
+                    public void paint(Graphics g) {
+                        g.setColor(BG);
+                        g.fillRect(0, 0, getWidth(), getHeight());
+                    }
+                };
+            }
+        });
 
         panel.add(dirSplit, BorderLayout.CENTER);
         panel.add(btnPanel, BorderLayout.SOUTH);
