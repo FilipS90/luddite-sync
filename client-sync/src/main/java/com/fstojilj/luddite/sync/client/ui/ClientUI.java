@@ -6,6 +6,7 @@ import com.fstojilj.luddite.sync.client.service.ServerApiClient;
 import com.fstojilj.luddite.sync.common.dto.TreeResponse;
 import jakarta.annotation.PostConstruct;
 import javax.swing.JDialog;
+import javax.swing.plaf.basic.BasicScrollBarUI;
 import javax.swing.plaf.basic.BasicSplitPaneDivider;
 import javax.swing.plaf.basic.BasicSplitPaneUI;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +32,7 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JRadioButton;
+import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
 import javax.swing.JSeparator;
 import javax.swing.JSplitPane;
@@ -44,6 +46,7 @@ import javax.swing.UIManager;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
 import javax.swing.border.TitledBorder;
+import javax.swing.text.DefaultCaret;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Cursor;
@@ -52,6 +55,7 @@ import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Rectangle;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
@@ -94,6 +98,8 @@ public class ClientUI {
     private static final Font MONO = new Font("Courier New", Font.PLAIN, 12);
     private static final Font MONO_SM = new Font("Courier New", Font.PLAIN, 11);
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
+    // Tolerance (in px) for treating the log viewport as "at the bottom" for auto-scroll purposes.
+    private static final int LOG_AUTOSCROLL_SLACK_PX = 4;
 
     // ── Spring deps ───────────────────────────────────────────────────────────
     private final RootDirService rootDirService;
@@ -132,6 +138,7 @@ public class ClientUI {
     private JButton btnStartSync;
     private JButton btnDownload;
     private JTextArea logArea;
+    private JScrollBar logScrollBar;
     private Timer refreshTimer;
     private final Set<String> expandedKeys = new HashSet<>();
     private long lastSubscribedClickMs = 0;
@@ -360,8 +367,14 @@ public class ClientUI {
         logArea.setWrapStyleWord(false);
         logArea.setCaretColor(FG);
         logArea.setBorder(new EmptyBorder(4, 6, 4, 6));
+        // The default caret update policy auto-tracks appended text back to the caret whenever
+        // the caret sits at the (old) end of the document, which fights our own auto-scroll
+        // gating in appendLog() by yanking the view back down. Disable it — we manage the
+        // caret/scroll position ourselves.
+        ((DefaultCaret) logArea.getCaret()).setUpdatePolicy(DefaultCaret.NEVER_UPDATE);
 
         JScrollPane scroll = retroScroll(logArea);
+        logScrollBar = scroll.getVerticalScrollBar();
         return titledPanel("LOG", scroll);
     }
 
@@ -841,9 +854,23 @@ public class ClientUI {
         String line = "[" + LocalTime.now().format(TIME_FMT) + "] " + msg + "\n";
         SwingUtilities.invokeLater(() -> {
             if (logArea == null) return;   // UI not yet built
+            boolean stickToBottom = isLogScrolledToBottom();
             logArea.append(line);
-            logArea.setCaretPosition(logArea.getDocument().getLength());
+            if (stickToBottom) {
+                logArea.setCaretPosition(logArea.getDocument().getLength());
+            }
         });
+    }
+
+    /**
+     * Whether the log viewport is currently scrolled to (or within a few pixels of) the bottom.
+     * Used to decide whether a newly appended line should auto-scroll the view — so a user who
+     * has scrolled up to read older entries isn't yanked back down by incoming log lines.
+     */
+    private boolean isLogScrolledToBottom() {
+        if (logScrollBar == null) return true;
+        int extent = logScrollBar.getModel().getExtent();
+        return logScrollBar.getValue() + extent >= logScrollBar.getMaximum() - LOG_AUTOSCROLL_SLACK_PX;
     }
 
     /**
@@ -938,9 +965,57 @@ public class ClientUI {
         sp.setBackground(BG_CELL);
         sp.setBorder(new LineBorder(BORDER_CLR, 1));
         sp.getViewport().setBackground(BG_CELL);
-        sp.getVerticalScrollBar().setBackground(BG);
-        sp.getHorizontalScrollBar().setBackground(BG);
+        styleScrollBar(sp.getVerticalScrollBar());
+        styleScrollBar(sp.getHorizontalScrollBar());
         return sp;
+    }
+
+    /**
+     * Replaces a scrollbar's look-and-feel-supplied UI (which paints a native white/gray track
+     * and arrow buttons regardless of {@code setBackground}) with a flat, borderless retro style
+     * consistent with the rest of the theme.
+     */
+    private static void styleScrollBar(JScrollBar bar) {
+        bar.setPreferredSize(new Dimension(10, 10));
+        bar.setUnitIncrement(16);
+        bar.setUI(new BasicScrollBarUI() {
+            @Override
+            protected void configureScrollBarColors() {
+                thumbColor = BORDER_CLR;
+                trackColor = BG_CELL;
+            }
+
+            @Override
+            protected JButton createDecreaseButton(int orientation) {
+                return zeroSizeButton();
+            }
+
+            @Override
+            protected JButton createIncreaseButton(int orientation) {
+                return zeroSizeButton();
+            }
+
+            private JButton zeroSizeButton() {
+                JButton button = new JButton();
+                button.setPreferredSize(new Dimension(0, 0));
+                button.setMinimumSize(new Dimension(0, 0));
+                button.setMaximumSize(new Dimension(0, 0));
+                return button;
+            }
+
+            @Override
+            protected void paintTrack(Graphics g, JComponent c, Rectangle trackBounds) {
+                g.setColor(BG_CELL);
+                g.fillRect(trackBounds.x, trackBounds.y, trackBounds.width, trackBounds.height);
+            }
+
+            @Override
+            protected void paintThumb(Graphics g, JComponent c, Rectangle thumbBounds) {
+                if (thumbBounds.isEmpty() || !c.isEnabled()) return;
+                g.setColor(BORDER_CLR);
+                g.fillRect(thumbBounds.x + 1, thumbBounds.y + 1, thumbBounds.width - 2, thumbBounds.height - 2);
+            }
+        });
     }
 
     private static JPanel titledPanel(String title, JComponent content) {
