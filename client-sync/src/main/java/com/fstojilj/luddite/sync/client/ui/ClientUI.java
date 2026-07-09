@@ -222,23 +222,37 @@ public class ClientUI {
         split.setDividerLocation(280);
         split.setDividerSize(4);
         split.setBackground(BG);
-        split.setBorder(null);
         split.setOpaque(true);
+        retroSplitPaneUi(split);
 
-        split.setUI(new BasicSplitPaneUI() {
+        return split;
+    }
+
+    /**
+     * Applies the retro-terminal look to a {@link JSplitPane}: a borderless, flat divider
+     * painted in the background color instead of the Metal look-and-feel's default bevel.
+     *
+     * <p>The border must be cleared <em>after</em> {@code setUI} because
+     * {@code BasicSplitPaneUI.installUI} re-installs the default (white bevel) border whenever
+     * the current border is {@code null} — clearing it beforehand has no lasting effect.
+     */
+    private static void retroSplitPaneUi(JSplitPane splitPane) {
+        splitPane.setUI(new BasicSplitPaneUI() {
             @Override
             public BasicSplitPaneDivider createDefaultDivider() {
-                return new BasicSplitPaneDivider(this) {
+                BasicSplitPaneDivider divider = new BasicSplitPaneDivider(this) {
                     @Override
                     public void paint(Graphics g) {
                         g.setColor(BG);
                         g.fillRect(0, 0, getWidth(), getHeight());
                     }
                 };
+                divider.setBackground(BG);
+                divider.setBorder(BorderFactory.createEmptyBorder());
+                return divider;
             }
         });
-
-        return split;
+        splitPane.setBorder(BorderFactory.createEmptyBorder());
     }
 
     // ── Directories panel ─────────────────────────────────────────────────────
@@ -293,20 +307,7 @@ public class ClientUI {
         dirSplit.setDividerLocation(360);
         dirSplit.setDividerSize(4);
         dirSplit.setBackground(BG);
-        dirSplit.setBorder(null);
-
-        dirSplit.setUI(new BasicSplitPaneUI() {
-            @Override
-            public BasicSplitPaneDivider createDefaultDivider() {
-                return new BasicSplitPaneDivider(this) {
-                    @Override
-                    public void paint(Graphics g) {
-                        g.setColor(BG);
-                        g.fillRect(0, 0, getWidth(), getHeight());
-                    }
-                };
-            }
-        });
+        retroSplitPaneUi(dirSplit);
 
         panel.add(dirSplit, BorderLayout.CENTER);
         panel.add(btnPanel, BorderLayout.SOUTH);
