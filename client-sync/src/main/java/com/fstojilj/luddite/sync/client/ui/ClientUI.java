@@ -6,6 +6,9 @@ import com.fstojilj.luddite.sync.client.service.ServerApiClient;
 import com.fstojilj.luddite.sync.common.dto.TreeResponse;
 import jakarta.annotation.PostConstruct;
 import javax.swing.JDialog;
+import javax.swing.plaf.basic.BasicScrollBarUI;
+import javax.swing.plaf.basic.BasicSplitPaneDivider;
+import javax.swing.plaf.basic.BasicSplitPaneUI;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,6 +32,7 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JRadioButton;
+import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
 import javax.swing.JSeparator;
 import javax.swing.JSplitPane;
@@ -42,14 +46,19 @@ import javax.swing.UIManager;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
 import javax.swing.border.TitledBorder;
+import javax.swing.text.DefaultCaret;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.Frame;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.Window;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
@@ -92,6 +101,16 @@ public class ClientUI {
     private static final Font MONO = new Font("Courier New", Font.PLAIN, 12);
     private static final Font MONO_SM = new Font("Courier New", Font.PLAIN, 11);
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
+    // Tolerance (in px) for treating the log viewport as "at the bottom" for auto-scroll purposes.
+    private static final int LOG_AUTOSCROLL_SLACK_PX = 4;
+    // Thickness (in px) of the draggable edge/corner resize *hit-test* zone around the
+    // undecorated main window — kept wide enough to reliably grab with the mouse, independent
+    // of how thick the visible border line drawn within it is (see VISIBLE_BORDER_PX).
+    private static final int RESIZE_MARGIN = 6;
+    // Thickness (in px) of the actual painted border line within the resize margin — kept thin
+    // (roughly 1/8-1/10 of RESIZE_MARGIN) so the frame reads as a thin retro outline rather than
+    // a thick colored band; the rest of the margin is invisible (painted in BG).
+    private static final int VISIBLE_BORDER_PX = 1;
 
     // ── Spring deps ───────────────────────────────────────────────────────────
     private final RootDirService rootDirService;
@@ -130,6 +149,7 @@ public class ClientUI {
     private JButton btnStartSync;
     private JButton btnDownload;
     private JTextArea logArea;
+    private JScrollBar logScrollBar;
     private Timer refreshTimer;
     private final Set<String> expandedKeys = new HashSet<>();
     private long lastSubscribedClickMs = 0;
@@ -153,9 +173,16 @@ public class ClientUI {
 
         frame = new JFrame();
         frame.setTitle("LUDDITE SYNC — CLIENT");
+        // Native OS chrome (white title bar, borders) clashes with the retro-terminal theme —
+        // replace it entirely with our own draggable title bar (see buildTitleBar()) and a
+        // custom resize border (see wrapWithResizeBorder()) since undecorated frames lose both
+        // the OS title-bar drag and the OS edge/corner resize behavior.
+        frame.setUndecorated(true);
+        frame.setResizable(true);
         frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
         frame.setBackground(BG);
         frame.getContentPane().setBackground(BG);
+        frame.getRootPane().setBackground(BG);
         frame.addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
@@ -163,12 +190,15 @@ public class ClientUI {
             }
         });
 
-        frame.setLayout(new BorderLayout(0, 0));
-        frame.add(buildTitleBar(), BorderLayout.NORTH);
-        frame.add(buildCenter(), BorderLayout.CENTER);
-        frame.add(buildStatusBar(), BorderLayout.SOUTH);
+        JPanel mainContent = new JPanel(new BorderLayout(0, 0));
+        mainContent.setBackground(BG);
+        mainContent.add(buildTitleBar(), BorderLayout.NORTH);
+        mainContent.add(buildCenter(), BorderLayout.CENTER);
+        mainContent.add(buildStatusBar(), BorderLayout.SOUTH);
 
-        frame.setMinimumSize(new Dimension(820, 560));
+        Dimension minSize = new Dimension(490, 460);
+        frame.setContentPane(wrapWithResizeBorder(frame, mainContent, minSize));
+        frame.setMinimumSize(minSize);
         frame.pack();
         frame.setLocationRelativeTo(null);
         frame.setVisible(true);
@@ -192,13 +222,17 @@ public class ClientUI {
         JLabel title = label("  ██╗     ██╗   ██╗██████╗ ██████╗ ██╗████████╗███████╗   by FilipS90", MONO_BOLD, FG);
         bar.add(title, BorderLayout.WEST);
 
-        // Status indicator
+        // Status indicator + window controls (this is a fully custom title bar — the frame
+        // is undecorated, so minimize/close and dragging must be handled ourselves here).
         JPanel statusPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
         statusPanel.setBackground(BG);
         statusDot = label("●", MONO_BOLD, FG_DIM);
         statusLabel = label("CONNECTING...", MONO_SM, FG_DIM);
         statusPanel.add(statusDot);
         statusPanel.add(statusLabel);
+        statusPanel.add(Box.createHorizontalStrut(10));
+        statusPanel.add(windowControlButton("_", FG_DIM, () -> frame.setExtendedState(Frame.ICONIFIED)));
+        statusPanel.add(windowControlButton("X", FG_RED, this::exitApp));
         bar.add(statusPanel, BorderLayout.EAST);
 
         // Separator
@@ -209,6 +243,12 @@ public class ClientUI {
         wrapper.setBackground(BG);
         wrapper.add(bar, BorderLayout.CENTER);
         wrapper.add(sep, BorderLayout.SOUTH);
+
+        // Dragging the undecorated frame: wire the listener to the bar background and the
+        // title label directly (Swing dispatches mouse events to the topmost component under
+        // the cursor, so the label needs its own listener too, not just its parent panel's).
+        enableWindowDrag(bar, frame);
+        enableWindowDrag(title, frame);
         return wrapper;
     }
 
@@ -217,12 +257,40 @@ public class ClientUI {
     private JComponent buildCenter() {
         JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT,
                 buildDirectoriesPanel(), buildLogPanel());
-        split.setDividerLocation(280);
+        split.setDividerLocation(210);
         split.setDividerSize(4);
         split.setBackground(BG);
-        split.setBorder(null);
         split.setOpaque(true);
+        retroSplitPaneUi(split);
+
         return split;
+    }
+
+    /**
+     * Applies the retro-terminal look to a {@link JSplitPane}: a borderless, flat divider
+     * painted in the background color instead of the Metal look-and-feel's default bevel.
+     *
+     * <p>The border must be cleared <em>after</em> {@code setUI} because
+     * {@code BasicSplitPaneUI.installUI} re-installs the default (white bevel) border whenever
+     * the current border is {@code null} — clearing it beforehand has no lasting effect.
+     */
+    private static void retroSplitPaneUi(JSplitPane splitPane) {
+        splitPane.setUI(new BasicSplitPaneUI() {
+            @Override
+            public BasicSplitPaneDivider createDefaultDivider() {
+                BasicSplitPaneDivider divider = new BasicSplitPaneDivider(this) {
+                    @Override
+                    public void paint(Graphics g) {
+                        g.setColor(BG);
+                        g.fillRect(0, 0, getWidth(), getHeight());
+                    }
+                };
+                divider.setBackground(BG);
+                divider.setBorder(BorderFactory.createEmptyBorder());
+                return divider;
+            }
+        });
+        splitPane.setBorder(BorderFactory.createEmptyBorder());
     }
 
     // ── Directories panel ─────────────────────────────────────────────────────
@@ -274,10 +342,11 @@ public class ClientUI {
         JPanel subPanel = titledPanel("SUBSCRIBED  (double-click to stop sync)", subScroll);
 
         JSplitPane dirSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, treePanel, subPanel);
-        dirSplit.setDividerLocation(360);
         dirSplit.setDividerSize(4);
         dirSplit.setBackground(BG);
-        dirSplit.setBorder(null);
+        retroSplitPaneUi(dirSplit);
+        dirSplit.setResizeWeight(0.75);
+        dirSplit.setDividerLocation(0.75);
 
         panel.add(dirSplit, BorderLayout.CENTER);
         panel.add(btnPanel, BorderLayout.SOUTH);
@@ -314,7 +383,6 @@ public class ClientUI {
         panel.add(retroButton("[ STOP SYNC ]", FG_AMBER, () -> stopSync(false)));
         panel.add(retroButton("[ STOP & DELETE ]", FG_RED, () -> stopSync(true)));
         panel.add(retroButton("[ REFRESH ]", FG_AMBER, this::doRefresh));
-        panel.add(retroButton("[ EXIT ]", FG_RED, this::exitApp));
         return panel;
     }
 
@@ -330,8 +398,14 @@ public class ClientUI {
         logArea.setWrapStyleWord(false);
         logArea.setCaretColor(FG);
         logArea.setBorder(new EmptyBorder(4, 6, 4, 6));
+        // The default caret update policy auto-tracks appended text back to the caret whenever
+        // the caret sits at the (old) end of the document, which fights our own auto-scroll
+        // gating in appendLog() by yanking the view back down. Disable it — we manage the
+        // caret/scroll position ourselves.
+        ((DefaultCaret) logArea.getCaret()).setUpdatePolicy(DefaultCaret.NEVER_UPDATE);
 
         JScrollPane scroll = retroScroll(logArea);
+        logScrollBar = scroll.getVerticalScrollBar();
         return titledPanel("LOG", scroll);
     }
 
@@ -539,8 +613,10 @@ public class ClientUI {
         final boolean[] confirmed = {false};
 
         JDialog dialog = new JDialog(frame, "SUBSCRIBE: " + dirName, true);
+        dialog.setUndecorated(true);
         dialog.getContentPane().setBackground(BG);
         dialog.getRootPane().setBorder(new LineBorder(BORDER_CLR, 1));
+        dialog.getRootPane().setBackground(BG);
 
         JButton okBtn = retroButton("OK", FG, () -> {
             confirmed[0] = true;
@@ -556,6 +632,7 @@ public class ClientUI {
 
         JPanel root = new JPanel(new BorderLayout());
         root.setBackground(BG);
+        root.add(buildDialogTitleBar(dialog, "SUBSCRIBE: " + dirName, dialog::dispose), BorderLayout.NORTH);
         root.add(content, BorderLayout.CENTER);
         root.add(buttonRow, BorderLayout.SOUTH);
 
@@ -596,11 +673,10 @@ public class ClientUI {
         String msg = deleteLocalFiles
                 ? "Stop sync AND delete local files for <b>" + dir + "</b>?"
                 : "Stop sync for <b>" + dir + "</b>?<br>Local mirror files will be kept.";
-        int confirm = JOptionPane.showConfirmDialog(frame,
-                retroHtmlMsg(msg),
+        boolean confirm = showRetroConfirm(
                 deleteLocalFiles ? "CONFIRM STOP & DELETE" : "CONFIRM STOP SYNC",
-                JOptionPane.YES_NO_OPTION);
-        if (confirm != JOptionPane.YES_OPTION) return;
+                retroHtmlMsg(msg));
+        if (!confirm) return;
 
         rootDirService.removeDirectory(dir, deleteLocalFiles);
         appendLog(deleteLocalFiles
@@ -641,12 +717,44 @@ public class ClientUI {
         inputPanel.add(label("PASSWORD:", MONO_SM, FG_DIM));
         inputPanel.add(passField);
 
-        int result = JOptionPane.showConfirmDialog(frame, inputPanel,
-                "SYNC PRIVATE DIRECTORY",
-                JOptionPane.OK_CANCEL_OPTION,
-                JOptionPane.PLAIN_MESSAGE);
+        JPanel content = new JPanel(new BorderLayout());
+        content.setBackground(BG);
+        content.setBorder(BorderFactory.createEmptyBorder(12, 14, 12, 14));
+        content.add(inputPanel, BorderLayout.CENTER);
 
-        if (result != JOptionPane.OK_OPTION) return;
+        final boolean[] confirmed = {false};
+
+        JDialog dialog = new JDialog(frame, "SYNC PRIVATE DIRECTORY", true);
+        dialog.setUndecorated(true);
+        dialog.getContentPane().setBackground(BG);
+        dialog.getRootPane().setBorder(new LineBorder(BORDER_CLR, 1));
+        dialog.getRootPane().setBackground(BG);
+
+        JButton okBtn = retroButton("OK", FG, () -> {
+            confirmed[0] = true;
+            dialog.dispose();
+        });
+        JButton cancelBtn = retroButton("Cancel", FG, dialog::dispose);
+
+        JPanel buttonRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
+        buttonRow.setBackground(BG);
+        buttonRow.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
+        buttonRow.add(okBtn);
+        buttonRow.add(cancelBtn);
+
+        JPanel root = new JPanel(new BorderLayout());
+        root.setBackground(BG);
+        root.add(buildDialogTitleBar(dialog, "SYNC PRIVATE DIRECTORY", dialog::dispose), BorderLayout.NORTH);
+        root.add(content, BorderLayout.CENTER);
+        root.add(buttonRow, BorderLayout.SOUTH);
+
+        dialog.setContentPane(root);
+        dialog.pack();
+        dialog.setLocationRelativeTo(frame);
+        dialog.setResizable(false);
+        dialog.setVisible(true); // blocks until dispose()
+
+        if (!confirmed[0]) return;
 
         String dirName = dirField.getText().trim();
         String password = new String(passField.getPassword());
@@ -683,12 +791,9 @@ public class ClientUI {
                         refreshData();
                     } else if (Boolean.FALSE.equals(granted)) {
                         appendLog("[WARN] Access denied to private dir: " + dirName);
-                        JOptionPane.showMessageDialog(frame,
-                                "<html><body style='font-family:Courier New;font-size:12px;"
-                                        + "color:#FF4444;background:#0D0D0D;padding:8px'>"
-                                        + "ACCESS DENIED<br>Wrong directory name or password.</body></html>",
-                                "ACCESS DENIED",
-                                JOptionPane.ERROR_MESSAGE);
+                        showRetroMessage("ACCESS DENIED",
+                                retroHtmlMsg("<span style='color:#FF4444'>ACCESS DENIED<br>"
+                                        + "Wrong directory name or password.</span>"));
                         // Ask user to retry with a new password
                         syncPrivate();
                     } else {
@@ -702,13 +807,101 @@ public class ClientUI {
     }
 
     private void exitApp() {
-        int confirm = JOptionPane.showConfirmDialog(frame,
-                retroHtmlMsg("Exit Luddite Sync client?"),
-                "CONFIRM EXIT", JOptionPane.YES_NO_OPTION);
-        if (confirm != JOptionPane.YES_OPTION) return;
+        boolean confirm = showRetroConfirm("CONFIRM EXIT", retroHtmlMsg("Exit Luddite Sync client?"));
+        if (!confirm) return;
         refreshTimer.stop();
         frame.dispose();
         SpringApplication.exit(applicationContext, () -> 0);
+    }
+
+    /**
+     * Shows a modal Yes/No confirmation dialog styled to match the retro-terminal theme,
+     * replacing {@link JOptionPane#showConfirmDialog} (which draws native OS chrome that
+     * clashes with the rest of the UI).
+     *
+     * @param title    dialog title-bar text
+     * @param htmlBody HTML-formatted message body, see {@link #retroHtmlMsg(String)}
+     * @return {@code true} if the user chose "Yes"; {@code false} for "No" or if the
+     * dialog was dismissed via its close button
+     */
+    private boolean showRetroConfirm(String title, String htmlBody) {
+        final boolean[] confirmed = {false};
+
+        JDialog dialog = new JDialog(frame, title, true);
+        dialog.setUndecorated(true);
+        dialog.getContentPane().setBackground(BG);
+        dialog.getRootPane().setBorder(new LineBorder(BORDER_CLR, 1));
+        dialog.getRootPane().setBackground(BG);
+
+        JPanel content = new JPanel(new BorderLayout());
+        content.setBackground(BG);
+        content.setBorder(BorderFactory.createEmptyBorder(14, 16, 10, 16));
+        content.add(new JLabel(htmlBody), BorderLayout.CENTER);
+
+        JButton yesBtn = retroButton("Yes", FG, () -> {
+            confirmed[0] = true;
+            dialog.dispose();
+        });
+        JButton noBtn = retroButton("No", FG, dialog::dispose);
+
+        JPanel buttonRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
+        buttonRow.setBackground(BG);
+        buttonRow.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
+        buttonRow.add(yesBtn);
+        buttonRow.add(noBtn);
+
+        JPanel root = new JPanel(new BorderLayout());
+        root.setBackground(BG);
+        root.add(buildDialogTitleBar(dialog, title, dialog::dispose), BorderLayout.NORTH);
+        root.add(content, BorderLayout.CENTER);
+        root.add(buttonRow, BorderLayout.SOUTH);
+
+        dialog.setContentPane(root);
+        dialog.pack();
+        dialog.setLocationRelativeTo(frame);
+        dialog.setResizable(false);
+        dialog.setVisible(true); // blocks until dispose()
+
+        return confirmed[0];
+    }
+
+    /**
+     * Shows a modal message dialog styled to match the retro-terminal theme, replacing
+     * {@link JOptionPane#showMessageDialog} (which draws native OS chrome that clashes with
+     * the rest of the UI). Dismissed via its OK button or the title bar's close control.
+     *
+     * @param title    dialog title-bar text
+     * @param htmlBody HTML-formatted message body, see {@link #retroHtmlMsg(String)}
+     */
+    private void showRetroMessage(String title, String htmlBody) {
+        JDialog dialog = new JDialog(frame, title, true);
+        dialog.setUndecorated(true);
+        dialog.getContentPane().setBackground(BG);
+        dialog.getRootPane().setBorder(new LineBorder(BORDER_CLR, 1));
+        dialog.getRootPane().setBackground(BG);
+
+        JPanel content = new JPanel(new BorderLayout());
+        content.setBackground(BG);
+        content.setBorder(BorderFactory.createEmptyBorder(14, 16, 10, 16));
+        content.add(new JLabel(htmlBody), BorderLayout.CENTER);
+
+        JButton okBtn = retroButton("OK", FG, dialog::dispose);
+        JPanel buttonRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
+        buttonRow.setBackground(BG);
+        buttonRow.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
+        buttonRow.add(okBtn);
+
+        JPanel root = new JPanel(new BorderLayout());
+        root.setBackground(BG);
+        root.add(buildDialogTitleBar(dialog, title, dialog::dispose), BorderLayout.NORTH);
+        root.add(content, BorderLayout.CENTER);
+        root.add(buttonRow, BorderLayout.SOUTH);
+
+        dialog.setContentPane(root);
+        dialog.pack();
+        dialog.setLocationRelativeTo(frame);
+        dialog.setResizable(false);
+        dialog.setVisible(true); // blocks until dispose()
     }
 
     // ── Data refresh (DB work off EDT via SwingWorker) ─────────────────────────
@@ -782,9 +975,23 @@ public class ClientUI {
         String line = "[" + LocalTime.now().format(TIME_FMT) + "] " + msg + "\n";
         SwingUtilities.invokeLater(() -> {
             if (logArea == null) return;   // UI not yet built
+            boolean stickToBottom = isLogScrolledToBottom();
             logArea.append(line);
-            logArea.setCaretPosition(logArea.getDocument().getLength());
+            if (stickToBottom) {
+                logArea.setCaretPosition(logArea.getDocument().getLength());
+            }
         });
+    }
+
+    /**
+     * Whether the log viewport is currently scrolled to (or within a few pixels of) the bottom.
+     * Used to decide whether a newly appended line should auto-scroll the view — so a user who
+     * has scrolled up to read older entries isn't yanked back down by incoming log lines.
+     */
+    private boolean isLogScrolledToBottom() {
+        if (logScrollBar == null) return true;
+        int extent = logScrollBar.getModel().getExtent();
+        return logScrollBar.getValue() + extent >= logScrollBar.getMaximum() - LOG_AUTOSCROLL_SLACK_PX;
     }
 
     /**
@@ -874,14 +1081,263 @@ public class ClientUI {
         return btn;
     }
 
+    /**
+     * A small square {@code retroButton} sized for use as a window-control (minimize/close)
+     * icon in a custom title bar, e.g. {@code windowControlButton("X", FG_RED, window::dispose)}.
+     */
+    private static JButton windowControlButton(String symbol, Color fg, Runnable action) {
+        JButton btn = retroButton(symbol, fg, action);
+        btn.setMargin(new java.awt.Insets(0, 0, 0, 0));
+        btn.setPreferredSize(new Dimension(24, 20));
+        return btn;
+    }
+
+    /**
+     * Makes {@code window} draggable by press-and-drag on {@code dragHandle}. Needed because
+     * undecorated frames/dialogs lose the OS's built-in title-bar drag behavior.
+     *
+     * <p>Swing dispatches mouse events to the topmost component under the cursor rather than
+     * bubbling them to ancestors, so this must be attached to every visible component that
+     * makes up the draggable region (e.g. both the title bar panel and its title label),
+     * not just the outermost container.
+     */
+    private static void enableWindowDrag(JComponent dragHandle, Window window) {
+        MouseAdapter dragListener = new MouseAdapter() {
+            private Point dragOrigin;
+
+            @Override
+            public void mousePressed(MouseEvent e) {
+                dragOrigin = e.getPoint();
+            }
+
+            @Override
+            public void mouseDragged(MouseEvent e) {
+                if (dragOrigin == null) return;
+                Point loc = window.getLocation();
+                window.setLocation(loc.x + e.getX() - dragOrigin.x, loc.y + e.getY() - dragOrigin.y);
+            }
+        };
+        dragHandle.addMouseListener(dragListener);
+        dragHandle.addMouseMotionListener(dragListener);
+    }
+
+    /**
+     * Wraps {@code content} in a panel with a {@link #RESIZE_MARGIN}-pixel invisible hit-test
+     * ring that lets the user resize {@code frame} by dragging its edges/corners, with only a
+     * thin {@link #VISIBLE_BORDER_PX}-pixel {@code BORDER_CLR} line actually painted at the
+     * outer edge as the frame's outline (replacing the plain {@code LineBorder} used before,
+     * since undecorated frames have no OS-drawn border either).
+     *
+     * <p>Needed because undecorated frames lose the OS's built-in edge/corner drag-to-resize
+     * behavior. The margin ring around {@code content} has no child component occupying it, so
+     * mouse events landing there are delivered to this wrapper panel's own listeners rather
+     * than being swallowed by a child — the same principle {@link #enableWindowDrag} relies on.
+     */
+    private static JPanel wrapWithResizeBorder(JFrame frame, JComponent content, Dimension minSize) {
+        JPanel wrapper = new JPanel(new BorderLayout()) {
+            @Override
+            protected void paintComponent(Graphics g) {
+                g.setColor(BG);
+                g.fillRect(0, 0, getWidth(), getHeight());
+                g.setColor(BORDER_CLR);
+                g.fillRect(0, 0, getWidth(), VISIBLE_BORDER_PX);
+                g.fillRect(0, getHeight() - VISIBLE_BORDER_PX, getWidth(), VISIBLE_BORDER_PX);
+                g.fillRect(0, 0, VISIBLE_BORDER_PX, getHeight());
+                g.fillRect(getWidth() - VISIBLE_BORDER_PX, 0, VISIBLE_BORDER_PX, getHeight());
+            }
+        };
+        wrapper.setOpaque(true);
+        wrapper.setBorder(new EmptyBorder(RESIZE_MARGIN, RESIZE_MARGIN, RESIZE_MARGIN, RESIZE_MARGIN));
+        wrapper.add(content, BorderLayout.CENTER);
+
+        ResizeController controller = new ResizeController(frame, wrapper, RESIZE_MARGIN, minSize);
+        wrapper.addMouseListener(controller);
+        wrapper.addMouseMotionListener(controller);
+        return wrapper;
+    }
+
+    /**
+     * Drives edge/corner drag-to-resize for an undecorated {@link JFrame}, attached to the
+     * margin ring built by {@link #wrapWithResizeBorder}. Tracks which edge(s) the cursor is
+     * over (as a bitmask of {@link #NORTH}/{@link #SOUTH}/{@link #WEST}/{@link #EAST}) to show
+     * the right resize cursor and, while dragging, to grow/shrink the frame from the correct
+     * side(s) — combining two edges handles the four corners.
+     */
+    private static final class ResizeController extends MouseAdapter {
+        private static final int NORTH = 1;
+        private static final int SOUTH = 2;
+        private static final int WEST = 4;
+        private static final int EAST = 8;
+
+        private final JFrame frame;
+        private final JComponent handle;
+        private final int margin;
+        private final Dimension minSize;
+        private int zone;
+        private Point pressScreenPoint;
+        private Rectangle pressBounds;
+
+        ResizeController(JFrame frame, JComponent handle, int margin, Dimension minSize) {
+            this.frame = frame;
+            this.handle = handle;
+            this.margin = margin;
+            this.minSize = minSize;
+        }
+
+        private int zoneAt(Point p) {
+            int z = 0;
+            if (p.y <= margin) z |= NORTH;
+            else if (p.y >= handle.getHeight() - margin) z |= SOUTH;
+            if (p.x <= margin) z |= WEST;
+            else if (p.x >= handle.getWidth() - margin) z |= EAST;
+            return z;
+        }
+
+        private Cursor cursorFor(int z) {
+            return switch (z) {
+                case NORTH -> Cursor.getPredefinedCursor(Cursor.N_RESIZE_CURSOR);
+                case SOUTH -> Cursor.getPredefinedCursor(Cursor.S_RESIZE_CURSOR);
+                case WEST -> Cursor.getPredefinedCursor(Cursor.W_RESIZE_CURSOR);
+                case EAST -> Cursor.getPredefinedCursor(Cursor.E_RESIZE_CURSOR);
+                case NORTH | WEST -> Cursor.getPredefinedCursor(Cursor.NW_RESIZE_CURSOR);
+                case NORTH | EAST -> Cursor.getPredefinedCursor(Cursor.NE_RESIZE_CURSOR);
+                case SOUTH | WEST -> Cursor.getPredefinedCursor(Cursor.SW_RESIZE_CURSOR);
+                case SOUTH | EAST -> Cursor.getPredefinedCursor(Cursor.SE_RESIZE_CURSOR);
+                default -> Cursor.getDefaultCursor();
+            };
+        }
+
+        @Override
+        public void mouseMoved(MouseEvent e) {
+            handle.setCursor(cursorFor(zoneAt(e.getPoint())));
+        }
+
+        @Override
+        public void mouseExited(MouseEvent e) {
+            handle.setCursor(Cursor.getDefaultCursor());
+        }
+
+        @Override
+        public void mousePressed(MouseEvent e) {
+            zone = zoneAt(e.getPoint());
+            pressScreenPoint = e.getLocationOnScreen();
+            pressBounds = frame.getBounds();
+        }
+
+        @Override
+        public void mouseDragged(MouseEvent e) {
+            if (zone == 0) return;
+            Point nowScreen = e.getLocationOnScreen();
+            int dx = nowScreen.x - pressScreenPoint.x;
+            int dy = nowScreen.y - pressScreenPoint.y;
+
+            int x = pressBounds.x, y = pressBounds.y, w = pressBounds.width, h = pressBounds.height;
+            if ((zone & WEST) != 0) {
+                int newW = Math.max(minSize.width, w - dx);
+                x += w - newW;
+                w = newW;
+            } else if ((zone & EAST) != 0) {
+                w = Math.max(minSize.width, w + dx);
+            }
+            if ((zone & NORTH) != 0) {
+                int newH = Math.max(minSize.height, h - dy);
+                y += h - newH;
+                h = newH;
+            } else if ((zone & SOUTH) != 0) {
+                h = Math.max(minSize.height, h + dy);
+            }
+            frame.setBounds(x, y, w, h);
+        }
+    }
+
+    /**
+     * Builds a themed, draggable title-bar panel for an undecorated popup dialog, replacing
+     * the OS-native title heading with one that matches the retro-terminal theme. Only a
+     * {@code [X]} close control is provided — popups don't need minimize.
+     */
+    private static JPanel buildDialogTitleBar(Window window, String title, Runnable onClose) {
+        JPanel bar = new JPanel(new BorderLayout());
+        bar.setBackground(BG);
+        bar.setBorder(new EmptyBorder(4, 8, 4, 4));
+
+        JLabel titleLabel = label(title, MONO_BOLD, FG);
+        // Extra right padding widens this row's minimum preferred width (BorderLayout sizes a
+        // WEST/EAST-only row to west.width + east.width with no gap of its own), which in turn
+        // widens the whole dialog on pack() — giving breathing room instead of the title text
+        // and close button sitting flush against each other.
+        titleLabel.setBorder(new EmptyBorder(0, 0, 0, 18));
+        bar.add(titleLabel, BorderLayout.WEST);
+        bar.add(windowControlButton("X", FG_RED, onClose), BorderLayout.EAST);
+
+        JSeparator sep = new JSeparator();
+        sep.setForeground(BORDER_CLR);
+        sep.setBackground(BG);
+        JPanel wrapper = new JPanel(new BorderLayout());
+        wrapper.setBackground(BG);
+        wrapper.add(bar, BorderLayout.CENTER);
+        wrapper.add(sep, BorderLayout.SOUTH);
+
+        enableWindowDrag(bar, window);
+        enableWindowDrag(titleLabel, window);
+        return wrapper;
+    }
+
     private static JScrollPane retroScroll(JComponent view) {
         JScrollPane sp = new JScrollPane(view);
         sp.setBackground(BG_CELL);
         sp.setBorder(new LineBorder(BORDER_CLR, 1));
         sp.getViewport().setBackground(BG_CELL);
-        sp.getVerticalScrollBar().setBackground(BG);
-        sp.getHorizontalScrollBar().setBackground(BG);
+        styleScrollBar(sp.getVerticalScrollBar());
+        styleScrollBar(sp.getHorizontalScrollBar());
         return sp;
+    }
+
+    /**
+     * Replaces a scrollbar's look-and-feel-supplied UI (which paints a native white/gray track
+     * and arrow buttons regardless of {@code setBackground}) with a flat, borderless retro style
+     * consistent with the rest of the theme.
+     */
+    private static void styleScrollBar(JScrollBar bar) {
+        bar.setPreferredSize(new Dimension(10, 10));
+        bar.setUnitIncrement(16);
+        bar.setUI(new BasicScrollBarUI() {
+            @Override
+            protected void configureScrollBarColors() {
+                thumbColor = BORDER_CLR;
+                trackColor = BG_CELL;
+            }
+
+            @Override
+            protected JButton createDecreaseButton(int orientation) {
+                return zeroSizeButton();
+            }
+
+            @Override
+            protected JButton createIncreaseButton(int orientation) {
+                return zeroSizeButton();
+            }
+
+            private JButton zeroSizeButton() {
+                JButton button = new JButton();
+                button.setPreferredSize(new Dimension(0, 0));
+                button.setMinimumSize(new Dimension(0, 0));
+                button.setMaximumSize(new Dimension(0, 0));
+                return button;
+            }
+
+            @Override
+            protected void paintTrack(Graphics g, JComponent c, Rectangle trackBounds) {
+                g.setColor(BG_CELL);
+                g.fillRect(trackBounds.x, trackBounds.y, trackBounds.width, trackBounds.height);
+            }
+
+            @Override
+            protected void paintThumb(Graphics g, JComponent c, Rectangle thumbBounds) {
+                if (thumbBounds.isEmpty() || !c.isEnabled()) return;
+                g.setColor(BORDER_CLR);
+                g.fillRect(thumbBounds.x + 1, thumbBounds.y + 1, thumbBounds.width - 2, thumbBounds.height - 2);
+            }
+        });
     }
 
     private static JPanel titledPanel(String title, JComponent content) {
