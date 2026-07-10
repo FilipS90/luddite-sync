@@ -1,7 +1,6 @@
 package com.fstojilj.luddite.sync.client.service;
 
 import com.fstojilj.luddite.sync.client.model.ClientRootDir;
-import com.fstojilj.luddite.sync.common.model.SocketOperation;
 import com.fstojilj.luddite.sync.common.util.PasswordUtils;
 import jakarta.annotation.PreDestroy;
 import java.io.DataInputStream;
@@ -11,25 +10,18 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.KeyStore;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import javax.net.ssl.KeyManagerFactory;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManagerFactory;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.annotation.Order;
-import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
 /**
@@ -40,8 +32,9 @@ import org.springframework.stereotype.Service;
  * <h2>Connection lifecycle</h2>
  * <ol>
  *   <li>HTTP phase: fetches public dirs, authenticates private dirs (populating
- *       the server's {@code AuthCacheService}), and builds a {@code List<SocketOperation>}.</li>
- *   <li>Opens the socket, sends the stable {@code clientId}, then executes operations.</li>
+ *       the server's {@code AuthCacheService}), and resolves the list of directory names
+ *       to sync.</li>
+ *   <li>Opens the socket, sends the stable {@code clientId}, then enters the poll loop.</li>
  *   <li>Enters a poll loop that every 2 s sends a {@code SYNC} request per subscribed
  *       directory, reads the response, writes/deletes files on disk, and sends a
  *       {@code DELETE_ACK} for each soft-deleted file received.</li>
@@ -69,7 +62,6 @@ import org.springframework.stereotype.Service;
 public class ClientSyncService implements ApplicationRunner {
 
     private static final byte SYNC = 0x01;
-    private static final byte FILE = 0x02;
     private static final byte DELETE_ACK = 0x03;
 
     private static final byte FLAG_DELETED = 0x01;
@@ -80,30 +72,13 @@ public class ClientSyncService implements ApplicationRunner {
     private final FileMetadataService fileMetadataService;
     private final ClientIdService clientIdService;
     private final ServerApiClient serverApiClient;
+    private final ClientSocketFactory socketFactory;
 
     /**
      * Dirs currently advertised by the server — exposed for the CLI {@code add} command
      * and the UI refresh loop. Updated via HTTP on each connect cycle.
      */
     public static List<String> serverDirs = new ArrayList<>();
-
-    @Value("${sync.server.host}")
-    private String serverHost;
-
-    @Value("${sync.server.port:8888}")
-    private int serverPort;
-
-    @Value("${sync.socket.keystore:classpath:client-keystore.p12}")
-    private Resource keystoreResource;
-
-    @Value("${sync.socket.truststore:classpath:truststore.p12}")
-    private Resource truststoreResource;
-
-    @Value("${sync.socket.password}")
-    private String keystorePassword;
-
-    @Value("${sync.socket.tls-enabled:true}")
-    private boolean tlsEnabled;
 
     private volatile boolean running = false;
     private Socket socket;
@@ -194,32 +169,32 @@ public class ClientSyncService implements ApplicationRunner {
                 String clientId = clientIdService.getClientId();
                 List<String> privateDirsToSync = authenticatePrivateDirsViaHttp(clientId);
 
-                // Build SocketOperation list
                 List<String> publicDirsToSync = serverPublicDirs.stream()
                         .filter(clientListeningDirs::contains)
                         .toList();
 
-                List<SocketOperation> operations = buildOperations(publicDirsToSync, privateDirsToSync);
+                List<String> dirsToSync = Stream.concat(publicDirsToSync.stream(), privateDirsToSync.stream())
+                        .toList();
 
-                if (operations.isEmpty()) {
-                    log.warn("No operations to execute after HTTP negotiation — waiting before retry");
+                if (dirsToSync.isEmpty()) {
+                    log.warn("No directories to sync after HTTP negotiation — waiting before retry");
                     sleep(5_000);
                     continue;
                 }
 
-                registerDirs(Stream.concat(publicDirsToSync.stream(), privateDirsToSync.stream()).toList());
-                auditMissingFiles(Stream.concat(publicDirsToSync.stream(), privateDirsToSync.stream()).toList());
+                registerDirs(dirsToSync);
+                auditMissingFiles(dirsToSync);
 
-                // Open socket once, send clientId, execute operations
-                socket = buildSocket();
-                log.info("Connected to server {}:{}", serverHost, serverPort);
+                // Open socket once, send clientId, enter the poll loop
+                socket = socketFactory.connect();
+                log.info("Connected to server {}:{}", socketFactory.getServerHost(), socketFactory.getServerPort());
 
                 var out = new DataOutputStream(socket.getOutputStream());
                 var in = new DataInputStream(socket.getInputStream());
 
                 sendClientId(out, clientId);
 
-                executeOperations(in, out, operations, serverPublicDirs, privateDirsToSync);
+                pollLoop(in, out, serverPublicDirs, privateDirsToSync);
 
             } catch (IOException e) {
                 if (running) {
@@ -268,20 +243,6 @@ public class ClientSyncService implements ApplicationRunner {
     }
 
     /**
-     * Builds the list of {@link SocketOperation}s to execute for this connect cycle.
-     * Downloads (feature #18) are placed first; continuous syncs follow.
-     *
-     * @param publicDirs  public directory names to sync
-     * @param privateDirs private directory names that have been authorized
-     * @return ordered list of operations to execute over the socket
-     */
-    private List<SocketOperation> buildOperations(List<String> publicDirs, List<String> privateDirs) {
-        return Stream.concat(publicDirs.stream(), privateDirs.stream())
-                .map(SocketOperation.Sync::new)
-                .collect(Collectors.toList());
-    }
-
-    /**
      * Sends the client's stable client ID to the server immediately after the socket
      * connection is established.
      *
@@ -297,47 +258,6 @@ public class ClientSyncService implements ApplicationRunner {
         out.write(idBytes);
         out.flush();
         log.info("Sent clientId to server: {}", clientId);
-    }
-
-    /**
-     * Executes all operations in order: downloads first, then enters the continuous
-     * sync poll loop for all SYNC operations.
-     *
-     * @param in                    the server input stream
-     * @param out                   the server output stream
-     * @param operations            the list of operations to execute
-     * @param serverPublicDirs      all public directories currently advertised by the server;
-     *                              used by {@link #pollLoop} to detect newly subscribed dirs
-     *                              without needing a reconnect
-     * @param authorizedPrivateDirs private directories authorized via HTTP for this connection
-     * @throws IOException if any IO operation fails
-     */
-    private void executeOperations(DataInputStream in, DataOutputStream out,
-                                   List<SocketOperation> operations,
-                                   List<String> serverPublicDirs,
-                                   List<String> authorizedPrivateDirs) throws IOException {
-        for (SocketOperation op : operations) {
-            if (op instanceof SocketOperation.Download download) {
-                executeDownload(in, out, download);
-            }
-        }
-        boolean hasSyncOps = operations.stream().anyMatch(op -> op instanceof SocketOperation.Sync);
-        if (hasSyncOps) {
-            pollLoop(in, out, serverPublicDirs, authorizedPrivateDirs);
-        }
-    }
-
-    /**
-     * Stub for the one-time file download operation (feature #18, not yet implemented).
-     *
-     * @param in       the server input stream
-     * @param out      the server output stream
-     * @param download the download operation to execute
-     * @throws IOException if any IO operation fails
-     */
-    private void executeDownload(DataInputStream in, DataOutputStream out,
-                                 SocketOperation.Download download) throws IOException {
-        log.info("Download requested for '{}' — not yet implemented", download.qualifiedPath());
     }
 
     /**
@@ -613,43 +533,6 @@ public class ClientSyncService implements ApplicationRunner {
         } catch (IOException e) {
             log.warn("Error closing socket", e);
         }
-    }
-
-    /**
-     * Builds a socket connected to the configured server.
-     * When {@code sync.socket.tls-enabled} is {@code true} (default), builds a
-     * mutually-authenticated TLS socket; otherwise builds a plain TCP socket.
-     *
-     * @return a connected {@link Socket}
-     * @throws Exception if the connection fails
-     */
-    private Socket buildSocket() throws Exception {
-        if (!tlsEnabled) {
-            return new Socket(serverHost, serverPort);
-        }
-
-        char[] password = keystorePassword.toCharArray();
-
-        KeyStore keyStore = KeyStore.getInstance("PKCS12");
-        try (var is = keystoreResource.getInputStream()) {
-            keyStore.load(is, password);
-        }
-
-        KeyStore trustStore = KeyStore.getInstance("PKCS12");
-        try (var is = truststoreResource.getInputStream()) {
-            trustStore.load(is, password);
-        }
-
-        var kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
-        kmf.init(keyStore, password);
-
-        var tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-        tmf.init(trustStore);
-
-        var ctx = SSLContext.getInstance("TLS");
-        ctx.init(kmf.getKeyManagers(), tmf.getTrustManagers(), null);
-
-        return ctx.getSocketFactory().createSocket(serverHost, serverPort);
     }
 
     /**

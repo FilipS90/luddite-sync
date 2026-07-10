@@ -1,6 +1,7 @@
 package com.fstojilj.luddite.sync.client.ui;
 
 import com.fstojilj.luddite.sync.client.service.ClientSyncService;
+import com.fstojilj.luddite.sync.client.service.DownloadService;
 import com.fstojilj.luddite.sync.client.service.RootDirService;
 import com.fstojilj.luddite.sync.client.service.ServerApiClient;
 import com.fstojilj.luddite.sync.common.dto.TreeResponse;
@@ -116,6 +117,7 @@ public class ClientUI {
     private final RootDirService rootDirService;
     private final ClientSyncService clientSyncService;
     private final ServerApiClient serverApiClient;
+    private final DownloadService downloadService;
     private final ApplicationContext applicationContext;
 
     @Value("${sync.client.mirror-dir}")
@@ -374,15 +376,14 @@ public class ClientUI {
     private JPanel buildActionButtons() {
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 6));
         panel.setBackground(BG);
-        btnStartSync = retroButton("[ START SYNC ]", FG, this::subscribeSelected);
-        btnDownload = retroButton("[ DOWNLOAD ]", FG_DIM, this::downloadSelected);
+        btnStartSync = retroButton("[ START SYNC ]", FG_AMBER, this::subscribeSelected);
+        btnDownload = retroButton("[ DOWNLOAD ]", FG_AMBER, this::downloadSelected);
         btnDownload.setEnabled(false);
         panel.add(btnStartSync);
         panel.add(btnDownload);
         panel.add(retroButton("[ SYNC PRIVATE ]", FG_AMBER, this::syncPrivate));
         panel.add(retroButton("[ STOP SYNC ]", FG_AMBER, () -> stopSync(false)));
         panel.add(retroButton("[ STOP & DELETE ]", FG_RED, () -> stopSync(true)));
-        panel.add(retroButton("[ REFRESH ]", FG_AMBER, this::doRefresh));
         return panel;
     }
 
@@ -495,7 +496,7 @@ public class ClientUI {
 
     private void updateButtonStates(TreeItem item) {
         btnStartSync.setEnabled(item.isRootDir());
-        btnDownload.setEnabled(!item.isRootDir() && !item.isFile());
+        btnDownload.setEnabled(true);
     }
 
     private void handleTreeDoubleClick(MouseEvent e) {
@@ -504,7 +505,7 @@ public class ClientUI {
         TreeItem item = treeListModel.getElementAt(index);
         if (item.isRootDir()) {
             subscribeSelected();
-        } else if (!item.isFile()) {
+        } else {
             downloadSelected();
         }
     }
@@ -661,7 +662,38 @@ public class ClientUI {
     }
 
     private void downloadSelected() {
-        appendLog("[INFO] Download not yet implemented — coming in a future update.");
+        int idx = treeList.getSelectedIndex();
+        if (idx < 0) {
+            appendLog("[WARN] No server item selected.");
+            return;
+        }
+        TreeItem item = treeListModel.getElementAt(idx);
+        String dirName = item.rootDirName();
+        String subPath = item.isRootDir() ? "" : item.fullRelPath();
+        boolean isFile = item.isFile();
+
+        appendLog("[INFO] Downloading: " + item.key() + " ...");
+        new SwingWorker<Integer, Void>() {
+            @Override
+            protected Integer doInBackground() {
+                return downloadService.download(dirName, subPath, isFile);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    int count = get();
+                    if (count > 0) {
+                        appendLog("[OK]   Downloaded " + count + " file(s): " + item.key());
+                    } else {
+                        appendLog("[WARN] Download failed or found no files: " + item.key());
+                    }
+                } catch (Exception ex) {
+                    log.warn("downloadSelected result check error", ex);
+                    appendLog("[WARN] Download error: " + ex.getMessage());
+                }
+            }
+        }.execute();
     }
 
     private void stopSync(boolean deleteLocalFiles) {
@@ -682,12 +714,6 @@ public class ClientUI {
         appendLog(deleteLocalFiles
                 ? "[OK]   Stopped sync and deleted local files for: " + dir
                 : "[OK]   Stopped sync (local files kept) for: " + dir);
-        clientSyncService.reconnect();
-        refreshData();
-    }
-
-    private void doRefresh() {
-        appendLog("[INFO] Reconnecting to server...");
         clientSyncService.reconnect();
         refreshData();
     }
