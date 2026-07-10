@@ -342,10 +342,11 @@ public class ClientUI {
         JPanel subPanel = titledPanel("SUBSCRIBED  (double-click to stop sync)", subScroll);
 
         JSplitPane dirSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, treePanel, subPanel);
-        dirSplit.setDividerLocation(360);
         dirSplit.setDividerSize(4);
         dirSplit.setBackground(BG);
         retroSplitPaneUi(dirSplit);
+        dirSplit.setResizeWeight(0.75);
+        dirSplit.setDividerLocation(0.75);
 
         panel.add(dirSplit, BorderLayout.CENTER);
         panel.add(btnPanel, BorderLayout.SOUTH);
