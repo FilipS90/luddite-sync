@@ -74,9 +74,6 @@ public class ClientCli {
         String command = parts[0].toLowerCase();
         String arg = parts.length > 1 ? parts[1] : "";
 
-        System.out.println(command);
-        System.out.println(arg);
-
         var entries = rootDirService.findAll();
         dirNames = entries.stream().map(ClientRootDir::dirName).toList();
 
