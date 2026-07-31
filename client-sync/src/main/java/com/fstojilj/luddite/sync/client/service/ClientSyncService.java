@@ -81,6 +81,7 @@ public class ClientSyncService implements ApplicationRunner {
     public static List<String> serverDirs = new ArrayList<>();
 
     private volatile boolean running = false;
+    private volatile ConnectionState connectionState = ConnectionState.DISCONNECTED;
     private Socket socket;
 
     /**
@@ -108,14 +109,25 @@ public class ClientSyncService implements ApplicationRunner {
     @PreDestroy
     public void stop() {
         running = false;
+        connectionState = ConnectionState.DISCONNECTED;
         closeSocket();
     }
 
     /**
-     * Returns {@code true} if the SSL socket is currently open and connected.
+     * Returns {@code true} if the connection state is anything other than
+     * {@link ConnectionState#DISCONNECTED}.
      */
     public boolean isConnected() {
-        return socket != null && !socket.isClosed() && socket.isConnected();
+        return connectionState != ConnectionState.DISCONNECTED;
+    }
+
+    /**
+     * Returns the current state of the sync connection, explicitly tracked at each
+     * transition point (connect, disconnect, and per-tick file transfer) rather than
+     * derived from raw socket introspection — see {@link ConnectionState}.
+     */
+    public ConnectionState getConnectionState() {
+        return connectionState;
     }
 
     /**
@@ -125,6 +137,9 @@ public class ClientSyncService implements ApplicationRunner {
      */
     public void reconnect() {
         log.info("Reconnect requested — dropping current connection to re-poll server dirs");
+        // Set state eagerly so the UI reflects the drop immediately, rather than waiting
+        // for the background loop to observe the resulting IOException.
+        connectionState = ConnectionState.DISCONNECTED;
         // Do NOT set running=false — that exits the loop entirely.
         // Closing the socket causes an IOException in connectAndSync which triggers a reconnect.
         closeSocket();
@@ -193,15 +208,18 @@ public class ClientSyncService implements ApplicationRunner {
                 var in = new DataInputStream(socket.getInputStream());
 
                 sendClientId(out, clientId);
+                connectionState = ConnectionState.IDLE;
 
                 pollLoop(in, out, serverPublicDirs, privateDirsToSync);
 
             } catch (IOException e) {
+                connectionState = ConnectionState.DISCONNECTED;
                 if (running) {
                     log.warn("Connection lost: {}. Reconnecting in 5s...", e.getMessage());
                     sleep(5_000);
                 }
             } catch (Exception e) {
+                connectionState = ConnectionState.DISCONNECTED;
                 log.error("Fatal error in sync receiver", e);
                 break;
             }
@@ -333,6 +351,10 @@ public class ClientSyncService implements ApplicationRunner {
      *   <li>Persists the highest received {@code syncVersion}.</li>
      * </ol>
      *
+     * <p>{@link #getConnectionState()} is flipped to {@link ConnectionState#TRANSFERRING} as
+     * soon as any polled directory reports a non-empty record count for the current tick, and
+     * back to {@link ConnectionState#IDLE} once every directory has been processed.
+     *
      * @param in                    the server input stream
      * @param out                   the server output stream
      * @param serverPublicDirs      all public directories currently advertised by the server
@@ -373,6 +395,7 @@ public class ClientSyncService implements ApplicationRunner {
 
                 // Read response
                 int count = in.readInt();
+                if (count > 0) connectionState = ConnectionState.TRANSFERRING;
                 long highestVersion = lastVersion;
 
                 Path dirBase = rootDirService.resolveLocalPath(dirName).toAbsolutePath().normalize();
@@ -443,6 +466,8 @@ public class ClientSyncService implements ApplicationRunner {
                     rootDirService.updateSyncVersion(dirName, highestVersion);
                 }
             }
+
+            if (connectionState == ConnectionState.TRANSFERRING) connectionState = ConnectionState.IDLE;
 
             // Check for server-initiated signals (non-blocking: peek at available bytes)
             if (in.available() > 0) {

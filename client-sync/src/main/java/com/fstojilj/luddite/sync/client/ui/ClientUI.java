@@ -1,6 +1,7 @@
 package com.fstojilj.luddite.sync.client.ui;
 
 import com.fstojilj.luddite.sync.client.service.ClientSyncService;
+import com.fstojilj.luddite.sync.client.service.ConnectionState;
 import com.fstojilj.luddite.sync.client.service.DownloadService;
 import com.fstojilj.luddite.sync.client.service.RootDirService;
 import com.fstojilj.luddite.sync.client.service.ServerApiClient;
@@ -938,8 +939,8 @@ public class ClientUI {
             protected RefreshSnapshot doInBackground() {
                 List<String> srv = serverApiClient.fetchPublicDirs();
                 List<String> subs = rootDirService.retrieveAllInSyncDirs();
-                boolean connected = clientSyncService.isConnected();
-                return new RefreshSnapshot(srv, subs, connected);
+                ConnectionState state = clientSyncService.getConnectionState();
+                return new RefreshSnapshot(srv, subs, state);
             }
 
             @Override
@@ -979,10 +980,13 @@ public class ClientUI {
                         if (newIdx >= 0) subscribedList.setSelectedIndex(newIdx);
                     }
 
-                    Color dotColor = snap.connected() ? FG : FG_RED;
+                    Color dotColor = switch (snap.connectionState()) {
+                        case TRANSFERRING, IDLE -> FG;
+                        case DISCONNECTED -> FG_RED;
+                    };
                     statusDot.setForeground(dotColor);
                     statusLabel.setForeground(dotColor);
-                    statusLabel.setText(snap.connected() ? "CONNECTED" : "DISCONNECTED");
+                    statusLabel.setText(snap.connectionState().name());
                 } catch (Exception ex) {
                     log.warn("refreshData error", ex);
                 }
@@ -992,7 +996,7 @@ public class ClientUI {
 
     private record RefreshSnapshot(List<String> serverDirs,
                                    List<String> subscribedDirs,
-                                   boolean connected) {
+                                   ConnectionState connectionState) {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
