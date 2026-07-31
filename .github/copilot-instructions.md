@@ -32,6 +32,7 @@ The `KEYSTORE_PASSWORD` environment variable must be set to start either applica
 - If you are asked to push code to luddite-sync, you first need to run $env:GIT_SSH_COMMAND="ssh -i C:/Users/fstojiljko/.ssh/id_fs_github".
 - Humility invites progress, and overconfidence invites decline, be skeptical about your work.
 - Simplicity is the ultimate sophistication.
+- Git commit messages must be short: 14 words max, no body/paragraphs.
 
 ## Architecture
 
