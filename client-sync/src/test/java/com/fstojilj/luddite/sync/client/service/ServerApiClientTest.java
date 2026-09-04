@@ -22,7 +22,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 class ServerApiClientTest {
 
-    private static final String BASE_URL = "http://win-server:8080";
+    private static final String BASE_URL = "http://luddite-server:8080";
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private MockRestServiceServer mockServer;

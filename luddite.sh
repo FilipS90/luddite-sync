@@ -26,7 +26,7 @@ SERVER_JAR="$SCRIPT_DIR/server-sync/target/server-sync-0.0.1-SNAPSHOT.jar"
 CLIENT_JAR="$SCRIPT_DIR/client-sync/target/client-sync-0.0.1-SNAPSHOT.jar"
 
 MODE=${1:-server}
-REMOTE_HOST=${2:-win-server}
+REMOTE_HOST=${2:-luddite-server}
 
 while true; do
     if [ "$MODE" = "server" ]; then

@@ -10,7 +10,8 @@ spring:
 
 sync:
   server:
-    host: win-server
+    # FOR LOCAL TESTING HOST NEEDS TO BE LOCALHOST
+    host: luddite-server
     port: 8888
     api-url: http://${sync.server.host}:8080
   client:
