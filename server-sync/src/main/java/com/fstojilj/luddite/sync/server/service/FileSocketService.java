@@ -5,6 +5,13 @@ import com.fstojilj.luddite.sync.common.model.RootDir;
 import com.fstojilj.luddite.sync.server.repository.RootDirRepository;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
+import org.springframework.stereotype.Service;
+
+import javax.net.ssl.SSLServerSocket;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -14,21 +21,10 @@ import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.KeyStore;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
-import javax.net.ssl.KeyManagerFactory;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLServerSocket;
-import javax.net.ssl.TrustManagerFactory;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.Resource;
-import org.springframework.stereotype.Service;
 
 /**
  * Accepts inbound connections from sync clients and serves file-change data.
@@ -120,7 +116,7 @@ public class FileSocketService {
      */
     @PostConstruct
     public void start() throws Exception {
-        serverSocket = tlsEnabled ? buildSslServerSocket() : new ServerSocket(port);
+        serverSocket = new ServerSocket(port);
         running = true;
         log.info("Listening for clients on port {} ({})", port, tlsEnabled ? "mTLS" : "plain TCP");
         Thread.ofPlatform().name("client-acceptor").daemon(false).start(this::acceptClients);
@@ -294,7 +290,7 @@ public class FileSocketService {
                 String qualifiedPath = dirName + "/" + relNorm;
                 Path absPath = Path.of(rootAbsPath).resolve(relNorm);
                 long version = meta.syncVersion() != null ? meta.syncVersion() : fileMetadataService.
-                        nextSyncVersion(rootDirId);
+                                                                                 nextSyncVersion(rootDirId);
                 byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
 
                 byte flags = meta.deleted() ? FLAG_DELETED : 0;
@@ -464,46 +460,6 @@ public class FileSocketService {
         } catch (IOException e) {
             log.warn("Failed to read file bytes for '{}': {}", absPath, e.getMessage());
             throw e;
-        }
-    }
-
-    // ── SSL setup ─────────────────────────────────────────────────────────────
-
-    /**
-     * Builds a mutually-authenticated TLS server socket bound to the configured port.
-     *
-     * @return a bound, listening {@link SSLServerSocket} with client auth required
-     * @throws Exception if the SSL context or socket cannot be created
-     */
-    private SSLServerSocket buildSslServerSocket() throws Exception {
-        char[] password = keystorePassword.toCharArray();
-        keystorePassword = null; // cleared for security reasons
-
-        try {
-            KeyStore keyStore = KeyStore.getInstance("PKCS12");
-            try (var in = keystoreResource.getInputStream()) {
-                keyStore.load(in, password);
-            }
-
-            KeyStore trustStore = KeyStore.getInstance("PKCS12");
-            try (var in = truststoreResource.getInputStream()) {
-                trustStore.load(in, password);
-            }
-
-            var kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
-            kmf.init(keyStore, password);
-
-            var tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-            tmf.init(trustStore);
-
-            var ctx = SSLContext.getInstance("TLS");
-            ctx.init(kmf.getKeyManagers(), tmf.getTrustManagers(), null);
-
-            var socket = (SSLServerSocket) ctx.getServerSocketFactory().createServerSocket(port);
-            socket.setNeedClientAuth(true);
-            return socket;
-        } finally {
-            Arrays.fill(password, '\0');
         }
     }
 }
