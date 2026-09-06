@@ -8,7 +8,6 @@ import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
 import javax.net.ssl.SSLServerSocket;
@@ -74,18 +73,6 @@ public class FileSocketService {
     @Value("${sync.socket.port:8888}")
     private int port;
 
-    @Value("${sync.socket.keystore:classpath:server-keystore.p12}")
-    private Resource keystoreResource;
-
-    @Value("${sync.socket.truststore:classpath:truststore.p12}")
-    private Resource truststoreResource;
-
-    @Value("${sync.socket.password}")
-    private String keystorePassword;
-
-    @Value("${sync.socket.tls-enabled:true}")
-    private boolean tlsEnabled;
-
     // ── State ─────────────────────────────────────────────────────────────────
     private ServerSocket serverSocket;
     private volatile boolean running = false;
@@ -118,7 +105,7 @@ public class FileSocketService {
     public void start() throws Exception {
         serverSocket = new ServerSocket(port);
         running = true;
-        log.info("Listening for clients on port {} ({})", port, tlsEnabled ? "mTLS" : "plain TCP");
+        log.info("Listening for clients on port {}", port);
         Thread.ofPlatform().name("client-acceptor").daemon(false).start(this::acceptClients);
     }
 

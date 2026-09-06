@@ -14,9 +14,5 @@ server:
 sync:
   socket:
     port: 8888
-    keystore: classpath:server-keystore.p12
-    truststore: classpath:truststore.p12
-    password: ${KEYSTORE_PASSWORD}
     pending-ack-ttl-ms: 20000
-    tls-enabled: true
 
