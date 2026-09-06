@@ -9,10 +9,6 @@ rem   luddite.bat client <remote-host>   — start in client mode pointing at re
 rem Switch console to UTF-8 so Cyrillic (and other non-ASCII) paths work correctly
 chcp 65001 >nul
 
-if "%KEYSTORE_PASSWORD%"=="" (
-    set KEYSTORE_PASSWORD=test123
-)
-
 set SCRIPT_DIR=%~dp0
 set SERVER_JAR=%SCRIPT_DIR%server-sync\target\server-sync-0.0.1-SNAPSHOT.jar
 set CLIENT_JAR=%SCRIPT_DIR%client-sync\target\client-sync-0.0.1-SNAPSHOT.jar
@@ -32,6 +28,6 @@ goto :eof
 
 :run_client
 echo [luddite] Starting in CLIENT mode...
-java -Djava.net.preferIPv4Stack=true -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -Dstdin.encoding=UTF-8 -jar %CLIENT_JAR% --sync.socket.keystore=classpath:client-keystore.p12
+java -Djava.net.preferIPv4Stack=true -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -Dstdin.encoding=UTF-8 -jar %CLIENT_JAR%
 set EXIT_CODE=%ERRORLEVEL%
 goto :eof

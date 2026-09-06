@@ -1,8 +1,18 @@
 package com.fstojilj.luddite.sync.client.service;
 
+import com.fstojilj.luddite.sync.client.event.ServerDirsAvailableEvent;
 import com.fstojilj.luddite.sync.client.model.ClientRootDir;
 import com.fstojilj.luddite.sync.common.util.PasswordUtils;
 import jakarta.annotation.PreDestroy;
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.core.annotation.Order;
+import org.springframework.stereotype.Service;
+
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -17,12 +27,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.ApplicationArguments;
-import org.springframework.boot.ApplicationRunner;
-import org.springframework.core.annotation.Order;
-import org.springframework.stereotype.Service;
 
 /**
  * Establishes and maintains a persistent connection to the sync server,
@@ -81,7 +85,17 @@ public class ClientSyncService implements ApplicationRunner {
     public static List<String> serverDirs = new ArrayList<>();
 
     private volatile boolean running = false;
+
+    /**
+     * -- GETTER --
+     * Returns the current state of the sync connection, explicitly tracked at each
+     * transition point (connect, disconnect, and per-tick file transfer) rather than
+     * derived from raw socket introspection — see
+     * .
+     */
+    @Getter
     private volatile ConnectionState connectionState = ConnectionState.DISCONNECTED;
+
     private Socket socket;
 
     /**
@@ -90,6 +104,8 @@ public class ClientSyncService implements ApplicationRunner {
      * Populated during each connect cycle; read by the UI to show access-denied popups.
      */
     private final ConcurrentHashMap<String, Boolean> privateAuthResults = new ConcurrentHashMap<>();
+
+    private final ApplicationEventPublisher serverDirsEventPublisher;
 
     /**
      * Starts the sync loop after the schema has been initialized.
@@ -119,15 +135,6 @@ public class ClientSyncService implements ApplicationRunner {
      */
     public boolean isConnected() {
         return connectionState != ConnectionState.DISCONNECTED;
-    }
-
-    /**
-     * Returns the current state of the sync connection, explicitly tracked at each
-     * transition point (connect, disconnect, and per-tick file transfer) rather than
-     * derived from raw socket introspection — see {@link ConnectionState}.
-     */
-    public ConnectionState getConnectionState() {
-        return connectionState;
     }
 
     /**
@@ -163,10 +170,10 @@ public class ClientSyncService implements ApplicationRunner {
 
                 serverDirs = serverPublicDirs;
                 log.info("Server advertises {} public dir(s): {}", serverPublicDirs.size(), serverPublicDirs);
+                serverDirsEventPublisher.publishEvent(new ServerDirsAvailableEvent(serverPublicDirs));
 
                 // Wait for user to subscribe if nothing configured yet
                 List<String> clientListeningDirs = rootDirService.retrieveAllInSyncDirs();
-                printAvailableDirs(serverPublicDirs);
                 if (clientListeningDirs.isEmpty()) {
                     while (running) {
                         sleep(7_000);
@@ -477,28 +484,6 @@ public class ClientSyncService implements ApplicationRunner {
 
             sleep(POLL_INTERVAL_MS);
         }
-    }
-
-    /**
-     * Prints the list of directories available on the server to stdout, along with
-     * instructions for subscribing via the CLI.
-     *
-     * @param availableDirs directory names advertised by the server
-     */
-    private static void printAvailableDirs(List<String> availableDirs) {
-        System.out.println();
-        System.out.println("  Server has the following directories available:");
-        System.out.println("  -----------------------------------------------");
-        if (availableDirs.isEmpty()) {
-            System.out.println("  (none)");
-        } else {
-            for (int i = 1; i <= availableDirs.size(); i++) {
-                System.out.printf("  %d. %s%n", i, availableDirs.get(i - 1));
-            }
-        }
-        System.out.println();
-        System.out.println("  Use the 'add' command with dir indices, e.g. 'add 1' or 'add 2,3'");
-        System.out.println();
     }
 
     /**
