@@ -1,14 +1,10 @@
 package com.fstojilj.luddite.sync.client.cli;
 
+import com.fstojilj.luddite.sync.client.event.ServerDirsAvailableEvent;
 import com.fstojilj.luddite.sync.client.model.ClientRootDir;
 import com.fstojilj.luddite.sync.client.service.ClientSyncService;
 import com.fstojilj.luddite.sync.client.service.RootDirService;
 import jakarta.annotation.PostConstruct;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
-import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -16,7 +12,14 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.ApplicationContext;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.List;
 
 import static com.fstojilj.luddite.sync.client.service.ClientSyncService.serverDirs;
 import static java.lang.Thread.sleep;
@@ -166,4 +169,27 @@ public class ClientCli {
 
         return names;
     }
+
+    @EventListener
+    public void onServerDirsAvailable(ServerDirsAvailableEvent event) {
+        printAvailableDirs(event.availableDirs());
+    }
+
+    private void printAvailableDirs(List<String> availableDirs) {
+        System.out.println();
+        System.out.println("  Server has the following directories available:");
+        System.out.println("  -----------------------------------------------");
+        if (availableDirs.isEmpty()) {
+            System.out.println("  (none)");
+        } else {
+            for (int i = 1; i <= availableDirs.size(); i++) {
+                System.out.printf("  %d. %s%n", i, availableDirs.get(i - 1));
+            }
+        }
+        System.out.println();
+        System.out.println("  Use the 'add' command with dir indices, e.g. 'add 1' or 'add 2,3'");
+        System.out.println();
+    }
+
+
 }
