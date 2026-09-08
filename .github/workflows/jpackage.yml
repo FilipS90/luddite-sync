@@ -1,0 +1,172 @@
+name: Package Luddite Sync App
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-and-package:
+    name: Package App on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'maven'
+
+      - name: Build All Modules (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: ./mvnw clean package -DskipTests
+
+      - name: Build All Modules (Windows)
+        if: matrix.os == 'windows-latest'
+        run: .\mvnw.cmd clean package -DskipTests
+
+      # ==========================================
+      # CLIENT PACKAGING
+      # ==========================================
+
+      # Client (Linux - DEB)
+      - name: Package Client Application (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          jpackage \
+            --type deb \
+            --input client-sync/target/jpackage-libs \
+            --main-jar client-sync-0.0.1-SNAPSHOT.jar \
+            --main-class org.springframework.boot.loader.launch.JarLauncher \
+            --name "luddite-client" \
+            --app-version "${GITHUB_REF_NAME#v}" \
+            --dest dist/client/
+
+      # Client (macOS - DMG)
+      - name: Package Client Application (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          jpackage \
+            --type dmg \
+            --input client-sync/target/jpackage-libs \
+            --main-jar client-sync-0.0.1-SNAPSHOT.jar \
+            --main-class org.springframework.boot.loader.launch.JarLauncher \
+            --name "LudditeClient" \
+            --app-version "${GITHUB_REF_NAME#v}" \
+            --dest dist/client/
+
+      # Client (Windows - Portable App Image)
+      - name: Package Client Application (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          $VERSION = $env:GITHUB_REF_NAME -replace '^v', ''
+          jpackage `
+            --type app-image `
+            --input client-sync\target\jpackage-libs `
+            --main-jar client-sync-0.0.1-SNAPSHOT.jar `
+            --main-class org.springframework.boot.loader.launch.JarLauncher `
+            --name "LudditeClient" `
+            --app-version "$VERSION" `
+            --dest dist/client/
+          Compress-Archive -Path dist/client/LudditeClient -DestinationPath dist/client/LudditeClient-windows.zip
+
+      # ==========================================
+      # SERVER PACKAGING
+      # ==========================================
+
+      # Server (Linux - DEB)
+      - name: Package Server Application (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          jpackage \
+            --type deb \
+            --input server-sync/target/jpackage-libs \
+            --main-jar server-sync-0.0.1-SNAPSHOT.jar \
+            --main-class org.springframework.boot.loader.launch.JarLauncher \
+            --name "luddite-server" \
+            --app-version "${GITHUB_REF_NAME#v}" \
+            --dest dist/server/
+
+      # Server (macOS - DMG)
+      - name: Package Server Application (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          jpackage \
+            --type dmg \
+            --input server-sync/target/jpackage-libs \
+            --main-jar server-sync-0.0.1-SNAPSHOT.jar \
+            --main-class org.springframework.boot.loader.launch.JarLauncher \
+            --name "LudditeServer" \
+            --app-version "${GITHUB_REF_NAME#v}" \
+            --dest dist/server/
+
+      # Server (Windows - Portable App Image)
+      - name: Package Server Application (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          $VERSION = $env:GITHUB_REF_NAME -replace '^v', ''
+          jpackage `
+            --type app-image `
+            --input server-sync\target\jpackage-libs `
+            --main-jar server-sync-0.0.1-SNAPSHOT.jar `
+            --main-class org.springframework.boot.loader.launch.JarLauncher `
+            --name "LudditeServer" `
+            --win-console `
+            --app-version "$VERSION" `
+            --dest dist/server/
+          Compress-Archive -Path dist/server/LudditeServer -DestinationPath dist/server/LudditeServer-windows.zip
+
+      # ==========================================
+      # ARTIFACT UPLOADS
+      # ==========================================
+
+      - name: Upload Client Application Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: luddite-client-${{ matrix.os }}
+          path: dist/client/
+
+      - name: Upload Server Application Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: luddite-server-${{ matrix.os }}
+          path: dist/server/
+
+  # ==========================================
+  # DRAFT GITHUB RELEASE
+  # ==========================================
+  create-draft-release:
+    name: Create GitHub Draft Release
+    needs: build-and-package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all matrix artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Consolidate binaries for release
+        run: |
+          mkdir -p release-files
+          find release-artifacts -type f \( -name "*.deb" -o -name "*.dmg" -o -name "*.zip" \) -exec cp {} release-files/ \;
+          ls -lh release-files
+
+      - name: Create Draft Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          files: release-files/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
