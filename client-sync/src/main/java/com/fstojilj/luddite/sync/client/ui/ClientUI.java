@@ -8,10 +8,6 @@ import com.fstojilj.luddite.sync.client.service.RootDirService;
 import com.fstojilj.luddite.sync.client.service.ServerApiClient;
 import com.fstojilj.luddite.sync.common.dto.TreeResponse;
 import jakarta.annotation.PostConstruct;
-import javax.swing.JDialog;
-import javax.swing.plaf.basic.BasicScrollBarUI;
-import javax.swing.plaf.basic.BasicSplitPaneDivider;
-import javax.swing.plaf.basic.BasicSplitPaneUI;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,6 +23,7 @@ import javax.swing.ButtonGroup;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JComponent;
+import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -50,6 +47,9 @@ import javax.swing.UIManager;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
 import javax.swing.border.TitledBorder;
+import javax.swing.plaf.basic.BasicScrollBarUI;
+import javax.swing.plaf.basic.BasicSplitPaneDivider;
+import javax.swing.plaf.basic.BasicSplitPaneUI;
 import javax.swing.text.DefaultCaret;
 import java.awt.AWTEvent;
 import java.awt.BorderLayout;
@@ -737,7 +737,8 @@ public class ClientUI {
             chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
             chooser.setDialogTitle("SELECT SYNC LOCATION");
             if (chooser.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION) {
-                customField.setText(chooser.getSelectedFile().getAbsolutePath());
+                // Mirror into a subfolder named after the server dir, as the DEFAULT
+                customField.setText(chooser.getSelectedFile().toPath().resolve(dirName).toString());
             }
         });
         browseBtn.setEnabled(false);
