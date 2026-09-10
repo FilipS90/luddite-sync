@@ -126,6 +126,28 @@ public class FileSocketService {
     // ── Public API ────────────────────────────────────────────────────────────
 
     /**
+     * Returns the port currently being listened on. Exposed to the admin CLI and to
+     * {@code ServerInfoController} so clients can discover it over REST.
+     */
+    public int getPort() {
+        return port;
+    }
+
+    /**
+     * Rebinds the listening socket to a new port without restarting the JVM.
+     * Already-connected clients are unaffected; only new connections are routed to the
+     * new port. Called from the admin CLI's {@code port} command.
+     *
+     * @param newPort the port to rebind to
+     * @throws Exception if the new port cannot be bound (e.g. already in use)
+     */
+    public synchronized void changePort(int newPort) throws Exception {
+        stop();
+        this.port = newPort;
+        start();
+    }
+
+    /**
      * Returns the remote address strings of all currently connected clients.
      * Used by the admin CLI {@code listc} command.
      *

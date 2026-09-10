@@ -3,8 +3,9 @@ setlocal enabledelayedexpansion
 rem Luddite Sync — wrapper script (Windows)
 rem
 rem Usage:
-rem   luddite.bat                        — start in server mode (default)
-rem   luddite.bat client <remote-host>   — start in client mode pointing at remote-host
+rem   luddite.bat            — start in server mode (default)
+rem   luddite.bat client     — start in client mode; use the UI's HOST panel to pick/switch
+rem                            the server host (persisted in the client's own DB)
 
 rem Switch console to UTF-8 so Cyrillic (and other non-ASCII) paths work correctly
 chcp 65001 >nul

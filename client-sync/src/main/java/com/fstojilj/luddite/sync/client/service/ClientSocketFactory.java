@@ -1,28 +1,32 @@
 package com.fstojilj.luddite.sync.client.service;
 
 import lombok.Getter;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 
 /**
  * Builds outbound connections to the server's file socket, shared by the persistent
  * sync connection ({@link ClientSyncService}) and one-off downloads ({@link DownloadService}).
- *
- * <p>Centralizes the mTLS/plain-TCP decision and keystore/truststore loading so both
- * callers stay in sync with the {@code sync.socket.*} configuration.
  */
 @Component
 public class ClientSocketFactory {
 
+    private static final int CONNECT_TIMEOUT_MS = 3_000;
+
+    /**
+     * The server host and port to connect to. Neither has an {@code @Value} default —
+     * both are always set by {@code HostSettingsInitializer} at startup, from the
+     * client's {@code host} DB table (the single source of truth for both;
+     * {@code application.yml} plays no role). The port is additionally kept current by
+     * {@code ClientSyncService}, which re-discovers it over REST on every (re)connect.
+     */
     @Getter
-    @Value("${sync.server.host}")
     private String serverHost;
 
     @Getter
-    @Value("${sync.server.port:8888}")
     private int serverPort;
 
     /**
@@ -32,7 +36,35 @@ public class ClientSocketFactory {
      * @throws IOException if the connection fails
      */
     public Socket connect() throws IOException {
-        return new Socket(serverHost, serverPort);
+        // Bounded connect: an unreachable host would otherwise block this thread on the
+        // OS-default TCP timeout (~45 s), stalling a switch to a different host — the
+        // in-progress connect can't be interrupted by closing the socket.
+        Socket socket = new Socket();
+        try {
+            socket.connect(new InetSocketAddress(serverHost, serverPort), CONNECT_TIMEOUT_MS);
+        } catch (IOException e) {
+            socket.close();
+            throw e;
+        }
+        return socket;
+    }
+
+    /**
+     * Points future {@link #connect()} calls at a different server host.
+     *
+     * @param host the new server host
+     */
+    public synchronized void setServerHost(String host) {
+        this.serverHost = host;
+    }
+
+    /**
+     * Points future {@link #connect()} calls at a different server port.
+     *
+     * @param port the new server port
+     */
+    public synchronized void setServerPort(int port) {
+        this.serverPort = port;
     }
 
 }

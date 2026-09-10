@@ -3,14 +3,11 @@ package com.fstojilj.luddite.sync.client.ui;
 import com.fstojilj.luddite.sync.client.service.ClientSyncService;
 import com.fstojilj.luddite.sync.client.service.ConnectionState;
 import com.fstojilj.luddite.sync.client.service.DownloadService;
+import com.fstojilj.luddite.sync.client.service.HostSettingsService;
 import com.fstojilj.luddite.sync.client.service.RootDirService;
 import com.fstojilj.luddite.sync.client.service.ServerApiClient;
 import com.fstojilj.luddite.sync.common.dto.TreeResponse;
 import jakarta.annotation.PostConstruct;
-import javax.swing.JDialog;
-import javax.swing.plaf.basic.BasicScrollBarUI;
-import javax.swing.plaf.basic.BasicSplitPaneDivider;
-import javax.swing.plaf.basic.BasicSplitPaneUI;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,6 +23,7 @@ import javax.swing.ButtonGroup;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JComponent;
+import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -40,6 +38,7 @@ import javax.swing.JSeparator;
 import javax.swing.JSplitPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
+import javax.swing.JWindow;
 import javax.swing.ListCellRenderer;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
@@ -48,7 +47,11 @@ import javax.swing.UIManager;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
 import javax.swing.border.TitledBorder;
+import javax.swing.plaf.basic.BasicScrollBarUI;
+import javax.swing.plaf.basic.BasicSplitPaneDivider;
+import javax.swing.plaf.basic.BasicSplitPaneUI;
 import javax.swing.text.DefaultCaret;
+import java.awt.AWTEvent;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Cursor;
@@ -60,7 +63,9 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Point;
 import java.awt.Rectangle;
+import java.awt.Toolkit;
 import java.awt.Window;
+import java.awt.event.AWTEventListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
@@ -119,6 +124,7 @@ public class ClientUI {
     private final ClientSyncService clientSyncService;
     private final ServerApiClient serverApiClient;
     private final DownloadService downloadService;
+    private final HostSettingsService hostSettingsService;
     private final ApplicationContext applicationContext;
 
     @Value("${sync.client.mirror-dir}")
@@ -156,6 +162,11 @@ public class ClientUI {
     private Timer refreshTimer;
     private final Set<String> expandedKeys = new HashSet<>();
     private long lastSubscribedClickMs = 0;
+    private JTextField hostField;
+    private boolean hostFieldPopulated = false;
+    // Guards against the 2 s timer stacking up refresh workers when the server is slow
+    // or unreachable. EDT-only: set before execute(), cleared in done().
+    private boolean refreshInFlight = false;
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -197,7 +208,13 @@ public class ClientUI {
         mainContent.setBackground(BG);
         mainContent.add(buildTitleBar(), BorderLayout.NORTH);
         mainContent.add(buildCenter(), BorderLayout.CENTER);
-        mainContent.add(buildStatusBar(), BorderLayout.SOUTH);
+
+        JPanel southStack = new JPanel();
+        southStack.setLayout(new BoxLayout(southStack, BoxLayout.Y_AXIS));
+        southStack.setBackground(BG);
+        southStack.add(buildHostBar());
+        southStack.add(buildStatusBar());
+        mainContent.add(southStack, BorderLayout.SOUTH);
 
         Dimension minSize = new Dimension(490, 460);
         frame.setContentPane(wrapWithResizeBorder(frame, mainContent, minSize));
@@ -207,7 +224,10 @@ public class ClientUI {
         frame.setVisible(true);
 
         // Refresh every 2 s
-        refreshTimer = new Timer(2000, e -> refreshData());
+        refreshTimer = new Timer(2000, e -> {
+            populateHostFieldOnce();
+            refreshData();
+        });
         refreshTimer.setInitialDelay(500);
         refreshTimer.start();
 
@@ -411,6 +431,142 @@ public class ClientUI {
         return titledPanel("LOG", scroll);
     }
 
+    // ── Host bar ──────────────────────────────────────────────────────────────
+
+    private JPanel buildHostBar() {
+        JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
+        bar.setBackground(BG);
+        bar.setBorder(new EmptyBorder(4, 12, 0, 12));
+
+        bar.add(label("HOST ▸", MONO_SM, FG_DIM));
+
+        hostField = new JTextField(18);
+        hostField.setFont(MONO);
+        hostField.setBackground(BG_CELL);
+        hostField.setForeground(FG);
+        hostField.setCaretColor(FG);
+        hostField.setBorder(BorderFactory.createCompoundBorder(
+                new LineBorder(BORDER_CLR, 1), new EmptyBorder(2, 4, 2, 4)));
+        hostField.addActionListener(e -> switchHost());
+        bar.add(hostField);
+
+        JButton historyBtn = retroButton("▾", FG_AMBER, () -> showHostHistoryPopup(hostField));
+        bar.add(historyBtn);
+
+        bar.add(retroButton("[ CONNECT ]", FG_AMBER, this::switchHost));
+
+        JSeparator sep = new JSeparator();
+        sep.setForeground(BORDER_CLR);
+        sep.setBackground(BG);
+
+        JPanel wrapper = new JPanel(new BorderLayout());
+        wrapper.setBackground(BG);
+        wrapper.add(sep, BorderLayout.NORTH);
+        wrapper.add(bar, BorderLayout.CENTER);
+        return wrapper;
+    }
+
+    private void switchHost() {
+        String host = hostField.getText();
+        if (host == null || host.isBlank()) {
+            appendLog("Enter a host before connecting.");
+            return;
+        }
+        // Drop the previous host's dirs up front rather than letting the refresh loop
+        // diff them away later — otherwise they linger until the next successful poll,
+        // and indefinitely if the new host shares none at all.
+        treeListModel.clear();
+        expandedKeys.clear();
+        hostSettingsService.switchTo(host);
+        appendLog("Switching to host: " + host.trim());
+        refreshData();
+    }
+
+    /**
+     * Shows a small popup listing previously-used hosts below {@code anchor}. Clicking
+     * a host fills {@link #hostField}; clicking the "×" next to it removes it from the
+     * history instead.
+     */
+    private void showHostHistoryPopup(JComponent anchor) {
+        List<String> history = hostSettingsService.getHistory();
+        if (history.isEmpty()) {
+            appendLog("No previously used hosts yet.");
+            return;
+        }
+
+        DefaultListModel<String> model = new DefaultListModel<>();
+        history.forEach(model::addElement);
+
+        JList<String> list = new JList<>(model);
+        list.setBackground(BG_CELL);
+        list.setFont(MONO);
+        list.setFixedCellHeight(22);
+        list.setCellRenderer(buildHostHistoryCellRenderer());
+
+        JWindow popup = new JWindow(frame);
+        popup.getContentPane().setBackground(BG_CELL);
+        JScrollPane scroll = retroScroll(list);
+        popup.getContentPane().add(scroll);
+
+        final int deleteZonePx = 20;
+        AWTEventListener[] outsideClickListener = new AWTEventListener[1];
+        Runnable closePopup = () -> {
+            popup.dispose();
+            if (outsideClickListener[0] != null) {
+                Toolkit.getDefaultToolkit().removeAWTEventListener(outsideClickListener[0]);
+            }
+        };
+
+        list.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                int index = list.locationToIndex(e.getPoint());
+                if (index < 0) return;
+                Rectangle bounds = list.getCellBounds(index, index);
+                String host = model.getElementAt(index);
+                if (e.getX() >= bounds.x + bounds.width - deleteZonePx) {
+                    hostSettingsService.forget(host);
+                    model.remove(index);
+                    if (model.isEmpty()) {
+                        closePopup.run();
+                    } else {
+                        popup.pack();
+                    }
+                } else {
+                    hostField.setText(host);
+                    closePopup.run();
+                }
+            }
+        });
+
+        outsideClickListener[0] = event -> {
+            if (event instanceof MouseEvent me && me.getID() == MouseEvent.MOUSE_PRESSED) {
+                Point screenPoint = me.getLocationOnScreen();
+                if (!popup.getBounds().contains(screenPoint)) {
+                    closePopup.run();
+                }
+            }
+        };
+        Toolkit.getDefaultToolkit().addAWTEventListener(outsideClickListener[0], AWTEvent.MOUSE_EVENT_MASK);
+
+        popup.pack();
+        popup.setSize(Math.max(popup.getWidth(), anchor.getWidth()), popup.getHeight());
+        Point anchorLoc = anchor.getLocationOnScreen();
+        popup.setLocation(anchorLoc.x, anchorLoc.y + anchor.getHeight());
+        popup.setVisible(true);
+    }
+
+    private ListCellRenderer<String> buildHostHistoryCellRenderer() {
+        return (list, value, index, isSelected, cellHasFocus) -> {
+            JPanel row = new JPanel(new BorderLayout());
+            row.setBackground(isSelected ? BORDER_CLR : BG_CELL);
+            row.setBorder(new EmptyBorder(2, 6, 2, 6));
+            row.add(label(value, MONO, FG), BorderLayout.WEST);
+            row.add(label("×", MONO_BOLD, FG_RED), BorderLayout.EAST);
+            return row;
+        };
+    }
+
     // ── Status bar ────────────────────────────────────────────────────────────
 
     private JPanel buildStatusBar() {
@@ -581,7 +737,8 @@ public class ClientUI {
             chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
             chooser.setDialogTitle("SELECT SYNC LOCATION");
             if (chooser.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION) {
-                customField.setText(chooser.getSelectedFile().getAbsolutePath());
+                // Mirror into a subfolder named after the server dir, as the DEFAULT
+                customField.setText(chooser.getSelectedFile().toPath().resolve(dirName).toString());
             }
         });
         browseBtn.setEnabled(false);
@@ -931,9 +1088,32 @@ public class ClientUI {
         dialog.setVisible(true); // blocks until dispose()
     }
 
+    /**
+     * Fills {@link #hostField} with the resolved host, once. Deliberately kept off the
+     * {@link #refreshData()} SwingWorker pipeline: that pipeline calls
+     * {@code serverApiClient.fetchPublicDirs()}, a network call to the actual server
+     * that can block for a long time (or indefinitely) if the server is unreachable —
+     * which would otherwise starve the host field of ever being populated. This method
+     * only reads {@code socketFactory.getServerHost()} (an in-memory field, no I/O), so
+     * it's safe to call directly on the EDT every tick until it succeeds. Runs before
+     * the very first {@code refreshData()} call — {@code HostSettingsInitializer}
+     * resolves the host slightly after UI-build time, on the main thread, so this
+     * retries each tick rather than assuming it's ready on the first one.
+     */
+    private void populateHostFieldOnce() {
+        if (hostFieldPopulated) return;
+        String host = hostSettingsService.getCurrentHost();
+        if (host != null && !host.isBlank()) {
+            hostField.setText(host);
+            hostFieldPopulated = true;
+        }
+    }
+
     // ── Data refresh (DB work off EDT via SwingWorker) ─────────────────────────
 
     private void refreshData() {
+        if (refreshInFlight) return;
+        refreshInFlight = true;
         new SwingWorker<RefreshSnapshot, Void>() {
             @Override
             protected RefreshSnapshot doInBackground() {
@@ -989,6 +1169,8 @@ public class ClientUI {
                     statusLabel.setText(snap.connectionState().name());
                 } catch (Exception ex) {
                     log.warn("refreshData error", ex);
+                } finally {
+                    refreshInFlight = false;
                 }
             }
         }.execute();

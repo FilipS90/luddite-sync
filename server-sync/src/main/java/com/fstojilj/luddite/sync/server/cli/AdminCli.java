@@ -26,6 +26,7 @@ import static java.lang.Thread.sleep;
  * listc             — list connected clients and their addresses
  * add &lt;path&gt;        — register a new root dir and start watching it
  * remove &lt;id&gt;       — stop watching and unregister a root dir by ID
+ * port [newPort]    — show or change the socket listening port
  * help              — show available commands
  * exit              — shut down the server
  */
@@ -135,6 +136,26 @@ public class AdminCli {
                     System.out.println("  Error: id must be a number");
                 }
             }
+            case "port" -> {
+                if (arg.isEmpty()) {
+                    System.out.println("  Usage: port <newPort>");
+                    System.out.printf("  Current port: %d%n", fileSocketService.getPort());
+                    return;
+                }
+                try {
+                    int newPort = Integer.parseInt(arg.trim());
+                    if (newPort < 1 || newPort > 65535) {
+                        System.out.println("  Error: port must be between 1 and 65535");
+                        return;
+                    }
+                    fileSocketService.changePort(newPort);
+                    System.out.printf("  Now listening on port %d%n", newPort);
+                } catch (NumberFormatException e) {
+                    System.out.println("  Error: port must be a number");
+                } catch (Exception e) {
+                    System.out.printf("  Error: failed to bind to port: %s%n", e.getMessage());
+                }
+            }
             case "help" -> printHelp();
             case "exit" -> {
                 System.out.println("  Shutting down...");
@@ -152,6 +173,7 @@ public class AdminCli {
         System.out.println("  listc               list connected clients and their addresses");
         System.out.println("  add <path>          register and watch a new root dir");
         System.out.println("  remove <id>         unregister a root dir by ID");
+        System.out.println("  port [newPort]      show, or change, the socket listening port");
         System.out.println("  help                show this message");
         System.out.println("  exit                shut down the server");
         System.out.println();
