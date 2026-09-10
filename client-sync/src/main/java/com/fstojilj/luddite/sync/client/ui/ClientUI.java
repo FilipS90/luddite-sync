@@ -164,6 +164,9 @@ public class ClientUI {
     private long lastSubscribedClickMs = 0;
     private JTextField hostField;
     private boolean hostFieldPopulated = false;
+    // Guards against the 2 s timer stacking up refresh workers when the server is slow
+    // or unreachable. EDT-only: set before execute(), cleared in done().
+    private boolean refreshInFlight = false;
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -469,8 +472,14 @@ public class ClientUI {
             appendLog("Enter a host before connecting.");
             return;
         }
+        // Drop the previous host's dirs up front rather than letting the refresh loop
+        // diff them away later — otherwise they linger until the next successful poll,
+        // and indefinitely if the new host shares none at all.
+        treeListModel.clear();
+        expandedKeys.clear();
         hostSettingsService.switchTo(host);
         appendLog("Switching to host: " + host.trim());
+        refreshData();
     }
 
     /**
@@ -1102,6 +1111,8 @@ public class ClientUI {
     // ── Data refresh (DB work off EDT via SwingWorker) ─────────────────────────
 
     private void refreshData() {
+        if (refreshInFlight) return;
+        refreshInFlight = true;
         new SwingWorker<RefreshSnapshot, Void>() {
             @Override
             protected RefreshSnapshot doInBackground() {
@@ -1157,6 +1168,8 @@ public class ClientUI {
                     statusLabel.setText(snap.connectionState().name());
                 } catch (Exception ex) {
                     log.warn("refreshData error", ex);
+                } finally {
+                    refreshInFlight = false;
                 }
             }
         }.execute();

@@ -44,11 +44,16 @@ public class HostSettingsService {
      * {@code ClientSyncService} re-discovers the real port over REST on the very next
      * connect cycle and corrects it if needed.
      *
+     * <p>Reconnecting to the host that is already configured is deliberately not a
+     * no-op: re-pressing CONNECT is how the user forces a re-poll after the server's
+     * shared dirs changed, and it also re-points the REST client, which would
+     * otherwise stay on whatever host it was last built against.
+     *
      * @param host the new server host
      */
     public void switchTo(String host) {
         String trimmed = host == null ? "" : host.trim();
-        if (trimmed.isEmpty() || trimmed.equals(socketFactory.getServerHost())) return;
+        if (trimmed.isEmpty()) return;
 
         int port = hostRepository.findPortForName(trimmed).orElse(HostEndpoint.DEFAULT_PORT);
         socketFactory.setServerHost(trimmed);

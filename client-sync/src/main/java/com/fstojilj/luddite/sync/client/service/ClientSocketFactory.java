@@ -4,6 +4,7 @@ import lombok.Getter;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 
 /**
@@ -12,6 +13,8 @@ import java.net.Socket;
  */
 @Component
 public class ClientSocketFactory {
+
+    private static final int CONNECT_TIMEOUT_MS = 3_000;
 
     /**
      * The server host and port to connect to. Neither has an {@code @Value} default —
@@ -33,7 +36,17 @@ public class ClientSocketFactory {
      * @throws IOException if the connection fails
      */
     public Socket connect() throws IOException {
-        return new Socket(serverHost, serverPort);
+        // Bounded connect: an unreachable host would otherwise block this thread on the
+        // OS-default TCP timeout (~45 s), stalling a switch to a different host — the
+        // in-progress connect can't be interrupted by closing the socket.
+        Socket socket = new Socket();
+        try {
+            socket.connect(new InetSocketAddress(serverHost, serverPort), CONNECT_TIMEOUT_MS);
+        } catch (IOException e) {
+            socket.close();
+            throw e;
+        }
+        return socket;
     }
 
     /**

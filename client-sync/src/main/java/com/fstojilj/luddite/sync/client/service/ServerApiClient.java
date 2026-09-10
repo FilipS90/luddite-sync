@@ -8,10 +8,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 
+import java.net.http.HttpClient;
+import java.time.Duration;
 import java.util.List;
 
 /**
@@ -28,13 +31,22 @@ import java.util.List;
 @Slf4j
 public class ServerApiClient {
 
+    /**
+     * Bounds every REST call. Without these, a request to an unreachable host blocks on
+     * the OS-default TCP connect timeout (~45 s), so calls issued just before a host
+     * switch keep failing against the *old* host long after the switch — and the UI's
+     * 2 s refresh stacks up worker threads behind them.
+     */
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(3);
+    private static final Duration READ_TIMEOUT = Duration.ofSeconds(5);
+
     private volatile RestClient restClient;
     private final int apiPort;
 
     @Autowired
     public ServerApiClient(@Value("${sync.server.api-port:8080}") int apiPort) {
         this.apiPort = apiPort;
-        this.restClient = RestClient.builder().build();
+        this.restClient = buildClient(null);
     }
 
     /** Package-private constructor for testing with a pre-built RestClient. */
@@ -50,9 +62,20 @@ public class ServerApiClient {
      * @param newHost the new server host
      */
     public synchronized void switchHost(String newHost) {
-        this.restClient = RestClient.builder()
-                .baseUrl("http://" + newHost + ":" + apiPort)
-                .build();
+        this.restClient = buildClient("http://" + newHost + ":" + apiPort);
+    }
+
+    /**
+     * Builds a timeout-bounded client. {@code baseUrl} is {@code null} only at
+     * construction time, before the host is known — see the class javadoc.
+     */
+    private static RestClient buildClient(String baseUrl) {
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(
+                HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build());
+        factory.setReadTimeout(READ_TIMEOUT);
+        RestClient.Builder builder = RestClient.builder().requestFactory(factory);
+        if (baseUrl != null) builder.baseUrl(baseUrl);
+        return builder.build();
     }
 
     /**
