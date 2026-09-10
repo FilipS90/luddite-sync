@@ -44,6 +44,14 @@ public class SchemaInitializer implements ApplicationRunner {
                 )
                 """);
 
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS host (
+                    name      TEXT    PRIMARY KEY NOT NULL,
+                    port      INTEGER NOT NULL,
+                    last_used BIGINT  NOT NULL
+                )
+                """);
+
         log.info("SQLite schema initialized successfully");
     }
 }

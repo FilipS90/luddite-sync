@@ -2,6 +2,7 @@ package com.fstojilj.luddite.sync.client.service;
 
 import com.fstojilj.luddite.sync.client.event.ServerDirsAvailableEvent;
 import com.fstojilj.luddite.sync.client.model.ClientRootDir;
+import com.fstojilj.luddite.sync.client.repository.HostRepository;
 import com.fstojilj.luddite.sync.common.util.PasswordUtils;
 import jakarta.annotation.PreDestroy;
 import lombok.Getter;
@@ -62,7 +63,7 @@ import java.util.stream.Stream;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-@Order(2)
+@Order(3)
 public class ClientSyncService implements ApplicationRunner {
 
     private static final byte SYNC = 0x01;
@@ -77,6 +78,7 @@ public class ClientSyncService implements ApplicationRunner {
     private final ClientIdService clientIdService;
     private final ServerApiClient serverApiClient;
     private final ClientSocketFactory socketFactory;
+    private final HostRepository hostRepository;
 
     /**
      * Dirs currently advertised by the server — exposed for the CLI {@code add} command
@@ -108,9 +110,10 @@ public class ClientSyncService implements ApplicationRunner {
     private final ApplicationEventPublisher serverDirsEventPublisher;
 
     /**
-     * Starts the sync loop after the schema has been initialized.
-     * Runs as {@link ApplicationRunner} with {@code @Order(2)}, after
-     * {@code SchemaInitializer} ({@code @Order(1)}) has created all tables.
+     * Starts the sync loop after the schema has been initialized and the last-used host
+     * has been restored. Runs as {@link ApplicationRunner} with {@code @Order(3)}, after
+     * {@code SchemaInitializer} ({@code @Order(1)}) has created all tables and
+     * {@code HostSettingsInitializer} ({@code @Order(2)}) has restored the host.
      */
     @Override
     public void run(ApplicationArguments args) {
@@ -206,6 +209,14 @@ public class ClientSyncService implements ApplicationRunner {
 
                 registerDirs(dirsToSync);
                 auditMissingFiles(dirsToSync);
+
+                // Discover the server's current socket port (it may have been changed live via
+                // the server's admin CLI) before opening the socket, and persist it — the DB is
+                // the only record of "last known good port for this host", so this keeps it
+                // fresh rather than ever going stale.
+                int socketPort = serverApiClient.fetchSocketPort(socketFactory.getServerPort());
+                socketFactory.setServerPort(socketPort);
+                hostRepository.recordUsed(socketFactory.getServerHost(), socketPort);
 
                 // Open socket once, send clientId, enter the poll loop
                 socket = socketFactory.connect();
