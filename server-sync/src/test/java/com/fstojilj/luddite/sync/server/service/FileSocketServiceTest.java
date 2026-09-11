@@ -15,6 +15,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
@@ -26,6 +27,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
@@ -384,7 +386,130 @@ class FileSocketServiceTest {
         assertThat(result.readNBytes((int) fileSize)).isEqualTo(content);
     }
 
+    // ── handleSync — client_ids recording ────────────────────────────────────
+
+    @Test
+    void handleSync_liveFiles_recordsClientForEveryFileSent() throws Exception {
+        Files.write(tempDir.resolve("a.jpg"), "a".getBytes(StandardCharsets.UTF_8));
+        Files.write(tempDir.resolve("b.jpg"), "b".getBytes(StandardCharsets.UTF_8));
+        setupRootDir("photos", 1, tempDir.toString());
+        when(fileMetadataService.findChangedSince(1, 0L, 100))
+                .thenReturn(List.of(liveFile("a.jpg", 1L), liveFile("b.jpg", 2L)));
+
+        invokeHandleSync(new DataOutputStream(new ByteArrayOutputStream()), "photos", 0L, "hw-1");
+
+        verify(fileMetadataService).addClientToFiles(1, List.of("a.jpg", "b.jpg"), "hw-1");
+    }
+
+    @Test
+    void handleSync_deletedRecords_areNotRecordedAsHolders() throws Exception {
+        Files.write(tempDir.resolve("live.jpg"), "x".getBytes(StandardCharsets.UTF_8));
+        setupRootDir("photos", 1, tempDir.toString());
+        when(fileMetadataService.findChangedSince(1, 0L, 100))
+                .thenReturn(List.of(deletedFile("gone.jpg", 3L), liveFile("live.jpg", 4L)));
+
+        invokeHandleSync(new DataOutputStream(new ByteArrayOutputStream()), "photos", 0L, "hw-1");
+
+        verify(fileMetadataService).addClientToFiles(1, List.of("live.jpg"), "hw-1");
+    }
+
+    @Test
+    void handleSync_onlyDeletedRecords_recordsNoHolders() throws Exception {
+        setupRootDir("photos", 1, tempDir.toString());
+        when(fileMetadataService.findChangedSince(1, 0L, 100))
+                .thenReturn(List.of(deletedFile("gone.jpg", 3L)));
+
+        invokeHandleSync(new DataOutputStream(new ByteArrayOutputStream()), "photos", 0L, "hw-1");
+
+        verify(fileMetadataService).addClientToFiles(1, List.of(), "hw-1");
+    }
+
+    @Test
+    void handleSync_unauthorizedPrivateDir_recordsNothing() throws Exception {
+        RootDir priv = RootDir.builder().id(2).name("secret").absolutePath(tempDir.toString()).isPrivate(true).build();
+        when(rootDirRepository.findByName("secret")).thenReturn(Optional.of(priv));
+        when(authCacheService.isAuthorized("hw-1", "secret")).thenReturn(false);
+
+        invokeHandleSync(new DataOutputStream(new ByteArrayOutputStream()), "secret", 0L, "hw-1");
+
+        verify(fileMetadataService, never()).addClientToFiles(anyInt(), anyList(), anyString());
+    }
+
+    @Test
+    void handleSync_unknownDir_recordsNothing() throws Exception {
+        when(rootDirRepository.findByName("nope")).thenReturn(Optional.empty());
+
+        invokeHandleSync(new DataOutputStream(new ByteArrayOutputStream()), "nope", 0L, "hw-1");
+
+        verify(fileMetadataService, never()).addClientToFiles(anyInt(), anyList(), anyString());
+    }
+
+    @Test
+    void handleSync_streamFailsMidTransfer_doesNotRecordClient() throws Exception {
+        Files.write(tempDir.resolve("a.jpg"), "abc".getBytes(StandardCharsets.UTF_8));
+        setupRootDir("photos", 1, tempDir.toString());
+        when(fileMetadataService.findChangedSince(1, 0L, 100)).thenReturn(List.of(liveFile("a.jpg", 1L)));
+
+        DataOutputStream broken = new DataOutputStream(new OutputStream() {
+            private int written;
+            @Override public void write(int b) throws IOException {
+                if (++written > 8) throw new IOException("peer reset");
+            }
+        });
+
+        assertThatThrownBy(() -> invokeHandleSync(broken, "photos", 0L, "hw-1"))
+                .isInstanceOf(IOException.class);
+
+        verify(fileMetadataService, never()).addClientToFiles(anyInt(), anyList(), anyString());
+    }
+
+    // ── handleDeleteAck ──────────────────────────────────────────────────────
+
+    @Test
+    void handleDeleteAck_qualifiedPath_acknowledgesWithDirIdAndRelativePath() throws Exception {
+        setupRootDir("photos", 7, tempDir.toString());
+
+        invokeHandleDeleteAck("photos/sub/deep/x.jpg", "hw-1");
+
+        verify(fileMetadataService).acknowledgeDelete(7, "sub/deep/x.jpg", "hw-1");
+    }
+
+    @Test
+    void handleDeleteAck_pathWithoutSlash_isIgnored() throws Exception {
+        invokeHandleDeleteAck("photos", "hw-1");
+
+        verify(fileMetadataService, never()).acknowledgeDelete(anyInt(), anyString(), anyString());
+    }
+
+    @Test
+    void handleDeleteAck_backslashSeparatedPath_isIgnored() throws Exception {
+        invokeHandleDeleteAck("photos\\sub\\x.jpg", "hw-1");
+
+        verify(fileMetadataService, never()).acknowledgeDelete(anyInt(), anyString(), anyString());
+    }
+
+    @Test
+    void handleDeleteAck_unknownDir_isIgnored() throws Exception {
+        when(rootDirRepository.findByName("ghost")).thenReturn(Optional.empty());
+
+        invokeHandleDeleteAck("ghost/x.jpg", "hw-1");
+
+        verify(fileMetadataService, never()).acknowledgeDelete(anyInt(), anyString(), anyString());
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private void invokeHandleDeleteAck(String qualifiedPath, String clientId) throws Exception {
+        Method m = FileSocketService.class.getDeclaredMethod("handleDeleteAck", String.class, String.class);
+        m.setAccessible(true);
+        try {
+            m.invoke(fileSocketService, qualifiedPath, clientId);
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException ex) throw ex;
+            throw e;
+        }
+    }
 
     private void invokeSendFileBytes(DataOutputStream out, Path absPath, long fileBytesSize)
             throws Exception {

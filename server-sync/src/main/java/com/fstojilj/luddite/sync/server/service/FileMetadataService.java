@@ -64,7 +64,8 @@ public class FileMetadataService implements ApplicationRunner {
             log.debug("Ignoring file: {}", filePath);
             return;
         }
-        fileMetadataRepository.add(buildFileMetadata(file, rootDirId, relativePath));
+        // Upsert, not insert: the path may still be occupied by a soft-deleted row awaiting acks.
+        fileMetadataRepository.upsert(buildFileMetadata(file, rootDirId, relativePath));
     }
 
     public void addAllFileMetadataForRoot(String rootAbsolutePath, int rootDirId) {
@@ -106,7 +107,9 @@ public class FileMetadataService implements ApplicationRunner {
     }
 
     /**
-     * Returns the new syncVersion assigned to this file.
+     * Refreshes the record for a modified file in place and resets its {@code sync_version}
+     * to {@code NULL} so the next poll re-delivers it. {@code client_ids} is preserved so
+     * clients holding the previous copy remain tracked for a subsequent delete.
      */
     @Transactional
     public void updateFileMetadata(Path absoluteFilePath, int rootDirId, String relativeFilePath) {
@@ -115,39 +118,39 @@ public class FileMetadataService implements ApplicationRunner {
             throw new IllegalArgumentException("Path must point to an existing file");
         }
 
-        // Delete existing row (if any) and re-insert as a fresh record.
-        // Resets sync_version to NULL so the next poll re-delivers the updated file.
-        fileMetadataRepository.delete(rootDirId, relativeFilePath);
-        fileMetadataRepository.add(buildFileMetadata(file, rootDirId, relativeFilePath));
-        log.debug("Re-created FileMetadata for rootDirId: {}, relativePath: {}", rootDirId, relativeFilePath);
+        fileMetadataRepository.upsert(buildFileMetadata(file, rootDirId, relativeFilePath));
+        log.debug("Refreshed FileMetadata for rootDirId: {}, relativePath: {}", rootDirId, relativeFilePath);
     }
 
     // ── Delete path ───────────────────────────────────────────────────────────
 
     /**
-     * Soft-deletes a file: marks it as deleted, bumps its {@code sync_version}, and sets
-     * {@code client_ids} to the comma-separated client IDs of every currently connected
-     * client. The row stays in the database until every client has acknowledged the delete.
+     * Marks a file as deleted by minting a new sync version and flagging the row. The row's
+     * {@code client_ids} — the clients that received the file — is preserved, and the row stays
+     * in the database until every one of them has acknowledged the delete.
      *
-     * @param rootDirId          root directory ID
-     * @param relativeFilePath   relative path of the deleted file
-     * @param connectedClientIds comma-separated client IDs of all connected clients;
-     *                           pass an empty string if no clients are connected (row is
-     *                           hard-deleted immediately in {@link #acknowledgeDelete})
+     * @param rootDirId        root directory ID
+     * @param relativeFilePath relative path of the deleted file
      */
     @Transactional
-    public void softDeleteFileMetadata(int rootDirId, String relativeFilePath, String connectedClientIds) {
+    public void softDeleteFileMetadata(int rootDirId, String relativeFilePath) {
         long version = nextSyncVersion(rootDirId);
-        fileMetadataRepository.softDelete(rootDirId, relativeFilePath, version, connectedClientIds);
-        log.info("Soft-deleted (v{}) rootDirId={} '{}', pending clients: [{}]",
-                version, rootDirId, relativeFilePath, connectedClientIds);
-
-        if (!connectedClientIds.contains(",")) {
-            fileMetadataRepository.delete(rootDirId, relativeFilePath);
-            log.info("Hard-deleted (no clients connected) rootDirId={} '{}'", rootDirId, relativeFilePath);
-        }
+        fileMetadataRepository.softDelete(rootDirId, relativeFilePath, version);
+        log.info("Soft-deleted (v{}) rootDirId={} '{}'", version, rootDirId, relativeFilePath);
     }
 
+    /**
+     * Records that {@code clientId} now holds a copy of each of the given files.
+     * Called by the socket layer after the files have been streamed to the client.
+     *
+     * @param rootDirId     root directory ID
+     * @param relativePaths relative paths of the files the client received
+     * @param clientId      the receiving client's stable client ID
+     */
+    @Transactional
+    public void addClientToFiles(int rootDirId, List<String> relativePaths, String clientId) {
+        fileMetadataRepository.addClientIdToAll(rootDirId, relativePaths, clientId);
+    }
 
     /**
      * Removes {@code clientId} from the {@code client_ids} of a soft-deleted row.

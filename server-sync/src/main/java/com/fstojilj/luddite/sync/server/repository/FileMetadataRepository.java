@@ -1,14 +1,6 @@
 package com.fstojilj.luddite.sync.server.repository;
 
 import com.fstojilj.luddite.sync.common.model.FileMetadata;
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
-import java.sql.Statement;
-import java.sql.Timestamp;
-import java.time.Instant;
-import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
@@ -18,6 +10,15 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
+
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 @Repository
 @RequiredArgsConstructor
@@ -69,6 +70,42 @@ public class FileMetadataRepository {
 
         log.debug("Inserted FileMetadata with id: {}", key.longValue());
         return key.longValue();
+    }
+
+    /**
+     * Inserts a live file record, or refreshes the existing row at that path in place (live or
+     * soft-deleted): marks it live, updates checksum, size and modification time, and resets
+     * {@code sync_version} to {@code NULL} so the next poll re-delivers the file.
+     * {@code client_ids} is preserved so clients holding a previous copy remain tracked.
+     *
+     * <p>Must be used instead of {@link #add} for create/modify events: a soft-deleted row still
+     * occupies the {@code UNIQUE (root_dir_id, relative_path, filename)} key until all clients
+     * have acknowledged the delete.
+     *
+     * @param fileMetadata the record to insert or refresh
+     */
+    public void upsert(FileMetadata fileMetadata) {
+        String sql = """
+                INSERT INTO file_metadata (filename, root_dir_id, relative_path, checksum, file_size,
+                                           created_at, modified_at, sync_version, deleted)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NULL, FALSE)
+                ON CONFLICT (root_dir_id, relative_path, filename) DO UPDATE SET
+                    checksum     = excluded.checksum,
+                    file_size    = excluded.file_size,
+                    modified_at  = excluded.modified_at,
+                    sync_version = NULL,
+                    deleted      = FALSE
+                """;
+        jdbcTemplate.update(sql,
+                fileMetadata.filename(),
+                fileMetadata.rootDirId(),
+                fileMetadata.relativePath(),
+                fileMetadata.checksum(),
+                fileMetadata.fileSize(),
+                fileMetadata.createdAt() != null ? Timestamp.from(fileMetadata.createdAt()) : Timestamp.from(Instant.now()),
+                fileMetadata.modifiedAt() != null ? Timestamp.from(fileMetadata.modifiedAt()) : Timestamp.from(Instant.now()));
+        log.debug("Upserted FileMetadata for rootDirId: {}, relativePath: {}",
+                fileMetadata.rootDirId(), fileMetadata.relativePath());
     }
 
     public void addAll(List<FileMetadata> metadataList) {
@@ -165,27 +202,70 @@ public class FileMetadataRepository {
     }
 
     /**
-     * Marks a file as soft-deleted and sets the {@code sync_version} and
-     * {@code client_ids} so the deletion can be replicated to all current clients.
+     * Marks a file as soft-deleted and sets the {@code sync_version}. The existing
+     * {@code client_ids} (clients holding a copy) is left untouched — each of them must
+     * acknowledge the delete via {@link #acknowledgeDelete} before the row is hard-deleted.
      *
      * @param rootDirId    root directory ID
      * @param relativePath relative file path
      * @param syncVersion  new monotonic sync version minted for this deletion event
-     * @param clientIds    comma-separated client IDs of all currently connected clients
      */
-    public void softDelete(long rootDirId, String relativePath, long syncVersion, String clientIds) {
+    public void softDelete(long rootDirId, String relativePath, long syncVersion) {
         int rows = jdbcTemplate.update("""
                         UPDATE file_metadata
-                        SET deleted = TRUE, sync_version = ?, client_ids = ?,
+                        SET deleted = TRUE, sync_version = ?,
                             file_size = 0, checksum = ''
                         WHERE root_dir_id = ? AND relative_path = ?
                         """,
-                syncVersion, clientIds, rootDirId, relativePath);
+                syncVersion, rootDirId, relativePath);
         if (rows == 0) {
             log.warn("softDelete: no row found for rootDirId={} relativePath='{}'", rootDirId, relativePath);
         } else {
             log.debug("Soft-deleted (v{}) rootDirId={} '{}'", syncVersion, rootDirId, relativePath);
         }
+    }
+
+    /**
+     * Appends {@code clientId} to the {@code client_ids} list of every given row in one batch.
+     * Called after a client has received the files. The append is done in SQL so it is atomic
+     * per row and idempotent (a client already in the list is not added twice).
+     *
+     * @param rootDirId     root directory ID
+     * @param relativePaths relative paths of the files the client received
+     * @param clientId      the receiving client's stable ID
+     */
+    public void addClientIdToAll(int rootDirId, List<String> relativePaths, String clientId) {
+        if (relativePaths.isEmpty()) {
+            return;
+        }
+        String sql = """
+                UPDATE file_metadata
+                SET client_ids = CASE
+                    WHEN client_ids IS NULL OR client_ids = '' THEN ?
+                    WHEN instr(',' || client_ids || ',', ',' || ? || ',') > 0 THEN client_ids
+                    ELSE client_ids || ',' || ?
+                END
+                WHERE root_dir_id = ? AND relative_path = ?
+                """;
+
+        jdbcTemplate.batchUpdate(sql, new BatchPreparedStatementSetter() {
+            @Override
+            public void setValues(@NonNull PreparedStatement ps, int i) throws SQLException {
+                ps.setString(1, clientId);
+                ps.setString(2, clientId);
+                ps.setString(3, clientId);
+                ps.setInt(4, rootDirId);
+                ps.setString(5, relativePaths.get(i));
+            }
+
+            @Override
+            public int getBatchSize() {
+                return relativePaths.size();
+            }
+        });
+
+        log.debug("Added client '{}' to client_ids of {} record(s) in rootDirId={}",
+                clientId, relativePaths.size(), rootDirId);
     }
 
     /**
