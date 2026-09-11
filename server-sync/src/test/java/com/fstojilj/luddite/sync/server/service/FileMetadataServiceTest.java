@@ -76,7 +76,7 @@ class FileMetadataServiceTest {
     void addFileMetadata_validFile_shouldInsert() throws Exception {
         Path file = Files.writeString(tempDir.resolve("photo.jpg"), "data");
         fileMetadataService.addFileMetadata(file, 1, "photo.jpg");
-        verify(fileMetadataRepository).add(any(FileMetadata.class));
+        verify(fileMetadataRepository).upsert(any(FileMetadata.class));
     }
 
     @Test
@@ -117,11 +117,11 @@ class FileMetadataServiceTest {
     // ── updateFileMetadata ────────────────────────────────────────────────────
 
     @Test
-    void updateFileMetadata_existingFile_shouldDeleteAndReinsert() throws Exception {
+    void updateFileMetadata_existingFile_shouldUpsertInPlace() throws Exception {
         Path file = Files.writeString(tempDir.resolve("photo.jpg"), "updated");
         fileMetadataService.updateFileMetadata(file, 1, "photo.jpg");
-        verify(fileMetadataRepository).delete(1, "photo.jpg");
-        verify(fileMetadataRepository).add(any(FileMetadata.class));
+        verify(fileMetadataRepository).upsert(any(FileMetadata.class));
+        verify(fileMetadataRepository, never()).delete(any(), any());
     }
 
     @Test
@@ -134,16 +134,18 @@ class FileMetadataServiceTest {
     // ── softDeleteFileMetadata ────────────────────────────────────────────────
 
     @Test
-    void softDeleteFileMetadata_LastClientProcessed_shouldHardDelete() {
-        fileMetadataService.softDeleteFileMetadata(1, "photo.jpg", "hw-id-1");
-        verify(fileMetadataRepository).softDelete(any(Long.class), any(), any(Long.class), any());
-        verify(fileMetadataRepository).delete(1, "photo.jpg");
+    void softDeleteFileMetadata_shouldSoftDeleteWithNextVersion() {
+        fileMetadataService.softDeleteFileMetadata(1, "photo.jpg");
+        verify(fileMetadataRepository).softDelete(1L, "photo.jpg", 1L);
+        verify(fileMetadataRepository, never()).delete(any(), any());
     }
 
+    // ── addClientToFiles ──────────────────────────────────────────────────────
+
     @Test
-    void softDeleteFileMetadata_withClients_shouldSoftDelete() {
-        fileMetadataService.softDeleteFileMetadata(1, "photo.jpg", "hw-id-1,hw-id-2");
-        verify(fileMetadataRepository).softDelete(1L, "photo.jpg", 1L, "hw-id-1,hw-id-2");
+    void addClientToFiles_shouldDelegateToRepository() {
+        fileMetadataService.addClientToFiles(1, List.of("a.jpg", "b.jpg"), "hw-id-1");
+        verify(fileMetadataRepository).addClientIdToAll(1, List.of("a.jpg", "b.jpg"), "hw-id-1");
     }
 
     // ── acknowledgeDelete ─────────────────────────────────────────────────────

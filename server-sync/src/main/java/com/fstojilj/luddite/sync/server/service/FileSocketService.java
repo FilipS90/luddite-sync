@@ -79,8 +79,7 @@ public class FileSocketService {
 
     /**
      * One entry per connected client: key = stable client ID, value = remote address string.
-     * Used to populate {@code client_ids} on soft-deleted rows and to expose the client list
-     * to the admin CLI.
+     * Exposed to the admin CLI via {@link #listConnectedClients()}.
      */
     private final ConcurrentHashMap<String, String> connectedClients = new ConcurrentHashMap<>();
 
@@ -155,16 +154,6 @@ public class FileSocketService {
      */
     public List<String> listConnectedClients() {
         return new ArrayList<>(connectedClients.values());
-    }
-
-    /**
-     * Returns a comma-separated string of client IDs for all currently connected clients.
-     * Called by {@link DirWatcherService} at soft-delete time to populate {@code client_ids}.
-     *
-     * @return comma-separated client IDs, or an empty string if no clients are connected
-     */
-    public String getConnectedClientIds() {
-        return String.join(",", connectedClients.keySet());
     }
 
     // ── Accept loop ───────────────────────────────────────────────────────────
@@ -318,6 +307,14 @@ public class FileSocketService {
                 }
             }
             out.flush();
+
+            // Record which live files this client now holds, so a later delete is propagated to it.
+            // Deleted rows are excluded: client_ids on those means "still has to ack the delete".
+            List<String> receivedPaths = changed.stream()
+                    .filter(meta -> !meta.deleted())
+                    .map(FileMetadata::relativePath)
+                    .toList();
+            fileMetadataService.addClientToFiles(rootDirId, receivedPaths, clientId);
         } finally {
             syncLock.unlock();
         }

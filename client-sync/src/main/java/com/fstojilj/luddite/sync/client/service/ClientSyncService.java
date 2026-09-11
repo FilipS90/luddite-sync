@@ -421,8 +421,10 @@ public class ClientSyncService implements ApplicationRunner {
                 for (int i = 0; i < count; i++) {
                     byte flags = in.readByte();
                     int pathLen = in.readInt();
-                    String relPath = new String(in.readNBytes(pathLen), StandardCharsets.UTF_8);
-                    relPath = adjustFilePathToClientOS(relPath);
+                    // Keep the server's own form of the path for the DELETE_ACK — the server
+                    // parses it with '/', so it must not be OS-adjusted.
+                    String serverPath = new String(in.readNBytes(pathLen), StandardCharsets.UTF_8);
+                    String relPath = adjustFilePathToClientOS(serverPath);
                     long syncVersion = in.readLong();
                     long fileSizeBytes = in.readLong();
 
@@ -444,11 +446,12 @@ public class ClientSyncService implements ApplicationRunner {
                         // Delete from disk first, then purge DB record (disk-only delete already done here,
                         // so use purgeRecord not removeRecord to avoid a second disk delete attempt)
                         Files.deleteIfExists(target);
+                        deleteEmptyParents(target.getParent(), dirBase);
                         fileMetadataService.purgeRecord(dirName, relPath);
                         log.info("Deleted: {}", relPath);
 
                         // ACK the delete so server can remove from client_ids
-                        byte[] ackPathBytes = relPath.getBytes(StandardCharsets.UTF_8);
+                        byte[] ackPathBytes = serverPath.getBytes(StandardCharsets.UTF_8);
                         out.writeByte(DELETE_ACK);
                         out.writeInt(ackPathBytes.length);
                         out.write(ackPathBytes);
@@ -566,6 +569,41 @@ public class ClientSyncService implements ApplicationRunner {
             Thread.sleep(millis);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * Walks up from {@code dir} toward {@code stopAt} (exclusive), removing each directory that
+     * is empty. Stops at the first non-empty directory. Since the server only sends per-file
+     * deletes, this is what keeps the client mirror free of empty directory skeletons when a
+     * whole tree is removed on the server. The mirror root ({@code stopAt}) is never removed.
+     *
+     * <p>Best-effort: a failure (e.g. a file appearing in the directory between the emptiness
+     * check and the delete, or a permission problem) is logged and swallowed. It must not
+     * escape into the poll loop, where it would be mistaken for a connection error and
+     * prevent the DELETE_ACK from being sent.
+     *
+     * @param dir    directory to start from (the deleted file's parent)
+     * @param stopAt the local root of the synced dir; never deleted
+     */
+    private void deleteEmptyParents(Path dir, Path stopAt) {
+        while (dir != null && dir.startsWith(stopAt) && !dir.equals(stopAt)) {
+            if (!Files.isDirectory(dir)) {
+                return;
+            }
+            try {
+                try (Stream<Path> entries = Files.list(dir)) {
+                    if (entries.findAny().isPresent()) {
+                        return;
+                    }
+                }
+                Files.delete(dir);
+            } catch (IOException e) {
+                log.warn("Could not remove empty directory {}: {}", dir, e.getMessage());
+                return;
+            }
+            log.info("Removed empty directory: {}", dir);
+            dir = dir.getParent();
         }
     }
 

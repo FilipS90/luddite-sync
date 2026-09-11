@@ -23,9 +23,6 @@ class DirWatcherServiceTest {
     @Mock
     private FileMetadataService fileMetadataService;
 
-    @Mock
-    private FileSocketService fileSocketService;
-
     @InjectMocks
     private DirWatcherService dirWatcherService;
 

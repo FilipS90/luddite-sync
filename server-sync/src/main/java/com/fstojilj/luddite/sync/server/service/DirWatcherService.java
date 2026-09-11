@@ -40,7 +40,6 @@ import java.util.stream.Collectors;
 public class DirWatcherService {
 
     private final FileMetadataService fileMetadataService;
-    private final FileSocketService fileSocketService;
 
     @Value("${sync.watcher.scan-interval-seconds:30}")
     private int scanIntervalSeconds = 30;
@@ -190,8 +189,7 @@ public class DirWatcherService {
         for (Map.Entry<String, FileMetadata> entry : dbState.entrySet()) {
             if (!foundOnDisk.contains(entry.getKey())) {
                 try {
-                    String connectedClientIds = fileSocketService.getConnectedClientIds();
-                    fileMetadataService.softDeleteFileMetadata(rootDirId, entry.getValue().relativePath(), connectedClientIds);
+                    fileMetadataService.softDeleteFileMetadata(rootDirId, entry.getValue().relativePath());
                     log.debug("Scan: deleted subdir file '{}'", entry.getKey());
                 } catch (Exception e) {
                     log.error("Scan: failed to soft-delete metadata for '{}'", entry.getKey(), e);
@@ -208,8 +206,8 @@ public class DirWatcherService {
     }
 
     /**
-     * Dispatches a single filesystem event to {@link FileMetadataService} and then
-     * signals {@link FileSocketService} that fresh data is available for this root dir.
+     * Dispatches a single filesystem event to {@link FileMetadataService}. Clients pick the
+     * change up on their next poll via the sync version.
      */
     private void handleFileEvent(WatchEvent.Kind<?> kind, Path absoluteFilePath,
                                  int rootDirId, String relativePath) {
@@ -219,8 +217,7 @@ public class DirWatcherService {
             } else if (kind == StandardWatchEventKinds.ENTRY_MODIFY) {
                 fileMetadataService.updateFileMetadata(absoluteFilePath, rootDirId, relativePath);
             } else if (kind == StandardWatchEventKinds.ENTRY_DELETE) {
-                String connectedClientIds = fileSocketService.getConnectedClientIds();
-                fileMetadataService.softDeleteFileMetadata(rootDirId, relativePath, connectedClientIds);
+                fileMetadataService.softDeleteFileMetadata(rootDirId, relativePath);
             }
         } catch (Exception e) {
             log.error("Error handling {} event for '{}': {}", kind.name(), absoluteFilePath, e.getMessage(), e);

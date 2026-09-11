@@ -117,13 +117,119 @@ class FileMetadataRepositoryTest {
         assertThat(repository.findChangedSince(1, -1L, 100)).isEmpty();
     }
 
+    // ── upsert ────────────────────────────────────────────────────────────────
+
+    @Test
+    void upsert_newPath_insertsLiveRow() {
+        repository.upsert(buildMeta("a.jpg", "a.jpg"));
+        List<FileMetadata> rows = repository.findChangedSince(1, -1L, 100);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.getFirst().deleted()).isFalse();
+        assertThat(rows.getFirst().syncVersion()).isNull();
+    }
+
+    @Test
+    void upsert_softDeletedPath_revivesRowAndKeepsClientIds() {
+        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
+        repository.softDelete(1L, "a.jpg", 5L);
+
+        repository.upsert(buildMeta("a.jpg", "a.jpg").toBuilder().checksum("new").fileSize(2048L).build());
+
+        List<FileMetadata> rows = repository.findChangedSince(1, -1L, 100);
+        assertThat(rows).hasSize(1);
+        FileMetadata row = rows.getFirst();
+        assertThat(row.deleted()).isFalse();
+        assertThat(row.checksum()).isEqualTo("new");
+        assertThat(row.fileSize()).isEqualTo(2048L);
+        assertThat(row.syncVersion()).isNull();
+        assertThat(row.clientIds()).isEqualTo("hw-id-1");
+    }
+
+    @Test
+    void upsert_livePath_refreshesAndResetsSyncVersionKeepingClientIds() {
+        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.updateSyncVersion(1, "a.jpg", 7L);
+        repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
+
+        repository.upsert(buildMeta("a.jpg", "a.jpg").toBuilder().checksum("new").build());
+
+        FileMetadata row = repository.findChangedSince(1, -1L, 100).getFirst();
+        assertThat(row.checksum()).isEqualTo("new");
+        assertThat(row.syncVersion()).isNull();
+        assertThat(row.clientIds()).isEqualTo("hw-id-1");
+    }
+
+    // ── addClientIdToAll ──────────────────────────────────────────────────────
+
+    @Test
+    void addClientIdToAll_nullClientIds_setsClientId() {
+        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.add(buildMeta("b.jpg", "b.jpg"));
+        repository.addClientIdToAll(1, List.of("a.jpg", "b.jpg"), "hw-id-1");
+
+        List<FileMetadata> rows = repository.findChangedSince(1, -1L, 100);
+        assertThat(rows).hasSize(2)
+                .allSatisfy(r -> assertThat(r.clientIds()).isEqualTo("hw-id-1"));
+    }
+
+    @Test
+    void addClientIdToAll_existingClient_appendsCommaSeparated() {
+        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
+        repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-2");
+
+        assertThat(repository.findChangedSince(1, -1L, 100).getFirst().clientIds())
+                .isEqualTo("hw-id-1,hw-id-2");
+    }
+
+    @Test
+    void addClientIdToAll_sameClientTwice_isIdempotent() {
+        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
+        repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
+
+        assertThat(repository.findChangedSince(1, -1L, 100).getFirst().clientIds())
+                .isEqualTo("hw-id-1");
+    }
+
+    @Test
+    void addClientIdToAll_prefixOfExistingId_isStillAppended() {
+        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-10");
+        repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
+
+        assertThat(repository.findChangedSince(1, -1L, 100).getFirst().clientIds())
+                .isEqualTo("hw-id-10,hw-id-1");
+    }
+
+    @Test
+    void addClientIdToAll_onlyTouchesGivenPaths() {
+        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.add(buildMeta("b.jpg", "b.jpg"));
+        repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
+
+        List<FileMetadata> rows = repository.findChangedSince(1, -1L, 100);
+        assertThat(rows).filteredOn(r -> r.relativePath().equals("b.jpg"))
+                .singleElement().satisfies(r -> assertThat(r.clientIds()).isNull());
+    }
+
+    @Test
+    void addClientIdToAll_noPaths_isNoOp() {
+        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addClientIdToAll(1, List.of(), "hw-id-1");
+        assertThat(repository.findChangedSince(1, -1L, 100).getFirst().clientIds()).isNull();
+    }
+
     // ── softDelete ────────────────────────────────────────────────────────────
 
     @Test
-    void softDelete_marksRowAsDeleted() {
+    void softDelete_marksRowAsDeletedAndKeepsClientIds() {
         repository.add(buildMeta("photo.jpg", "photo.jpg"));
         repository.updateSyncVersion(1, "photo.jpg", 1L);
-        repository.softDelete(1L, "photo.jpg", 2L, "hw-id-1");
+        repository.addClientIdToAll(1, List.of("photo.jpg"), "hw-id-1");
+        repository.softDelete(1L, "photo.jpg", 2L);
+
         List<FileMetadata> changed = repository.findChangedSince(1, 1L, 100);
         assertThat(changed).hasSize(1);
         assertThat(changed.getFirst().deleted()).isTrue();
@@ -135,7 +241,8 @@ class FileMetadataRepositoryTest {
     @Test
     void acknowledgeDelete_lastClient_hardDeletesRow() {
         repository.add(buildMeta("photo.jpg", "photo.jpg"));
-        repository.softDelete(1L, "photo.jpg", 1L, "hw-id-1");
+        repository.addClientIdToAll(1, List.of("photo.jpg"), "hw-id-1");
+        repository.softDelete(1L, "photo.jpg", 1L);
         repository.acknowledgeDelete(1, "photo.jpg", "hw-id-1");
         assertThat(repository.findChangedSince(1, -1L, 100)).isEmpty();
     }
@@ -143,12 +250,22 @@ class FileMetadataRepositoryTest {
     @Test
     void acknowledgeDelete_oneOfTwoClients_removesFromList() {
         repository.add(buildMeta("photo.jpg", "photo.jpg"));
-        repository.softDelete(1L, "photo.jpg", 1L, "hw-id-1,hw-id-2");
+        repository.addClientIdToAll(1, List.of("photo.jpg"), "hw-id-1");
+        repository.addClientIdToAll(1, List.of("photo.jpg"), "hw-id-2");
+        repository.softDelete(1L, "photo.jpg", 1L);
         repository.acknowledgeDelete(1, "photo.jpg", "hw-id-1");
 
         List<FileMetadata> rows = repository.findChangedSince(1, -1L, 100);
         assertThat(rows).hasSize(1);
         assertThat(rows.getFirst().clientIds()).isEqualTo("hw-id-2");
+    }
+
+    @Test
+    void acknowledgeDelete_noClientsEverHeldFile_hardDeletesRow() {
+        repository.add(buildMeta("photo.jpg", "photo.jpg"));
+        repository.softDelete(1L, "photo.jpg", 1L);
+        repository.acknowledgeDelete(1, "photo.jpg", "hw-id-1");
+        assertThat(repository.findChangedSince(1, -1L, 100)).isEmpty();
     }
 
     // ── getMaxSyncVersionByRootDir ────────────────────────────────────────────
