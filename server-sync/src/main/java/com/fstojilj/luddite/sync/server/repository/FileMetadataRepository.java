@@ -73,18 +73,14 @@ public class FileMetadataRepository {
     }
 
     /**
-     * Inserts a live file record, or — if a row already exists at that path, live or
-     * soft-deleted — refreshes it in place: marks it live again, updates checksum, size and
-     * modification time, and resets {@code sync_version} to {@code NULL} so the next poll
-     * re-delivers the file.
+     * Inserts a live file record, or refreshes the existing row at that path in place (live or
+     * soft-deleted): marks it live, updates checksum, size and modification time, and resets
+     * {@code sync_version} to {@code NULL} so the next poll re-delivers the file.
+     * {@code client_ids} is preserved so clients holding a previous copy remain tracked.
      *
-     * <p>{@code client_ids} is deliberately preserved. It tracks which clients hold a copy of
-     * this path; those clients will simply receive the new content on their next poll, and if
-     * the file is deleted again before they do, they still need to be told.
-     *
-     * <p>This is what makes delete-then-recreate at the same path safe: the soft-deleted row
-     * still occupies the {@code UNIQUE (root_dir_id, relative_path, filename)} key until every
-     * client has acknowledged the delete, so a plain INSERT would fail.
+     * <p>Must be used instead of {@link #add} for create/modify events: a soft-deleted row still
+     * occupies the {@code UNIQUE (root_dir_id, relative_path, filename)} key until all clients
+     * have acknowledged the delete.
      *
      * @param fileMetadata the record to insert or refresh
      */
@@ -230,12 +226,9 @@ public class FileMetadataRepository {
     }
 
     /**
-     * Appends {@code clientId} to the {@code client_ids} list of every given row, in one
-     * batch. Called after a client has received the files so the server knows which clients
-     * hold a copy and therefore must be told when the file is later deleted.
-     *
-     * <p>The append is done in SQL so it is atomic per row and idempotent: a client that is
-     * already in the list (e.g. re-receiving a modified file) is not added twice.
+     * Appends {@code clientId} to the {@code client_ids} list of every given row in one batch.
+     * Called after a client has received the files. The append is done in SQL so it is atomic
+     * per row and idempotent (a client already in the list is not added twice).
      *
      * @param rootDirId     root directory ID
      * @param relativePaths relative paths of the files the client received

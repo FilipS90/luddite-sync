@@ -421,64 +421,11 @@ public class ClientSyncService implements ApplicationRunner {
                 for (int i = 0; i < count; i++) {
                     byte flags = in.readByte();
                     int pathLen = in.readInt();
-                    // Keep the server's own form of the path for the DELETE_ACK — the server
-                    // parses it with '/', so it must not be OS-adjusted.
                     String serverPath = new String(in.readNBytes(pathLen), StandardCharsets.UTF_8);
-                    String relPath = adjustFilePathToClientOS(serverPath);
                     long syncVersion = in.readLong();
                     long fileSizeBytes = in.readLong();
 
-                    boolean deleted = (flags & FLAG_DELETED) != 0;
-
-                    Path target = dirBase.resolve(stripDirPrefix(dirName, relPath)).normalize();
-
-                    // Reject any path whose canonical form is not a descendant of dirBase.
-                    if (!target.startsWith(dirBase)) {
-                        log.error("Path traversal blocked — server sent path outside mirror dir: '{}'", relPath);
-                        // Must drain bytes from stream to keep it in sync before continuing
-                        if (!deleted && fileSizeBytes > 0) {
-                            in.skipNBytes(fileSizeBytes);
-                        }
-                        continue;
-                    }
-
-                    if (deleted) {
-                        // Delete from disk first, then purge DB record (disk-only delete already done here,
-                        // so use purgeRecord not removeRecord to avoid a second disk delete attempt)
-                        Files.deleteIfExists(target);
-                        deleteEmptyParents(target.getParent(), dirBase);
-                        fileMetadataService.purgeRecord(dirName, relPath);
-                        log.info("Deleted: {}", relPath);
-
-                        // ACK the delete so server can remove from client_ids
-                        byte[] ackPathBytes = serverPath.getBytes(StandardCharsets.UTF_8);
-                        out.writeByte(DELETE_ACK);
-                        out.writeInt(ackPathBytes.length);
-                        out.write(ackPathBytes);
-                        out.flush();
-                    } else {
-                        Files.createDirectories(target.getParent());
-                        if (fileSizeBytes <= 33L * 1024 * 1024) {
-                            // Small file — read whole into memory, write at once
-                            byte[] fileBytes = in.readNBytes((int) fileSizeBytes);
-                            Files.write(target, fileBytes);
-                        } else {
-                            // Large file — read in 33 MB chunks, stream directly to disk
-                            try (var fileOut = Files.newOutputStream(target)) {
-                                byte[] buf = new byte[33 * 1024 * 1024];
-                                long remaining = fileSizeBytes;
-                                while (remaining > 0) {
-                                    int toRead = (int) Math.min(buf.length, remaining);
-                                    int read = in.readNBytes(buf, 0, toRead); // reads exactly toRead bytes
-                                    fileOut.write(buf, 0, read);
-                                    remaining -= read;
-                                }
-                            }
-                        }
-                        fileMetadataService.recordSynced(dirName, relPath);
-                        String fileSizeMb = String.format("%.2f", (double) fileSizeBytes / (1024 * 1024));
-                        log.info("Written: {} ({} MB, v{})", relPath, fileSizeMb, syncVersion);
-                    }
+                    applyRecord(in, out, dirName, dirBase, flags, serverPath, syncVersion, fileSizeBytes);
 
                     if (syncVersion > highestVersion) highestVersion = syncVersion;
                 }
@@ -497,6 +444,81 @@ public class ClientSyncService implements ApplicationRunner {
             }
 
             sleep(POLL_INTERVAL_MS);
+        }
+    }
+
+    /**
+     * Applies a single record from a SYNC response to the local mirror: deletes the file (and any
+     * parent directories left empty) and ACKs the delete, or writes the file's bytes from
+     * {@code in}. Always consumes exactly the record's payload from {@code in}, so the stream
+     * stays aligned for the next record even when the record is rejected.
+     *
+     * <p>Package-private for tests; {@link #pollLoop} is the only production caller.
+     *
+     * @param in            stream positioned at the start of this record's file bytes (none for deletes)
+     * @param out           stream to the server, used to send the DELETE_ACK
+     * @param dirName       the synced directory the record belongs to
+     * @param dirBase       absolute, normalised local root of that directory
+     * @param flags         record flags ({@link #FLAG_DELETED})
+     * @param serverPath    the qualified path exactly as the server sent it ("dirName/rel/path");
+     *                      echoed back verbatim in the DELETE_ACK because the server parses it with '/'
+     * @param syncVersion   the record's sync version (logging only)
+     * @param fileSizeBytes number of file bytes that follow in {@code in} for a live record
+     * @throws IOException if reading, writing, or the ACK fails (triggers reconnect)
+     */
+    void applyRecord(DataInputStream in, DataOutputStream out, String dirName, Path dirBase,
+                     byte flags, String serverPath, long syncVersion, long fileSizeBytes) throws IOException {
+        String relPath = adjustFilePathToClientOS(serverPath);
+        boolean deleted = (flags & FLAG_DELETED) != 0;
+
+        Path target = dirBase.resolve(stripDirPrefix(dirName, relPath)).normalize();
+
+        // Reject any path whose canonical form is not a descendant of dirBase.
+        if (!target.startsWith(dirBase)) {
+            log.error("Path traversal blocked — server sent path outside mirror dir: '{}'", relPath);
+            // Must drain bytes from stream to keep it in sync before continuing
+            if (!deleted && fileSizeBytes > 0) {
+                in.skipNBytes(fileSizeBytes);
+            }
+            return;
+        }
+
+        if (deleted) {
+            // Delete from disk first, then purge DB record (disk-only delete already done here,
+            // so use purgeRecord not removeRecord to avoid a second disk delete attempt)
+            Files.deleteIfExists(target);
+            deleteEmptyParents(target.getParent(), dirBase);
+            fileMetadataService.purgeRecord(dirName, relPath);
+            log.info("Deleted: {}", relPath);
+
+            // ACK the delete so server can remove from client_ids
+            byte[] ackPathBytes = serverPath.getBytes(StandardCharsets.UTF_8);
+            out.writeByte(DELETE_ACK);
+            out.writeInt(ackPathBytes.length);
+            out.write(ackPathBytes);
+            out.flush();
+        } else {
+            Files.createDirectories(target.getParent());
+            if (fileSizeBytes <= 33L * 1024 * 1024) {
+                // Small file — read whole into memory, write at once
+                byte[] fileBytes = in.readNBytes((int) fileSizeBytes);
+                Files.write(target, fileBytes);
+            } else {
+                // Large file — read in 33 MB chunks, stream directly to disk
+                try (var fileOut = Files.newOutputStream(target)) {
+                    byte[] buf = new byte[33 * 1024 * 1024];
+                    long remaining = fileSizeBytes;
+                    while (remaining > 0) {
+                        int toRead = (int) Math.min(buf.length, remaining);
+                        int read = in.readNBytes(buf, 0, toRead); // reads exactly toRead bytes
+                        fileOut.write(buf, 0, read);
+                        remaining -= read;
+                    }
+                }
+            }
+            fileMetadataService.recordSynced(dirName, relPath);
+            String fileSizeMb = String.format("%.2f", (double) fileSizeBytes / (1024 * 1024));
+            log.info("Written: {} ({} MB, v{})", relPath, fileSizeMb, syncVersion);
         }
     }
 
@@ -574,14 +596,11 @@ public class ClientSyncService implements ApplicationRunner {
 
     /**
      * Walks up from {@code dir} toward {@code stopAt} (exclusive), removing each directory that
-     * is empty. Stops at the first non-empty directory. Since the server only sends per-file
-     * deletes, this is what keeps the client mirror free of empty directory skeletons when a
-     * whole tree is removed on the server. The mirror root ({@code stopAt}) is never removed.
+     * is empty, stopping at the first non-empty one. The server only sends per-file deletes, so
+     * this is what removes directories emptied by a delete. {@code stopAt} itself is never removed.
      *
-     * <p>Best-effort: a failure (e.g. a file appearing in the directory between the emptiness
-     * check and the delete, or a permission problem) is logged and swallowed. It must not
-     * escape into the poll loop, where it would be mistaken for a connection error and
-     * prevent the DELETE_ACK from being sent.
+     * <p>Best-effort: an {@link IOException} (race with a new file, permissions) is logged and
+     * swallowed so it cannot block the DELETE_ACK.
      *
      * @param dir    directory to start from (the deleted file's parent)
      * @param stopAt the local root of the synced dir; never deleted

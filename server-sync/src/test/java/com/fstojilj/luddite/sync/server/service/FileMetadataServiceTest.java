@@ -77,6 +77,7 @@ class FileMetadataServiceTest {
         Path file = Files.writeString(tempDir.resolve("photo.jpg"), "data");
         fileMetadataService.addFileMetadata(file, 1, "photo.jpg");
         verify(fileMetadataRepository).upsert(any(FileMetadata.class));
+        verify(fileMetadataRepository, never()).add(any(FileMetadata.class));
     }
 
     @Test

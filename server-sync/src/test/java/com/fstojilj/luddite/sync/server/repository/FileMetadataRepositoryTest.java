@@ -3,16 +3,19 @@ package com.fstojilj.luddite.sync.server.repository;
 import com.fstojilj.luddite.sync.common.model.FileMetadata;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static com.fstojilj.luddite.sync.server.config.SchemaConstants.FILE_METADATA_TABLE;
 import static com.fstojilj.luddite.sync.server.config.SchemaConstants.ROOT_DIR_TABLE;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Tests FileMetadataRepository against a real in-memory SQLite database.
@@ -266,6 +269,120 @@ class FileMetadataRepositoryTest {
         repository.softDelete(1L, "photo.jpg", 1L);
         repository.acknowledgeDelete(1, "photo.jpg", "hw-id-1");
         assertThat(repository.findChangedSince(1, -1L, 100)).isEmpty();
+    }
+
+    // ── delete-propagation lifecycle ──────────────────────────────────────────
+    // client_ids = clients holding the file; a soft-deleted row lives until each of them ACKs.
+
+    @Test
+    void lifecycle_allHoldersAck_rowIsHardDeletedOnlyAfterTheLastOne() {
+        repository.add(buildMeta("a.jpg", "a.jpg"));
+        receivedBy("a.jpg", "c1", "c2", "c3");
+        repository.softDelete(1L, "a.jpg", 5L);
+
+        repository.acknowledgeDelete(1, "a.jpg", "c1");
+        repository.acknowledgeDelete(1, "a.jpg", "c2");
+        assertThat(row("a.jpg")).isPresent()
+                .get().satisfies(r -> assertThat(r.clientIds()).isEqualTo("c3"));
+
+        repository.acknowledgeDelete(1, "a.jpg", "c3");
+        assertThat(row("a.jpg")).isEmpty();
+    }
+
+    @Test
+    void lifecycle_offlineHolder_keepsTombstoneUntilItComesBack() {
+        repository.add(buildMeta("d.jpg", "d.jpg"));
+        receivedBy("d.jpg", "c1", "c2", "c3");
+        repository.softDelete(1L, "d.jpg", 5L);
+        repository.acknowledgeDelete(1, "d.jpg", "c1");
+        repository.acknowledgeDelete(1, "d.jpg", "c2");
+
+        FileMetadata tombstone = row("d.jpg").orElseThrow();
+        assertThat(tombstone.deleted()).isTrue();
+        assertThat(tombstone.clientIds()).isEqualTo("c3");
+        assertThat(repository.findChangedSince(1, 4L, 100))
+                .as("c3 must still be told about the delete on its next poll")
+                .extracting(FileMetadata::relativePath).containsExactly("d.jpg");
+    }
+
+    @Test
+    void acknowledgeDelete_fromClientNotInList_doesNotShortenListOrHardDelete() {
+        repository.add(buildMeta("a.jpg", "a.jpg"));
+        receivedBy("a.jpg", "c1", "c2");
+        repository.softDelete(1L, "a.jpg", 5L);
+
+        repository.acknowledgeDelete(1, "a.jpg", "stranger");
+
+        assertThat(row("a.jpg")).isPresent()
+                .get().satisfies(r -> assertThat(r.clientIds()).isEqualTo("c1,c2"));
+    }
+
+    @Test
+    void acknowledgeDelete_onLiveRow_isIgnored() {
+        repository.add(buildMeta("a.jpg", "a.jpg"));
+        receivedBy("a.jpg", "c1");
+
+        repository.acknowledgeDelete(1, "a.jpg", "c1");
+
+        FileMetadata live = row("a.jpg").orElseThrow();
+        assertThat(live.deleted()).isFalse();
+        assertThat(live.clientIds()).isEqualTo("c1");
+    }
+
+    @Test
+    void lifecycle_modifyThenDelete_holdersSurviveTheModify() {
+        repository.add(buildMeta("e.jpg", "e.jpg"));
+        receivedBy("e.jpg", "c1", "c2", "c3");
+
+        repository.upsert(buildMeta("e.jpg", "e.jpg").toBuilder().checksum("v2").build()); // modify
+        repository.softDelete(1L, "e.jpg", 6L);
+
+        assertThat(row("e.jpg").orElseThrow().clientIds()).isEqualTo("c1,c2,c3");
+        repository.acknowledgeDelete(1, "e.jpg", "c1");
+        assertThat(row("e.jpg")).as("c2 and c3 still pending").isPresent();
+    }
+
+    @Test
+    void lifecycle_deleteThenRecreate_revivesRowAndReDeliversToEveryone() {
+        repository.add(buildMeta("e.jpg", "e.jpg"));
+        receivedBy("e.jpg", "c1", "c2", "c3");
+        repository.softDelete(1L, "e.jpg", 5L);
+        repository.acknowledgeDelete(1, "e.jpg", "c1");
+        repository.acknowledgeDelete(1, "e.jpg", "c3");
+
+        repository.upsert(buildMeta("e.jpg", "e.jpg").toBuilder().checksum("recreated").build());
+
+        FileMetadata revived = row("e.jpg").orElseThrow();
+        assertThat(revived.deleted()).isFalse();
+        assertThat(revived.syncVersion()).isNull();
+        assertThat(revived.checksum()).isEqualTo("recreated");
+        assertThat(revived.clientIds()).isEqualTo("c2");
+        assertThat(repository.findChangedSince(1, 99L, 100))
+                .as("unversioned row is offered to every client regardless of their cursor")
+                .extracting(FileMetadata::relativePath).containsExactly("e.jpg");
+
+        receivedBy("e.jpg", "c1", "c2", "c3");
+        assertThat(row("e.jpg").orElseThrow().clientIds()).isEqualTo("c2,c1,c3");
+    }
+
+    @Test
+    void add_whileTombstoneOccupiesPath_violatesUniqueConstraint() {
+        repository.add(buildMeta("a.jpg", "a.jpg"));
+        receivedBy("a.jpg", "c1");
+        repository.softDelete(1L, "a.jpg", 5L);
+
+        assertThatThrownBy(() -> repository.add(buildMeta("a.jpg", "a.jpg")))
+                .isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("UNIQUE constraint failed");
+    }
+
+    private void receivedBy(String path, String... clientIds) {
+        for (String c : clientIds) repository.addClientIdToAll(1, List.of(path), c);
+    }
+
+    private Optional<FileMetadata> row(String path) {
+        return repository.findChangedSince(1, -1L, 100).stream()
+                .filter(r -> r.relativePath().equals(path)).findFirst();
     }
 
     // ── getMaxSyncVersionByRootDir ────────────────────────────────────────────

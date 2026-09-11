@@ -308,7 +308,7 @@ public class FileSocketService {
             }
             out.flush();
 
-            // Record which live files this client now holds, so a later delete is propagated to it.
+            // Record the client as a holder of every live file it just received.
             // Deleted rows are excluded: client_ids on those means "still has to ack the delete".
             List<String> receivedPaths = changed.stream()
                     .filter(meta -> !meta.deleted())

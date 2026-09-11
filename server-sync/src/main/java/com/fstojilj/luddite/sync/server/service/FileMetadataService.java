@@ -64,8 +64,7 @@ public class FileMetadataService implements ApplicationRunner {
             log.debug("Ignoring file: {}", filePath);
             return;
         }
-        // Upsert rather than insert: the path may still be occupied by a soft-deleted row
-        // awaiting client acks (delete-then-recreate, atomic-save editors, cut/paste).
+        // Upsert, not insert: the path may still be occupied by a soft-deleted row awaiting acks.
         fileMetadataRepository.upsert(buildFileMetadata(file, rootDirId, relativePath));
     }
 
