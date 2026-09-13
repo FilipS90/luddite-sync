@@ -61,7 +61,9 @@ public class DirsController {
 
     /**
      * Returns the immediate child directory names under {@code under} (defaults to root level).
-     * Requires {@code X-Auth-Hash} header for private directories.
+     * Requires {@code X-Auth-Hash} header for private directories. A private directory
+     * without a valid hash answers 404, identically to a directory that does not exist,
+     * so the endpoint cannot be used to discover private directory names.
      *
      * @param name     root directory name
      * @param under    relative path to look under; omit or pass {@code ""} for root level
@@ -81,7 +83,7 @@ public class DirsController {
         RootDir dir = dirOpt.get();
         if (dir.isPrivate() && !isAuthorized(dir, authHash)) {
             log.warn("GET /api/dirs/{}/tree — unauthorized (missing or wrong X-Auth-Hash)", name);
-            return ResponseEntity.status(403).build();
+            return ResponseEntity.notFound().build();
         }
 
         List<String> childDirs  = fileMetadataService.findImmediateChildDirNames(dir.getId(), under);
@@ -91,9 +93,9 @@ public class DirsController {
 
     /**
      * Validates the password for a private directory.
-     * Returns 400 if the directory is not private or does not exist.
-     * Returns 200 with {@code granted=false} (not 403) on wrong password so the client
-     * can distinguish "wrong password" from "server error".
+     * Returns 400 for a public directory, 200 on the correct password, and 403 otherwise.
+     * An unknown name answers 403 too, identically to a wrong password, so the endpoint
+     * cannot be used to discover private directory names.
      *
      * @param name    root directory name
      * @param request body containing the SHA-256 hex password hash
@@ -104,7 +106,11 @@ public class DirsController {
             @RequestBody AuthRequest request) {
 
         Optional<RootDir> dirOpt = rootDirService.findByName(name);
-        if (dirOpt.isEmpty() || !dirOpt.get().isPrivate()) {
+        if (dirOpt.isEmpty()) {
+            log.warn("POST /api/dirs/{}/auth — DENIED (unknown dir)", name);
+            return ResponseEntity.status(403).build();
+        }
+        if (!dirOpt.get().isPrivate()) {
             return ResponseEntity.badRequest().build();
         }
 

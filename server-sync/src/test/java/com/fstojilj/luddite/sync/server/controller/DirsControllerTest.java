@@ -103,21 +103,21 @@ class DirsControllerTest {
     }
 
     @Test
-    void getTree_returns403ForPrivateDirWithoutHash() throws Exception {
+    void getTree_returns404ForPrivateDirWithoutHash() throws Exception {
         RootDir dir = RootDir.builder().id(2).name("Secrets").isPrivate(true).password("abc123").build();
         when(rootDirService.findByName("Secrets")).thenReturn(Optional.of(dir));
 
         mvc.perform(get("/api/dirs/Secrets/tree"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isNotFound());
     }
 
     @Test
-    void getTree_returns403ForPrivateDirWithWrongHash() throws Exception {
+    void getTree_returns404ForPrivateDirWithWrongHash() throws Exception {
         RootDir dir = RootDir.builder().id(2).name("Secrets").isPrivate(true).password("abc123").build();
         when(rootDirService.findByName("Secrets")).thenReturn(Optional.of(dir));
 
         mvc.perform(get("/api/dirs/Secrets/tree").header("X-Auth-Hash", "wronghash"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isNotFound());
     }
 
     @Test
@@ -162,13 +162,13 @@ class DirsControllerTest {
     }
 
     @Test
-    void auth_returns400ForUnknownDir() throws Exception {
+    void auth_returns403ForUnknownDir() throws Exception {
         when(rootDirService.findByName("ghost")).thenReturn(Optional.empty());
 
         mvc.perform(post("/api/dirs/ghost/auth")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new AuthRequest("client-1", "hash"))))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isForbidden());
     }
 
     @Test

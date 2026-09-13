@@ -143,8 +143,8 @@ public class ServerApiClient {
             return new TreeResponse(
                     response.childNames() != null ? response.childNames() : List.of(),
                     response.fileNames() != null ? response.fileNames() : List.of());
-        } catch (HttpClientErrorException.Forbidden e) {
-            log.warn("fetchTree: access denied for private dir '{}'", dirName);
+        } catch (HttpClientErrorException.NotFound e) {
+            log.warn("fetchTree: dir '{}' not found or access denied", dirName);
             return new TreeResponse(List.of(), List.of());
         } catch (Exception e) {
             log.warn("fetchTree failed for dir='{}' under='{}': {}", dirName, under, e.getMessage());
