@@ -136,6 +136,8 @@ class ClientSyncServiceApplyRecordTest {
         Path parent = Files.createDirectories(mirror.resolve("locked/inner"));
         Files.writeString(parent.resolve("c.txt"), "x");
         Path locked = mirror.resolve("locked");
+        assumeTrue(locked.getFileSystem().supportedFileAttributeViews().contains("posix"),
+                "test needs a POSIX filesystem to lock a directory via permissions");
         Set<PosixFilePermission> original = Files.getPosixFilePermissions(locked);
         Files.setPosixFilePermissions(locked, Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_EXECUTE));
         assumeTrue(!Files.isWritable(locked), "test needs a non-root user for read-only dirs to take effect");

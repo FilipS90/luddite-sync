@@ -488,7 +488,7 @@ public class ClientSyncService implements ApplicationRunner {
             // so use purgeRecord not removeRecord to avoid a second disk delete attempt)
             Files.deleteIfExists(target);
             deleteEmptyParents(target.getParent(), dirBase);
-            fileMetadataService.purgeRecord(dirName, relPath);
+            fileMetadataService.purgeRecord(dirName, serverPath);
             log.info("Deleted: {}", relPath);
 
             // ACK the delete so server can remove from client_ids
@@ -516,7 +516,7 @@ public class ClientSyncService implements ApplicationRunner {
                     }
                 }
             }
-            fileMetadataService.recordSynced(dirName, relPath);
+            fileMetadataService.recordSynced(dirName, serverPath);
             String fileSizeMb = String.format("%.2f", (double) fileSizeBytes / (1024 * 1024));
             log.info("Written: {} ({} MB, v{})", relPath, fileSizeMb, syncVersion);
         }

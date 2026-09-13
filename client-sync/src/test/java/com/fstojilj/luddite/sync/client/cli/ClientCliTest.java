@@ -10,6 +10,7 @@ import com.fstojilj.luddite.sync.common.dto.TreeResponse;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.lang.reflect.Method;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -220,7 +221,8 @@ class ClientCliTest {
     void handle_add_withCustomPath_registersCustomPath() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
         handle("add photos --path /data/pics");
-        verify(rootDirService).registerWithCustomPath("photos", "/data/pics");
+        String expectedPath = Path.of("/data/pics").toAbsolutePath().normalize().toString();
+        verify(rootDirService).registerWithCustomPath("photos", expectedPath);
     }
 
     @Test
@@ -463,7 +465,7 @@ class ClientCliTest {
         handle("browse photos");
         handle("browse 1");
         handle("browse 1");
-        assertThat(output()).contains("photos/2024\n").contains("photos/2024/may").contains("1. [file] a.jpg");
+        assertThat(output()).contains("photos/2024").contains("photos/2024/may").contains("1. [file] a.jpg");
     }
 
     @Test
