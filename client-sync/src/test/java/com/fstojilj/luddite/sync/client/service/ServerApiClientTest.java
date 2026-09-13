@@ -106,9 +106,9 @@ class ServerApiClientTest {
     }
 
     @Test
-    void fetchTree_returnsEmptyOn403() {
+    void fetchTree_returnsEmptyOn404() {
         mockServer.expect(requestTo(BASE_URL + "/api/dirs/Secrets/tree"))
-                .andRespond(withStatus(HttpStatus.FORBIDDEN));
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
 
         TreeResponse result = client.fetchTree("Secrets", "", "wronghash");
 
