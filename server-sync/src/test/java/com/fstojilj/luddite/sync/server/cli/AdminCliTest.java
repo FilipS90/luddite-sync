@@ -74,6 +74,18 @@ class AdminCliTest {
     }
 
     @Test
+    void handle_list_withDirs_shouldPrintNameAndPrivateFlag() throws Exception {
+        when(rootDirService.findAll()).thenReturn(Set.of(
+                RootDir.builder().id(1).name("photos").isPrivate(false).absolutePath("/photos").build(),
+                RootDir.builder().id(2).name("vault").isPrivate(true).absolutePath("/vault").build()
+        ));
+        handle("list");
+        assertThat(output())
+                .containsPattern("1\\s*\\| photos\\s*\\| no\\s*\\| /photos")
+                .containsPattern("2\\s*\\| vault\\s*\\| yes\\s*\\| /vault");
+    }
+
+    @Test
     void handle_listc_noClients_shouldPrintNone() throws Exception {
         when(fileSocketService.listConnectedClients()).thenReturn(List.of());
         handle("listc");

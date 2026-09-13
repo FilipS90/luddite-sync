@@ -69,6 +69,7 @@ public class DownloadService {
      * @return the number of files successfully downloaded
      */
     public int download(String dirName, String subPath, boolean isFile) {
+        refreshSocketPort();
         Path downloadsRoot = Path.of(mirrorDirPath, "downloads");
 
         if (isFile) {
@@ -95,6 +96,17 @@ public class DownloadService {
         log.info("Download of '{}/{}' complete: {}/{} file(s) succeeded",
                 dirName, subPath, successCount, relativeFiles.size());
         return successCount;
+    }
+
+    /**
+     * Re-discovers the server's socket port over REST before opening a download connection.
+     *
+     * <p>{@link ClientSyncService} only reaches its own port discovery once the client has at
+     * least one subscribed directory, so a download that precedes any subscription would
+     * otherwise still be aimed at the bootstrap port.
+     */
+    private void refreshSocketPort() {
+        socketFactory.setServerPort(serverApiClient.fetchSocketPort(socketFactory.getServerPort()));
     }
 
     /**
