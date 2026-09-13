@@ -3,20 +3,18 @@ package com.fstojilj.luddite.sync.server.cli;
 import com.fstojilj.luddite.sync.common.util.PasswordUtils;
 import com.fstojilj.luddite.sync.server.service.FileSocketService;
 import com.fstojilj.luddite.sync.server.service.RootDirService;
-import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.SpringApplication;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationContext;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
-
-import static java.lang.Thread.sleep;
 
 /**
  * Interactive CLI for managing server root directories at runtime.
@@ -25,6 +23,7 @@ import static java.lang.Thread.sleep;
  * list              — list all registered root dirs
  * listc             — list connected clients and their addresses
  * add &lt;path&gt;        — register a new root dir and start watching it
+ *                     (--private --pswd &lt;password&gt; for a password-protected dir)
  * remove &lt;id&gt;       — stop watching and unregister a root dir by ID
  * port [newPort]    — show or change the socket listening port
  * help              — show available commands
@@ -42,14 +41,16 @@ public class AdminCli {
     private final String PSWD_FLAG = "--pswd";
     private final String PRIVATE_FLAG = "--private";
 
-    @PostConstruct
+    /**
+     * Starts the CLI once the application is fully up, so the help banner lands after
+     * the startup log output instead of being buried in it.
+     */
+    @EventListener(ApplicationReadyEvent.class)
     public void start() {
         Thread.ofVirtual().name("admin-cli").start(this::runLoop);
     }
 
-    @SneakyThrows
     private void runLoop() {
-        sleep(300); // Wait a bit for the server to start up before accepting input
         printHelp();
         try (var reader = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8))) {
             String line;
@@ -74,9 +75,10 @@ public class AdminCli {
                 if (dirs.isEmpty()) {
                     System.out.println("  (no root dirs registered)");
                 } else {
-                    System.out.println("  ID  | Path");
-                    System.out.println("  ----|-----------------------------");
-                    dirs.forEach(d -> System.out.printf("  %-4d| %s%n", d.getId(), d.getAbsolutePath()));
+                    System.out.println("  ID  | Name                 | Private | Path");
+                    System.out.println("  ----|----------------------|---------|-----------------------------");
+                    dirs.forEach(d -> System.out.printf("  %-4d| %-20s | %-7s | %s%n",
+                            d.getId(), d.getName(), d.isPrivate() ? "yes" : "no", d.getAbsolutePath()));
                 }
             }
             case "listc" -> {
@@ -172,6 +174,7 @@ public class AdminCli {
         System.out.println("  list                list all registered root dirs");
         System.out.println("  listc               list connected clients and their addresses");
         System.out.println("  add <path>          register and watch a new root dir");
+        System.out.println("                        --private --pswd <password>  make it password-protected");
         System.out.println("  remove <id>         unregister a root dir by ID");
         System.out.println("  port [newPort]      show, or change, the socket listening port");
         System.out.println("  help                show this message");

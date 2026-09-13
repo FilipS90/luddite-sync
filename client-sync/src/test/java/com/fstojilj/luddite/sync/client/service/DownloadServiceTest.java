@@ -23,6 +23,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -160,6 +161,17 @@ class DownloadServiceTest {
 
         assertThat(count).isEqualTo(1);
         assertThat(Files.exists(tempDir.resolve("downloads/Movies/readme.txt"))).isTrue();
+    }
+
+    @Test
+    void download_refreshesSocketPortBeforeConnecting() {
+        when(socketFactory.getServerPort()).thenReturn(8888);
+        when(serverApiClient.fetchSocketPort(8888)).thenReturn(18888);
+        fakeServer.respondWith("Movies/movie.mkv", "bytes".getBytes(StandardCharsets.UTF_8));
+
+        downloadService.download("Movies", "movie.mkv", true);
+
+        verify(socketFactory).setServerPort(18888);
     }
 
     // ── Fake server ───────────────────────────────────────────────────────────
