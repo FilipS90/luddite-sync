@@ -14,5 +14,4 @@ sync:
   client:
     mirror-dir: ${user.home}/.luddite
     retain-local-directory: true
-    ui: cli
     name: luddite-client

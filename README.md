@@ -130,6 +130,9 @@ Every tagged release publishes native packages built with `jpackage`:
 
 Download from the [Releases](../../releases) page. The Windows zips are self-contained
 app images — unzip anywhere and run `LudditeServer.exe` / `LudditeClient.exe`.
+Packaged clients always open the desktop UI; they are launched from a menu or Explorer
+with no terminal attached, so the start-up chooser described below is skipped. On a
+headless box they fall back to the CLI.
 
 ### Option B — run the JARs
 
@@ -196,14 +199,25 @@ it over REST when they reconnect.
 
 ## Running the client
 
-The client has two front-ends chosen by the `sync.client.ui` property:
+The client has two front-ends:
 
-- **`cli`** (default) — an interactive prompt on the console.
+- **`cli`** — an interactive prompt on the console.
 - **`swing`** — a retro-terminal desktop window with the same features.
 
+Which one starts is decided at launch:
+
+1. On a headless system (no display) the CLI starts silently, whatever else is configured.
+2. `--sync.client.ui=cli|swing` on the command line (or the matching env var / system
+   property) wins and skips the question below.
+3. Otherwise a small window asks **Desktop UI** or **CLI**. Tick *"Don't ask again for the
+   next 5 launches"* to reuse the answer; after five launches the choice is forgotten and the
+   window returns with the box unchecked. The counter lives in `~/.luddite/ui-choice.properties`
+   — delete it to be asked again right away.
+
 ```bash
-java -jar client-sync-0.0.1-SNAPSHOT.jar                         # CLI
-java -jar client-sync-0.0.1-SNAPSHOT.jar --sync.client.ui=swing  # desktop window
+java -jar client-sync-0.0.1-SNAPSHOT.jar                         # ask (or CLI when headless)
+java -jar client-sync-0.0.1-SNAPSHOT.jar --sync.client.ui=cli    # CLI, no question
+java -jar client-sync-0.0.1-SNAPSHOT.jar --sync.client.ui=swing  # desktop window, no question
 ```
 
 ### First run: point it at your server
@@ -350,7 +364,7 @@ java -jar server-sync-0.0.1-SNAPSHOT.jar --server.port=18080 --sync.socket.port=
 
 | Property | Default | Meaning |
 |----------|---------|---------|
-| `sync.client.ui` | `cli` | `cli` or `swing` |
+| `sync.client.ui` | *ask* (`cli` when headless) | `cli` or `swing`; set it to skip the start-up chooser. Headless systems always get `cli` |
 | `sync.client.mirror-dir` | `${user.home}/.luddite` | Where subscribed dirs and downloads are stored |
 | `sync.client.retain-local-directory` | `true` | Keep local files when the server stops sharing a directory you were subscribed to |
 | `sync.client.name` | `luddite-client` | Human-readable suffix written into the client-id file |
@@ -375,6 +389,7 @@ java -jar client-sync-0.0.1-SNAPSHOT.jar --sync.client.mirror-dir=/data/luddite 
 ├── client/sync.db              client state (subscriptions, sync versions, host history)
 ├── client-id                   stable client identity; delete to make the server treat this
 │                               machine as a brand-new client
+├── ui-choice.properties        remembered UI/CLI answer and launches left; only present while remembered
 ├── downloads/                  one-off downloads
 ├── photos/                     one mirror folder per subscribed dir …
 └── documents/                  … unless it was added with --path <elsewhere>
