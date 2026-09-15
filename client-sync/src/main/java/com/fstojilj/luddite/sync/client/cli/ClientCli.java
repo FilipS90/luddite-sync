@@ -53,7 +53,7 @@ import static java.lang.Thread.sleep;
 @Component
 @RequiredArgsConstructor
 @Slf4j
-@ConditionalOnProperty(name = "sync.client.ui", havingValue = "cli")
+@ConditionalOnProperty(name = "sync.client.ui", havingValue = "cli", matchIfMissing = true)
 public class ClientCli {
 
     private static final String PSWD_FLAG = "--pswd";

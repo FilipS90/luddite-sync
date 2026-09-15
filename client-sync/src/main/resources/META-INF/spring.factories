@@ -1,0 +1,2 @@
+org.springframework.boot.env.EnvironmentPostProcessor=\
+com.fstojilj.luddite.sync.client.config.UiModeEnvironmentPostProcessor

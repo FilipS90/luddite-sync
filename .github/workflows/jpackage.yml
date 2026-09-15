@@ -46,6 +46,7 @@ jobs:
             --input client-sync/target/jpackage-libs \
             --main-jar client-sync-0.0.1-SNAPSHOT.jar \
             --main-class org.springframework.boot.loader.launch.JarLauncher \
+            --java-options "-Dsync.client.ui=swing" \
             --name "luddite-client" \
             --app-version "${GITHUB_REF_NAME#v}" \
             --dest dist/client/
@@ -59,6 +60,7 @@ jobs:
             --input client-sync/target/jpackage-libs \
             --main-jar client-sync-0.0.1-SNAPSHOT.jar \
             --main-class org.springframework.boot.loader.launch.JarLauncher \
+            --java-options "-Dsync.client.ui=swing" \
             --name "LudditeClient" \
             --app-version "${GITHUB_REF_NAME#v}" \
             --dest dist/client/
@@ -73,6 +75,7 @@ jobs:
             --input client-sync\target\jpackage-libs `
             --main-jar client-sync-0.0.1-SNAPSHOT.jar `
             --main-class org.springframework.boot.loader.launch.JarLauncher `
+            --java-options "-Dsync.client.ui=swing" `
             --name "LudditeClient" `
             --app-version "$VERSION" `
             --dest dist/client/
