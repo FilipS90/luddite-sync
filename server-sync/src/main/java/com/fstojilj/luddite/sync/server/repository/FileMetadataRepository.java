@@ -187,6 +187,11 @@ public class FileMetadataRepository {
      * {@code lastSyncVersion}, or whose {@code sync_version} is {@code NULL} (never delivered).
      * Used by the poll handler to compute what a client needs to catch up on.
      *
+     * <p>Ordered by ascending version with {@code NULL} rows last. The client advances its
+     * cursor to the highest version in a batch, and {@code NULL} rows are minted above every
+     * existing version when sent, so this ordering guarantees a capped batch never contains a
+     * version higher than one still unsent.
+     *
      * @param rootDirId       root directory ID
      * @param lastSyncVersion last version the client acknowledged
      * @return list of changed/deleted records since that version
@@ -196,6 +201,7 @@ public class FileMetadataRepository {
                         SELECT * FROM file_metadata
                         WHERE root_dir_id = ?
                           AND (sync_version IS NULL OR sync_version > ?)
+                        ORDER BY sync_version IS NULL, sync_version ASC
                         LIMIT ?
                         """,
                 rowMapper, rootDirId, lastSyncVersion, limit);

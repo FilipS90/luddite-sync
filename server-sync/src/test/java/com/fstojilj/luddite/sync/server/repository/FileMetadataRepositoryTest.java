@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.LongStream;
 
 import static com.fstojilj.luddite.sync.server.config.SchemaConstants.FILE_METADATA_TABLE;
 import static com.fstojilj.luddite.sync.server.config.SchemaConstants.ROOT_DIR_TABLE;
@@ -88,6 +89,38 @@ class FileMetadataRepositoryTest {
         repository.add(buildMeta("c.jpg", "c.jpg"));
         List<FileMetadata> changed = repository.findChangedSince(1, -1L, 2);
         assertThat(changed).hasSize(2);
+    }
+
+    @Test
+    void findChangedSince_limitedBatch_returnsLowestVersionsAndExcludesUndelivered() {
+        for (int i = 1; i <= 150; i++) {
+            repository.add(buildMeta(i + ".jpg", i + ".jpg"));
+            repository.updateSyncVersion(1, i + ".jpg", i);
+        }
+        repository.upsert(buildMeta("5.jpg", "5.jpg").toBuilder().checksum("modified").build());
+
+        List<FileMetadata> batch = repository.findChangedSince(1, -1L, 100);
+
+        assertThat(batch).hasSize(100);
+        assertThat(batch).extracting(FileMetadata::syncVersion)
+                .containsExactly(LongStream.rangeClosed(1, 101).filter(v -> v != 5).boxed().toArray(Long[]::new));
+    }
+
+    @Test
+    void findChangedSince_undeliveredRows_comeAfterAllStampedRows() {
+        for (int i = 1; i <= 150; i++) {
+            repository.add(buildMeta(i + ".jpg", i + ".jpg"));
+            repository.updateSyncVersion(1, i + ".jpg", i);
+        }
+        repository.upsert(buildMeta("5.jpg", "5.jpg").toBuilder().checksum("modified").build());
+
+        List<FileMetadata> batch = repository.findChangedSince(1, 100L, 100);
+
+        assertThat(batch).hasSize(51);
+        assertThat(batch.subList(0, 50)).extracting(FileMetadata::syncVersion)
+                .containsExactly(LongStream.rangeClosed(101, 150).boxed().toArray(Long[]::new));
+        assertThat(batch.getLast().syncVersion()).isNull();
+        assertThat(batch.getLast().relativePath()).isEqualTo("5.jpg");
     }
 
     // ── updateSyncVersion ─────────────────────────────────────────────────────
