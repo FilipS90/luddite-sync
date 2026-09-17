@@ -57,6 +57,30 @@ a private network.
 
 Sync is one-way: server → client. Clients never push files to the server.
 
+### Your local copy is yours ("weak sync")
+
+The client tracks *what the server has sent so far* (a per-directory version cursor),
+not *what is currently on your disk*. It never audits the mirror folder, so you are free
+to reorganise it:
+
+| You do this locally… | …and the client will |
+|---|---|
+| Delete a synced file or folder | Leave it deleted. It is **not** re-downloaded on the next poll or restart. |
+| Drop your own files into the mirror | Ignore them. They are never uploaded and never touched. |
+| Delete the whole mirror folder | Carry on. The folder is recreated when the next new file arrives. |
+
+Only server-side events move files afterwards:
+
+- A file **added** on the server is delivered as usual.
+- A file **modified** on the server is delivered again — even if you had deleted your
+  copy, it comes back with the new content.
+- A file **deleted** on the server is removed locally if still present; if you already
+  deleted it nothing happens and the delete is simply acknowledged.
+- A server file that lands on the **same path as one of your own files** overwrites it.
+
+If you want a full copy again, unsubscribe and resubscribe (`remove <name>` then
+`add <name>`); that resets the cursor and the server re-sends everything.
+
 ---
 
 ## Requirements
@@ -421,6 +445,24 @@ Run only one module's tests:
 ./mvnw -pl server-sync test -Dtest=DirsControllerTest
 ```
 
+### End-to-end tests
+
+`e2e/` starts a real server and real clients from the built JARs on ports 18080/18888,
+with their own SQLite DBs and mirror folders under the git-ignored `e2e/.run/`, and
+drives them through the CLI. It needs `bash` and `sqlite3` and does not touch
+`~/.luddite`.
+
+```bash
+e2e/weak-sync.sh              # builds the JARs, then runs the weak-sync scenarios
+e2e/weak-sync.sh --no-build   # reuse the JARs already in */target
+```
+
+`e2e/lib.sh` holds the reusable pieces — `start_server`, `start_client N`,
+`server_cmd` / `client_cmd` (CLI over a FIFO), `client_files`, `client_db`,
+`server_db`, `wait_for_log`, `assert_eq` — so a new scenario script is just
+`source lib.sh` plus the steps to check. Logs and databases stay in `e2e/.run/` after a
+run for inspection.
+
 Native packages are produced by the `Package Luddite Sync App` GitHub Actions workflow,
 which runs on every `v*` tag (or manually via *Run workflow*) and attaches the `.deb`,
 `.dmg`, and Windows `.zip` files to a draft release.
@@ -495,6 +537,11 @@ Use `luddite.bat`, which switches the console to UTF-8, or start `java` with
 **I moved the client to a new machine and deletes are not arriving**
 The client identity lives in `~/.luddite/client-id`. Copy that file along with
 `client/sync.db` and the mirror folders, or simply resubscribe on the new machine.
+
+**I deleted a synced file locally and want it back**
+That is by design — see [weak sync](#your-local-copy-is-yours-weak-sync). Either wait
+for the file to change on the server, or run `remove <name>` followed by `add <name>` to
+pull the whole directory again.
 
 **Start over on the server**
 Stop it and delete `~/.luddite/server/photos.db`. Shares must then be `add`ed again;
