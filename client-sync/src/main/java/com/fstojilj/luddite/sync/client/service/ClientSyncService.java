@@ -81,7 +81,7 @@ public class ClientSyncService implements ApplicationRunner {
     private final HostRepository hostRepository;
 
     /**
-     * Dirs currently advertised by the server — exposed for the CLI {@code add} command
+     * Dirs currently advertised by the server — exposed for the CLI {@code sync} command
      * and the UI refresh loop. Updated via HTTP on each connect cycle.
      */
     public static List<String> serverDirs = new ArrayList<>();

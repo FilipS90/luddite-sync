@@ -57,7 +57,7 @@ start_server() {
 server_cmd() { echo "$*" > "$E2E_ROOT/server.in"; }
 
 # start_client N — mirror dir, DB, log and FIFO live under $E2E_ROOT/cN.
-# The client is pointed at localhost and left waiting for `client_cmd N add <dir>`.
+# The client is pointed at localhost and left waiting for `client_cmd N sync <dir>`.
 start_client() {
     local n="$1" dir="$E2E_ROOT/c$1"
     mkdir -p "$dir/mirror"

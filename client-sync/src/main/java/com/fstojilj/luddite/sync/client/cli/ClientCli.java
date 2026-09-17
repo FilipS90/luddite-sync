@@ -40,7 +40,7 @@ import static java.lang.Thread.sleep;
  * browse &lt;n&gt; / up             — enter entry n of the last listing / go up one level
  *                               (stops at level one; 'dirs' returns to the root dir list)
  * browse ... --depth &lt;n&gt;      — list several levels at once
- * add &lt;name&gt;                  — subscribe to a server directory by name or index
+ * sync &lt;name&gt;                 — subscribe to a server directory by name or index
  * private &lt;name&gt; --pswd &lt;pw&gt;  — subscribe to a password-protected directory
  * download &lt;dir&gt; [subpath]    — download a dir, subdir, or file into the downloads folder
  * remove &lt;name&gt;               — unsubscribe from a directory
@@ -146,7 +146,7 @@ public class ClientCli {
             case "dirs" -> browseRoots();
             case "browse", "tree" -> browse(arg);
             case "up" -> browse("..");
-            case "add" -> add(arg);
+            case "sync" -> sync(arg);
             case "private" -> addPrivate(arg);
             case "download" -> download(arg);
             case "remove" -> remove(arg);
@@ -282,7 +282,7 @@ public class ClientCli {
         }
     }
 
-    // ── add ───────────────────────────────────────────────────────────────────
+    // ── sync ──────────────────────────────────────────────────────────────────
 
     /**
      * Subscribes to one or more public server directories, each given by name or by its
@@ -291,9 +291,9 @@ public class ClientCli {
      * @param arg comma-separated dir names or indices, optionally followed by
      *            {@code --path <absolute-path>} to mirror a single dir outside the mirror root
      */
-    private void add(String arg) {
+    private void sync(String arg) {
         if (arg.isEmpty()) {
-            System.out.println("  Usage: add <dir-name|index> (comma-separate to add multiple)");
+            System.out.println("  Usage: sync <dir-name|index> (comma-separate to sync multiple)");
             System.out.printf("  Available flags: %s <absolute-path>, to mirror a single dir outside %s%n",
                     PATH_FLAG, mirrorDir);
             return;
@@ -303,7 +303,7 @@ public class ClientCli {
         String dirTokens = stripFlag(arg, PATH_FLAG);
 
         if (dirTokens.isEmpty()) {
-            System.out.println("  Usage: add <dir-name|index> (comma-separate to add multiple)");
+            System.out.println("  Usage: sync <dir-name|index> (comma-separate to sync multiple)");
             return;
         }
 
@@ -603,7 +603,7 @@ public class ClientCli {
         System.out.println("  browse [dir] [subpath]   list a server directory's contents (numbered)");
         System.out.println("  browse <n> / up          enter entry n of the last listing / go up");
         System.out.printf ("                             --depth <1-%d>  list several levels at once%n", MAX_BROWSE_DEPTH);
-        System.out.println("  add <name|index>         subscribe to a server directory");
+        System.out.println("  sync <name|index>        subscribe to a server directory");
         System.out.println("                             --path <abs>  mirror it outside the mirror dir");
         System.out.println("  private <name> --pswd <password>");
         System.out.println("                           subscribe to a password-protected directory");
@@ -640,7 +640,7 @@ public class ClientCli {
             }
         }
         System.out.println();
-        System.out.println("  'add <n>' subscribes (e.g. 'add 2,3'), 'browse <n>' looks inside, 'download <n>' fetches");
+        System.out.println("  'sync <n>' subscribes (e.g. 'sync 2,3'), 'browse <n>' looks inside, 'download <n>' fetches");
         System.out.println();
     }
 }

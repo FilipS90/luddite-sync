@@ -17,7 +17,7 @@ echo "nested-c" > "$SHARE_DIR/sub/c.txt"
 start_server
 server_cmd add "$SHARE_DIR"
 start_client 1
-client_cmd 1 add share
+client_cmd 1 sync share
 wait_for_log "$E2E_ROOT/c1/client.log" "Written: share/sub/c.txt" 60
 
 log "Baseline"

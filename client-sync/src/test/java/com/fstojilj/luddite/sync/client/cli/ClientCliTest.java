@@ -97,27 +97,27 @@ class ClientCliTest {
         assertThat(output()).contains("42");
     }
 
-    // ── add ───────────────────────────────────────────────────────────────────
+    // ── sync ──────────────────────────────────────────────────────────────────
 
     @Test
-    void handle_add_noArg_printsUsage() throws Exception {
+    void handle_sync_noArg_printsUsage() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
-        handle("add");
+        handle("sync");
         assertThat(output()).contains("Usage:");
     }
 
     @Test
-    void handle_add_validIndex_registersDir() throws Exception {
+    void handle_sync_validIndex_registersDir() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
-        handle("add 1");
+        handle("sync 1");
         verify(rootDirService).registerWithDefaultPath("photos");
         assertThat(output()).contains("photos");
     }
 
     @Test
-    void handle_add_multipleIndices_registersAll() throws Exception {
+    void handle_sync_multipleIndices_registersAll() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
-        handle("add 1,2");
+        handle("sync 1,2");
         verify(rootDirService).registerWithDefaultPath("photos");
         verify(rootDirService).registerWithDefaultPath("documents");
     }
@@ -185,50 +185,50 @@ class ClientCliTest {
     // ── add by name ───────────────────────────────────────────────────────────
 
     @Test
-    void handle_add_validName_registersDir() throws Exception {
+    void handle_sync_validName_registersDir() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
-        handle("add photos");
+        handle("sync photos");
         verify(rootDirService).registerWithDefaultPath("photos");
         assertThat(output()).contains("Subscribed to: photos");
     }
 
     @Test
-    void handle_add_multipleNames_registersAll() throws Exception {
+    void handle_sync_multipleNames_registersAll() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
-        handle("add photos, music");
+        handle("sync photos, music");
         verify(rootDirService).registerWithDefaultPath("photos");
         verify(rootDirService).registerWithDefaultPath("music");
     }
 
     @Test
-    void handle_add_outOfRangeIndex_printsError() throws Exception {
+    void handle_sync_outOfRangeIndex_printsError() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
-        handle("add 9");
+        handle("sync 9");
         verify(rootDirService, never()).registerWithDefaultPath(any());
         assertThat(output()).contains("No directory at index 9");
     }
 
     @Test
-    void handle_add_alreadySubscribed_doesNotReregister() throws Exception {
+    void handle_sync_alreadySubscribed_doesNotReregister() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of(new ClientRootDir("photos", 1L, null)));
-        handle("add photos");
+        handle("sync photos");
         verify(rootDirService, never()).registerWithDefaultPath(any());
         verify(clientSyncService, never()).reconnect();
         assertThat(output()).contains("Already subscribed to: photos");
     }
 
     @Test
-    void handle_add_withCustomPath_registersCustomPath() throws Exception {
+    void handle_sync_withCustomPath_registersCustomPath() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
-        handle("add photos --path /data/pics");
+        handle("sync photos --path /data/pics");
         String expectedPath = Path.of("/data/pics").toAbsolutePath().normalize().toString();
         verify(rootDirService).registerWithCustomPath("photos", expectedPath);
     }
 
     @Test
-    void handle_add_customPathWithMultipleDirs_printsError() throws Exception {
+    void handle_sync_customPathWithMultipleDirs_printsError() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
-        handle("add photos,music --path /data/pics");
+        handle("sync photos,music --path /data/pics");
         verify(rootDirService, never()).registerWithCustomPath(any(), any());
         assertThat(output()).contains("--path applies to a single directory only");
     }

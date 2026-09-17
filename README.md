@@ -46,7 +46,7 @@ a private network.
 
 1. On the server you `add` one or more directories. The server indexes them, watches
    the root level with OS file events, and re-scans subdirectories every 30 seconds.
-2. A client connects, fetches the list of public directories over REST, and you `add`
+2. A client connects, fetches the list of public directories over REST, and you `sync`
    the ones you want. Private directories are joined with `private <name> --pswd <pw>`.
 3. The client then keeps a socket open and asks, every 2 seconds, "anything newer than
    version N?" for each subscribed directory. New and changed files are streamed down;
@@ -79,7 +79,7 @@ Only server-side events move files afterwards:
 - A server file that lands on the **same path as one of your own files** overwrites it.
 
 If you want a full copy again, unsubscribe and resubscribe (`remove <name>` then
-`add <name>`); that resets the cursor and the server re-sends everything.
+`sync <name>`); that resets the cursor and the server re-sends everything.
 
 ---
 
@@ -268,7 +268,7 @@ host 192.168.1.10     # plain LAN
   browse [dir] [subpath]   list a server directory's contents (numbered)
   browse <n> / up          enter entry n of the last listing / go up
                              --depth <1-5>  list several levels at once
-  add <name|index>         subscribe to a server directory
+  sync <name|index>        subscribe to a server directory
                              --path <abs>  mirror it outside the mirror dir
   private <name> --pswd <password>
                            subscribe to a password-protected directory
@@ -290,12 +290,12 @@ host 192.168.1.10     # plain LAN
   1. documents
   2. music
   3. photos
-  'add <n>' subscribes (e.g. 'add 2,3'), 'browse <n>' looks inside, 'download <n>' fetches
+  'sync <n>' subscribes (e.g. 'sync 2,3'), 'browse <n>' looks inside, 'download <n>' fetches
 
-> add 3                      # or: add photos
+> sync 3                     # or: sync photos
   Subscribed to: photos
 
-> add documents --path /data/docs   # mirror this one somewhere else (single dir only)
+> sync documents --path /data/docs  # mirror this one somewhere else (single dir only)
   Subscribed to: documents
 
 > list
@@ -307,7 +307,7 @@ documents              | 7                 |
 
 Everything in `photos` now lands in `~/.luddite/photos/` and stays current while the
 client runs. Every listing is numbered, and the numbers are accepted anywhere a name is
-(`add 2`, `browse 3`, `download 1`).
+(`sync 2`, `browse 3`, `download 1`).
 
 ### Browsing and one-off downloads
 
@@ -540,7 +540,7 @@ The client identity lives in `~/.luddite/client-id`. Copy that file along with
 
 **I deleted a synced file locally and want it back**
 That is by design — see [weak sync](#your-local-copy-is-yours-weak-sync). Either wait
-for the file to change on the server, or run `remove <name>` followed by `add <name>` to
+for the file to change on the server, or run `remove <name>` followed by `sync <name>` to
 pull the whole directory again.
 
 **Start over on the server**
