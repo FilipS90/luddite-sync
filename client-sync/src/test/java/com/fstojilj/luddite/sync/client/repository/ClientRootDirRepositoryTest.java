@@ -120,17 +120,6 @@ class ClientRootDirRepositoryTest {
         repository.remove("missing"); // should not throw
     }
 
-    // ── reset ─────────────────────────────────────────────────────────────────
-
-    @Test
-    void reset_setsVersionToMinusOne() {
-        repository.registerIfAbsent("photos");
-        repository.updateSyncVersion("photos", 100L);
-        repository.reset("photos");
-        long version = repository.findAll().getFirst().lastSyncVersion();
-        assertThat(version).isEqualTo(-1L);
-    }
-
     // ── updateSyncVersion ─────────────────────────────────────────────────────
 
     @Test

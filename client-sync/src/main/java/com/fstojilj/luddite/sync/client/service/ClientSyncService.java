@@ -208,7 +208,6 @@ public class ClientSyncService implements ApplicationRunner {
                 }
 
                 registerDirs(dirsToSync);
-                auditMissingFiles(dirsToSync);
 
                 // Discover the server's current socket port (it may have been changed live via
                 // the server's admin CLI) before opening the socket, and persist it — the DB is
@@ -307,49 +306,6 @@ public class ClientSyncService implements ApplicationRunner {
     }
 
     /**
-     * Audits the local mirror against the database of synced-file records.
-     * Any file previously acknowledged but no longer present on disk causes the
-     * directory's sync version to be reset to {@code -1} so the server re-sends it.
-     *
-     * @param dirs list of directory names to audit
-     */
-    private void auditMissingFiles(List<String> dirs) {
-        for (String dirName : dirs) {
-            Path dirBase = rootDirService.resolveLocalPath(dirName);
-
-            // If the entire directory is absent, reset everything for this dir
-            if (!Files.exists(dirBase)) {
-                log.warn("Dir '{}': mirror directory missing entirely — resetting sync version", dirName);
-                rootDirService.resetSyncVersionForDir(dirName);
-                fileMetadataService.findAllByDir(dirName)
-                        .forEach(rel -> fileMetadataService.purgeRecord(dirName, rel));
-                continue;
-            }
-
-            // Walk all recorded paths (includes subdirectory files) and find missing ones
-            List<String> recorded = fileMetadataService.findAllByDir(dirName);
-            List<String> missing = recorded.stream()
-                    .filter(rel -> {
-                        // rel is a qualified path like "dirName/subdir/file.txt"; strip the
-                        // dirName prefix and resolve the remainder under this dir's own base
-                        Path filePath = dirBase.resolve(stripDirPrefix(dirName, rel)).normalize();
-                        return !Files.exists(filePath);
-                    })
-                    .toList();
-
-            if (!missing.isEmpty()) {
-                log.warn("Dir '{}': {} file(s) missing from disk (including subdirs) — resetting sync version: {}",
-                        dirName, missing.size(), missing);
-                rootDirService.resetSyncVersionForDir(dirName);
-                missing.forEach(rel -> fileMetadataService.purgeRecord(dirName, rel));
-            }
-        }
-    }
-
-    // TODO : consider strong and weak sync feature, user is allowed to delete excess data, will continue
-    // to be synced with new incoming files
-
-    /**
      * Polls the server every {@value #POLL_INTERVAL_MS} ms for each subscribed directory.
      *
      * <p>The set of directories to poll is recomputed on <em>every</em> iteration from
@@ -361,7 +317,7 @@ public class ClientSyncService implements ApplicationRunner {
      * {@code retrieveAllInSyncDirs()}.
      *
      * <p>Directories seen for the first time in this connection (including the initial batch)
-     * are registered and audited for missing local files before their first poll.
+     * are registered before their first poll.
      *
      * <p>For each directory polled:
      * <ol>
@@ -395,7 +351,6 @@ public class ClientSyncService implements ApplicationRunner {
             List<String> newDirs = dirsToSync.stream().filter(d -> !seenDirs.contains(d)).toList();
             if (!newDirs.isEmpty()) {
                 registerDirs(newDirs);
-                auditMissingFiles(newDirs);
                 seenDirs.addAll(newDirs);
             }
 

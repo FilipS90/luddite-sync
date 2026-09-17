@@ -15,8 +15,7 @@ import org.springframework.stereotype.Service;
  *
  * <p>Wraps {@link FileMetadataRepository} (the {@code file_metadata} SQLite table) and
  * provides the business operations needed by {@link ClientSyncService}:
- * recording a newly written file, removing a deleted file, and auditing which files
- * are expected to be present on disk.
+ * recording a newly written file and removing a deleted file.
  */
 @Service
 @RequiredArgsConstructor
@@ -45,10 +44,10 @@ public class FileMetadataService {
      * the file from disk.
      *
      * <p>Ordering rationale: the DB record is the source of truth for what the client
-     * is supposed to have. Deleting it first means that if the process crashes between
-     * the DB delete and the disk delete, the startup audit will find no record for the
-     * file and will not attempt to re-request it from the server. If the DB delete
-     * itself fails, the disk file is left untouched so no data is lost.
+     * has received. Deleting it first means that if the process crashes between the DB
+     * delete and the disk delete, the file is simply left behind as an untracked local
+     * file. If the DB delete itself fails, the disk file is left untouched so no data
+     * is lost.
      *
      * <p>If the file is already absent from disk the deletion step is skipped silently.
      *
@@ -97,7 +96,7 @@ public class FileMetadataService {
 
     /**
      * Removes the DB record for a file without touching the disk.
-     * Use this when the file is already known to be gone from disk (e.g. startup audit).
+     * Use this when the file is already known to be gone from disk.
      * For server-driven deletes use {@link #removeRecord} which also deletes from disk.
      *
      * @param dirName      server-side directory name
@@ -110,7 +109,7 @@ public class FileMetadataService {
 
     /**
      * Returns all relative paths that were previously confirmed as synced for a given
-     * directory. Used during the startup audit to detect files missing from disk.
+     * directory. Used when a directory is removed from sync to delete its local files.
      *
      * @param dirName server-side directory name
      * @return list of relative paths previously written to disk

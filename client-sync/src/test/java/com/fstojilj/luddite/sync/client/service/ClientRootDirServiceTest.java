@@ -99,14 +99,6 @@ class ClientRootDirServiceTest {
         verify(rootDirRepository).updateSyncVersion("photos", 99L);
     }
 
-    // ── resetSyncVersionForDir ────────────────────────────────────────────────
-
-    @Test
-    void resetSyncVersionForDir_delegatesToRepository() {
-        rootDirService.resetSyncVersionForDir("photos");
-        verify(rootDirRepository).reset("photos");
-    }
-
     // ── removeDirectory ───────────────────────────────────────────────────────
 
     @Test

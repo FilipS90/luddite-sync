@@ -32,8 +32,7 @@ public class FileMetadataRepository {
     }
 
     /**
-     * Removes a file record when the server delivers a delete event,
-     * or when the file is found missing from disk during the startup audit.
+     * Removes a file record when the server delivers a delete event.
      *
      * @param dirName      server-side directory name
      * @param relativePath qualified relative path to remove
@@ -57,7 +56,7 @@ public class FileMetadataRepository {
 
     /**
      * Returns all relative paths recorded for a given directory.
-     * Used during the startup audit to detect files missing from disk.
+     * Used when a directory is removed from sync to delete its local files.
      *
      * @param dirName server-side directory name
      * @return list of relative paths previously confirmed as synced

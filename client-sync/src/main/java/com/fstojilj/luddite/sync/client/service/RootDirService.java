@@ -105,16 +105,6 @@ public class RootDirService {
     }
 
     /**
-     * Resets the last sync version for the given directory back to {@code -1}, forcing
-     * the server to re-send all files for that directory on the next connection.
-     *
-     * @param dirName the directory whose sync version should be reset
-     */
-    public void resetSyncVersionForDir(String dirName) {
-        rootDirRepository.reset(dirName);
-    }
-
-    /**
      * Registers a directory in the local sync state with a starting sync version of
      * {@code -1} if it is not already present. Safe to call multiple times.
      *
