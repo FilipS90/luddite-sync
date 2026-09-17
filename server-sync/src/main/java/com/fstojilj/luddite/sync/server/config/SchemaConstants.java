@@ -31,6 +31,13 @@ public interface SchemaConstants {
             )
             """;
 
+    String SYNC_TIME_TABLE = """
+            CREATE TABLE IF NOT EXISTS sync_time (
+                client_id             TEXT PRIMARY KEY,
+                last_sync_time_millis INTEGER NOT NULL
+            )
+            """;
+
     String UPDATE_ROOT_DIR_MODIFIED_AT_TRIGGER = """
             CREATE TRIGGER update_root_dir_modified_at
             AFTER UPDATE ON root_dir

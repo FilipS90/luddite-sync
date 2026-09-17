@@ -224,6 +224,98 @@ class FileMetadataRepositoryTest {
         assertThat(repository.findChangedSince(1, -1L, 100).getFirst().clientIds()).isNull();
     }
 
+    // ── removeAllClientIdUsage ────────────────────────────────────────────────
+
+    private String clientIdsOf(String relativePath) {
+        return jdbcTemplate.queryForObject(
+                "SELECT client_ids FROM file_metadata WHERE root_dir_id = 1 AND relative_path = ?",
+                String.class, relativePath);
+    }
+
+    @Test
+    void removeAllClientIdUsage_middleOfList_removesOnlyThatId() {
+        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
+        repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-2");
+        repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-3");
+
+        repository.removeAllClientIdUsage("hw-id-2");
+
+        assertThat(clientIdsOf("a.jpg")).isEqualTo("hw-id-1,hw-id-3");
+    }
+
+    @Test
+    void removeAllClientIdUsage_firstAndLastOfList_removesCleanly() {
+        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.add(buildMeta("b.jpg", "b.jpg"));
+        repository.addClientIdToAll(1, List.of("a.jpg", "b.jpg"), "hw-id-1");
+        repository.addClientIdToAll(1, List.of("a.jpg", "b.jpg"), "hw-id-2");
+
+        repository.removeAllClientIdUsage("hw-id-1");
+        assertThat(clientIdsOf("a.jpg")).isEqualTo("hw-id-2");
+
+        repository.removeAllClientIdUsage("hw-id-2");
+        assertThat(clientIdsOf("a.jpg")).isNull();
+        assertThat(clientIdsOf("b.jpg")).isNull();
+    }
+
+    @Test
+    void removeAllClientIdUsage_prefixOfAnotherId_leavesLongerIdIntact() {
+        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-10");
+        repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
+
+        repository.removeAllClientIdUsage("hw-id-1");
+
+        assertThat(clientIdsOf("a.jpg")).isEqualTo("hw-id-10");
+    }
+
+    @Test
+    void removeAllClientIdUsage_unknownClient_leavesRowsUntouched() {
+        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
+
+        repository.removeAllClientIdUsage("hw-id-9");
+
+        assertThat(clientIdsOf("a.jpg")).isEqualTo("hw-id-1");
+    }
+
+    @Test
+    void removeAllClientIdUsage_softDeletedRowWithOtherClients_keepsRow() {
+        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
+        repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-2");
+        repository.softDelete(1L, "a.jpg", 5L);
+
+        repository.removeAllClientIdUsage("hw-id-1");
+
+        assertThat(clientIdsOf("a.jpg")).isEqualTo("hw-id-2");
+    }
+
+    @Test
+    void removeAllClientIdUsage_lastClientOfSoftDeletedRow_hardDeletesRow() {
+        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
+        repository.softDelete(1L, "a.jpg", 5L);
+
+        repository.removeAllClientIdUsage("hw-id-1");
+
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM file_metadata WHERE relative_path = 'a.jpg'", Integer.class);
+        assertThat(count).isZero();
+    }
+
+    @Test
+    void removeAllClientIdUsage_lastClientOfLiveRow_keepsRow() {
+        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
+
+        repository.removeAllClientIdUsage("hw-id-1");
+
+        assertThat(repository.findChangedSince(1, -1L, 100)).hasSize(1);
+        assertThat(clientIdsOf("a.jpg")).isNull();
+    }
+
     // ── softDelete ────────────────────────────────────────────────────────────
 
     @Test

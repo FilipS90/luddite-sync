@@ -3,6 +3,7 @@ package com.fstojilj.luddite.sync.server.service;
 import com.fstojilj.luddite.sync.common.model.FileMetadata;
 import com.fstojilj.luddite.sync.common.model.RootDir;
 import com.fstojilj.luddite.sync.server.repository.RootDirRepository;
+import com.fstojilj.luddite.sync.server.repository.SyncTimeRepository;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
@@ -43,7 +44,7 @@ import java.util.concurrent.locks.ReentrantLock;
  *   SYNC (0x01):
  *     Client → [4b dirNameLen][dirName][8b sinceVersion]
  *     Server → [4b count] per record: [1b flags][4b pathLen][qualifiedPath][8b version][8b fileSize][fileSize bytes]
- *   FILE (0x02):
+ *   DOWNLOAD_FILE (0x02):
  *     Client → [4b pathLen][qualifiedPath]
  *     Server → [8b fileSize (-1L = not found/denied)][fileSize bytes if ≥ 0]
  *   DELETE_ACK (0x03):
@@ -58,15 +59,19 @@ public class FileSocketService {
 
     // ── Wire protocol bytes — client→server message types ────────────────────
     public static final byte SYNC = 0x01;
-    public static final byte FILE = 0x02;
+    public static final byte DOWNLOAD_FILE = 0x02;
     public static final byte DELETE_ACK = 0x03;
 
     // ── Flag bits inside sync-response file records ───────────────────────────
     private static final byte FLAG_DELETED = 0x01;
 
+    /** Minimum gap between two {@code sync_time} writes for the same client. */
+    private static final long SYNC_TIME_WRITE_INTERVAL_MS = 60 * 60 * 1000L;
+
     // ── Dependencies ─────────────────────────────────────────────────────────
     private final FileMetadataService fileMetadataService;
     private final RootDirRepository rootDirRepository;
+    private final SyncTimeRepository syncTimeRepository;
     private final AuthCacheService authCacheService;
 
     // ── Config ────────────────────────────────────────────────────────────────
@@ -82,6 +87,12 @@ public class FileSocketService {
      * Exposed to the admin CLI via {@link #listConnectedClients()}.
      */
     private final ConcurrentHashMap<String, String> connectedClients = new ConcurrentHashMap<>();
+
+    /**
+     * Last time each connected client's {@code sync_time} row was written. Clients poll every
+     * couple of seconds, so without this every poll would be a SQLite write.
+     */
+    private final ConcurrentHashMap<String, Long> lastSyncTimeWrite = new ConcurrentHashMap<>();
 
     /**
      * Serialises concurrent SYNC requests so that version minting and stamping are atomic.
@@ -179,7 +190,7 @@ public class FileSocketService {
      *
      * <ol>
      *   <li>Reads the client's stable {@code clientId}.</li>
-     *   <li>Enters the message loop: handles {@code SYNC}, {@code FILE}, and
+     *   <li>Enters the message loop: handles {@code SYNC}, {@code DOWNLOAD_FILE}, and
      *       {@code DELETE_ACK} messages.</li>
      * </ol>
      *
@@ -205,9 +216,10 @@ public class FileSocketService {
                         int nameLen = in.readInt();
                         String dirName = new String(in.readNBytes(nameLen), StandardCharsets.UTF_8);
                         long lastSyncVersion = in.readLong();
+                        recordSyncTime(finalClientId);
                         handleSync(out, dirName, lastSyncVersion, finalClientId);
                     }
-                    case FILE -> handleFile(in, out, finalClientId);
+                    case DOWNLOAD_FILE -> handleDownloadFile(in, out, finalClientId);
                     case DELETE_ACK -> {
                         int pathLen = in.readInt();
                         String qualifiedPath = new String(in.readNBytes(pathLen), StandardCharsets.UTF_8);
@@ -222,6 +234,7 @@ public class FileSocketService {
         } finally {
             if (clientId != null) {
                 connectedClients.remove(clientId);
+                lastSyncTimeWrite.remove(clientId);
                 authCacheService.evict(clientId);
             }
             try {
@@ -230,6 +243,23 @@ public class FileSocketService {
                 log.error("Error closing socket for client '{}': {}", clientId, e.getMessage());
             }
         }
+    }
+
+    /**
+     * Persists the client's last-sync timestamp, at most once per
+     * {@value #SYNC_TIME_WRITE_INTERVAL_MS} ms per connection. The first SYNC after a
+     * connect always writes, since the in-memory entry is dropped on disconnect.
+     *
+     * @param clientId the polling client's stable ID
+     */
+    private void recordSyncTime(String clientId) {
+        long now = System.currentTimeMillis();
+        Long last = lastSyncTimeWrite.get(clientId);
+        if (last != null && now - last < SYNC_TIME_WRITE_INTERVAL_MS) {
+            return;
+        }
+        syncTimeRepository.upsert(clientId, now);
+        lastSyncTimeWrite.put(clientId, now);
     }
 
     // ── Sync handler ──────────────────────────────────────────────────────────
@@ -323,25 +353,28 @@ public class FileSocketService {
     // ── File download handler ─────────────────────────────────────────────────
 
     /**
-     * Handles a FILE request from a client. Resolves the qualified path, verifies
-     * path-traversal safety and private-dir authorization, then streams the file.
+     * Handles a DOWNLOAD_FILE request from a client: a one-off fetch of a single file, outside
+     * the sync protocol. Directory downloads are driven entirely by the client, which walks
+     * the tree over HTTP and issues one DOWNLOAD_FILE request per descendant file; this handler
+     * only ever serves a single regular file.
      *
-     * <p>Sends {@code -1L} as the file size if the file is not found, the path is
-     * malformed, or the client is not authorized.
+     * <p>Resolves the qualified path, verifies path-traversal safety and private-dir
+     * authorization, then streams the file. Sends {@code -1L} as the file size if the
+     * target is not a regular file, the path is malformed, or the client is not authorized.
      *
      * @param in       the client's input stream
      * @param out      the client's output stream
      * @param clientId the requesting client's ID
      * @throws IOException if reading or writing fails
      */
-    private void handleFile(DataInputStream in, DataOutputStream out,
-                            String clientId) throws IOException {
+    private void handleDownloadFile(DataInputStream in, DataOutputStream out,
+                                    String clientId) throws IOException {
         int pathLen = in.readInt();
         String qualifiedPath = new String(in.readNBytes(pathLen), StandardCharsets.UTF_8);
 
         int slash = qualifiedPath.indexOf('/');
         if (slash < 0) {
-            log.warn("handleFile: malformed qualifiedPath '{}' from '{}'", qualifiedPath, clientId);
+            log.warn("handleDownloadFile: malformed qualifiedPath '{}' from '{}'", qualifiedPath, clientId);
             out.writeLong(-1L);
             out.flush();
             return;
@@ -352,7 +385,7 @@ public class FileSocketService {
 
         var rootDirOpt = rootDirRepository.findByName(dirName);
         if (rootDirOpt.isEmpty()) {
-            log.warn("handleFile: unknown dir '{}' from '{}'", dirName, clientId);
+            log.warn("handleDownloadFile: unknown dir '{}' from '{}'", dirName, clientId);
             out.writeLong(-1L);
             out.flush();
             return;
@@ -360,7 +393,7 @@ public class FileSocketService {
 
         RootDir rootDir = rootDirOpt.get();
         if (rootDir.isPrivate() && !authCacheService.isAuthorized(clientId, dirName)) {
-            log.warn("handleFile: unauthorized access to private dir '{}' from '{}'", dirName, clientId);
+            log.warn("handleDownloadFile: unauthorized access to private dir '{}' from '{}'", dirName, clientId);
             out.writeLong(-1L);
             out.flush();
             return;
@@ -369,14 +402,14 @@ public class FileSocketService {
         Path rootAbsPath = Path.of(rootDir.getAbsolutePath()).toAbsolutePath().normalize();
         Path target = rootAbsPath.resolve(relPath).normalize();
         if (!target.startsWith(rootAbsPath)) {
-            log.warn("handleFile: path traversal blocked for '{}' from '{}'", qualifiedPath, clientId);
+            log.warn("handleDownloadFile: path traversal blocked for '{}' from '{}'", qualifiedPath, clientId);
             out.writeLong(-1L);
             out.flush();
             return;
         }
 
         if (!Files.exists(target) || !Files.isRegularFile(target)) {
-            log.warn("handleFile: file not found '{}' for '{}'", target, clientId);
+            log.warn("handleDownloadFile: file not found '{}' for '{}'", target, clientId);
             out.writeLong(-1L);
             out.flush();
             return;
@@ -386,7 +419,7 @@ public class FileSocketService {
         out.writeLong(fileSize);
         sendFileBytes(out, target, fileSize);
         out.flush();
-        log.debug("handleFile: sent '{}' ({} bytes) to '{}'", qualifiedPath, fileSize, clientId);
+        log.debug("handleDownloadFile: sent '{}' ({} bytes) to '{}'", qualifiedPath, fileSize, clientId);
     }
 
     // ── Delete-ACK handler ────────────────────────────────────────────────────

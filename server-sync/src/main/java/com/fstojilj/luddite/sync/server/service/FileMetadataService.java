@@ -170,6 +170,17 @@ public class FileMetadataService implements ApplicationRunner {
         fileMetadataRepository.deleteAllByRootDirId(rootDirId);
     }
 
+    /**
+     * Removes {@code clientId} from every row's {@code client_ids}, hard-deleting
+     * soft-deleted rows that no longer have any client left to acknowledge them.
+     *
+     * @param clientId the client ID to forget
+     */
+    @Transactional
+    public void deleteAllForClient(String clientId) {
+        fileMetadataRepository.removeAllClientIdUsage(clientId);
+    }
+
     // ── Sync-version stamping ─────────────────────────────────────────────────
 
     /**

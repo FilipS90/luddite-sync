@@ -346,6 +346,9 @@ public class ClientSyncService implements ApplicationRunner {
         }
     }
 
+    // TODO : consider strong and weak sync feature, user is allowed to delete excess data, will continue
+    // to be synced with new incoming files
+
     /**
      * Polls the server every {@value #POLL_INTERVAL_MS} ms for each subscribed directory.
      *

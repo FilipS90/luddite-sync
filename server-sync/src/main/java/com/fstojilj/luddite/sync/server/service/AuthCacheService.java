@@ -10,7 +10,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>Populated by {@code DirsController} when a client successfully authenticates
  * against a private directory via {@code POST /api/dirs/{name}/auth}. Read by
- * {@code FileSocketService} to gate access to private dirs on every SYNC and FILE
+ * {@code FileSocketService} to gate access to private dirs on every SYNC and DOWNLOAD_FILE
  * request. Evicted when the client's socket disconnects.
  */
 @Service

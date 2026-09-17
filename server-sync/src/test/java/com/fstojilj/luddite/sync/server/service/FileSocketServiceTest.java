@@ -3,12 +3,14 @@ package com.fstojilj.luddite.sync.server.service;
 import com.fstojilj.luddite.sync.common.model.FileMetadata;
 import com.fstojilj.luddite.sync.common.model.RootDir;
 import com.fstojilj.luddite.sync.server.repository.RootDirRepository;
+import com.fstojilj.luddite.sync.server.repository.SyncTimeRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -23,6 +25,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -30,7 +33,9 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -41,6 +46,8 @@ class FileSocketServiceTest {
     private FileMetadataService fileMetadataService;
     @Mock
     private RootDirRepository rootDirRepository;
+    @Mock
+    private SyncTimeRepository syncTimeRepository;
     @Mock
     private AuthCacheService authCacheService;
 
@@ -302,10 +309,10 @@ class FileSocketServiceTest {
         assertThat(in.readInt()).isEqualTo(2); // both records written
     }
 
-    // ── handleFile ────────────────────────────────────────────────────────────
+    // ── handleDownloadFile ────────────────────────────────────────────────────
 
     @Test
-    void handleFile_malformedPath_sendsMinusOne() throws Exception {
+    void handleDownloadFile_malformedPath_sendsMinusOne() throws Exception {
         ByteArrayOutputStream inputBuffer = new ByteArrayOutputStream();
         DataOutputStream inputData = new DataOutputStream(inputBuffer);
         String qualifiedPath = "noslash";
@@ -314,7 +321,7 @@ class FileSocketServiceTest {
         inputData.write(pathBytes);
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        invokeHandleFile(
+        invokeHandleDownloadFile(
                 new DataInputStream(new ByteArrayInputStream(inputBuffer.toByteArray())),
                 new DataOutputStream(baos), "client-1");
 
@@ -322,7 +329,7 @@ class FileSocketServiceTest {
     }
 
     @Test
-    void handleFile_fileNotFound_sendsMinusOne() throws Exception {
+    void handleDownloadFile_fileNotFound_sendsMinusOne() throws Exception {
         setupRootDir("photos", 1, tempDir.toString());
 
         ByteArrayOutputStream inputBuffer = new ByteArrayOutputStream();
@@ -333,7 +340,7 @@ class FileSocketServiceTest {
         inputData.write(pathBytes);
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        invokeHandleFile(
+        invokeHandleDownloadFile(
                 new DataInputStream(new ByteArrayInputStream(inputBuffer.toByteArray())),
                 new DataOutputStream(baos), "client-1");
 
@@ -341,7 +348,7 @@ class FileSocketServiceTest {
     }
 
     @Test
-    void handleFile_unauthorizedPrivateDir_sendsMinusOne() throws Exception {
+    void handleDownloadFile_unauthorizedPrivateDir_sendsMinusOne() throws Exception {
         RootDir privateDir = RootDir.builder().id(1).name("vault").isPrivate(true)
                 .password("hash").absolutePath(tempDir.toString()).build();
         when(rootDirRepository.findByName("vault")).thenReturn(Optional.of(privateDir));
@@ -355,7 +362,7 @@ class FileSocketServiceTest {
         inputData.write(pathBytes);
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        invokeHandleFile(
+        invokeHandleDownloadFile(
                 new DataInputStream(new ByteArrayInputStream(inputBuffer.toByteArray())),
                 new DataOutputStream(baos), "client-1");
 
@@ -363,7 +370,7 @@ class FileSocketServiceTest {
     }
 
     @Test
-    void handleFile_validPublicFile_sendsFileSizeThenBytes() throws Exception {
+    void handleDownloadFile_validPublicFile_sendsFileSizeThenBytes() throws Exception {
         byte[] content = "photo bytes".getBytes(StandardCharsets.UTF_8);
         Files.write(tempDir.resolve("photo.jpg"), content);
         setupRootDir("photos", 1, tempDir.toString());
@@ -376,7 +383,7 @@ class FileSocketServiceTest {
         inputData.write(pathBytes);
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        invokeHandleFile(
+        invokeHandleDownloadFile(
                 new DataInputStream(new ByteArrayInputStream(inputBuffer.toByteArray())),
                 new DataOutputStream(baos), "client-1");
 
@@ -497,7 +504,53 @@ class FileSocketServiceTest {
         verify(fileMetadataService, never()).acknowledgeDelete(anyInt(), anyString(), anyString());
     }
 
+    // ── recordSyncTime ────────────────────────────────────────────────────────
+
+    @Test
+    void recordSyncTime_firstCall_writesToRepository() throws Exception {
+        invokeRecordSyncTime("hw-1");
+
+        verify(syncTimeRepository).upsert(eq("hw-1"), anyLong());
+    }
+
+    @Test
+    void recordSyncTime_repeatedCallsWithinInterval_writeOnce() throws Exception {
+        invokeRecordSyncTime("hw-1");
+        invokeRecordSyncTime("hw-1");
+        invokeRecordSyncTime("hw-1");
+
+        verify(syncTimeRepository, times(1)).upsert(eq("hw-1"), anyLong());
+    }
+
+    @Test
+    void recordSyncTime_afterIntervalElapsed_writesAgain() throws Exception {
+        invokeRecordSyncTime("hw-1");
+        @SuppressWarnings("unchecked")
+        var lastWrite = (ConcurrentHashMap<String, Long>)
+                ReflectionTestUtils.getField(fileSocketService, "lastSyncTimeWrite");
+        lastWrite.put("hw-1", System.currentTimeMillis() - 2 * 60 * 60 * 1000L);
+
+        invokeRecordSyncTime("hw-1");
+
+        verify(syncTimeRepository, times(2)).upsert(eq("hw-1"), anyLong());
+    }
+
+    @Test
+    void recordSyncTime_differentClients_areThrottledIndependently() throws Exception {
+        invokeRecordSyncTime("hw-1");
+        invokeRecordSyncTime("hw-2");
+
+        verify(syncTimeRepository).upsert(eq("hw-1"), anyLong());
+        verify(syncTimeRepository).upsert(eq("hw-2"), anyLong());
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private void invokeRecordSyncTime(String clientId) throws Exception {
+        Method m = FileSocketService.class.getDeclaredMethod("recordSyncTime", String.class);
+        m.setAccessible(true);
+        m.invoke(fileSocketService, clientId);
+    }
 
     private void invokeHandleDeleteAck(String qualifiedPath, String clientId) throws Exception {
         Method m = FileSocketService.class.getDeclaredMethod("handleDeleteAck", String.class, String.class);
@@ -541,10 +594,10 @@ class FileSocketServiceTest {
         }
     }
 
-    private void invokeHandleFile(DataInputStream in, DataOutputStream out,
+    private void invokeHandleDownloadFile(DataInputStream in, DataOutputStream out,
                                   String clientId) throws Exception {
         Method m = FileSocketService.class.getDeclaredMethod(
-                "handleFile", DataInputStream.class, DataOutputStream.class, String.class);
+                "handleDownloadFile", DataInputStream.class, DataOutputStream.class, String.class);
         m.setAccessible(true);
         try {
             m.invoke(fileSocketService, in, out, clientId);

@@ -12,6 +12,7 @@ import java.nio.file.Paths;
 
 import static com.fstojilj.luddite.sync.server.config.SchemaConstants.FILE_METADATA_TABLE;
 import static com.fstojilj.luddite.sync.server.config.SchemaConstants.ROOT_DIR_TABLE;
+import static com.fstojilj.luddite.sync.server.config.SchemaConstants.SYNC_TIME_TABLE;
 import static com.fstojilj.luddite.sync.server.config.SchemaConstants.UPDATE_FILE_METADATA_MODIFIED_AT_TRIGGER;
 import static com.fstojilj.luddite.sync.server.config.SchemaConstants.UPDATE_ROOT_DIR_MODIFIED_AT_TRIGGER;
 
@@ -35,6 +36,7 @@ public class SchemaInitializer implements ApplicationRunner {
 
         jdbcTemplate.execute(ROOT_DIR_TABLE);
         jdbcTemplate.execute(FILE_METADATA_TABLE);
+        jdbcTemplate.execute(SYNC_TIME_TABLE);
         createTriggerIfNotExists("update_root_dir_modified_at", UPDATE_ROOT_DIR_MODIFIED_AT_TRIGGER);
         createTriggerIfNotExists("update_file_metadata_modified_at", UPDATE_FILE_METADATA_MODIFIED_AT_TRIGGER);
 
