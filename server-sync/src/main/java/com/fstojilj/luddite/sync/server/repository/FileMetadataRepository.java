@@ -397,4 +397,25 @@ public class FileMetadataRepository {
                 .sorted()
                 .toList();
     }
+
+    /**
+     * Removes {@code clientId} from the {@code client_ids} list of every row that contains it,
+     * across all root directories. Soft-deleted rows left with no clients are hard-deleted,
+     * since nobody remains to acknowledge the delete.
+     *
+     * @param clientId the client ID to remove
+     */
+    public void removeAllClientIdUsage(String clientId) {
+        String sql = """
+                UPDATE file_metadata
+                SET client_ids = NULLIF(TRIM(REPLACE(',' || client_ids || ',', ',' || ? || ',', ','), ','), '')
+                WHERE instr(',' || client_ids || ',', ',' || ? || ',') > 0
+                """;
+        int updated = jdbcTemplate.update(sql, clientId, clientId);
+        int purged = jdbcTemplate.update(
+                "DELETE FROM file_metadata WHERE deleted = TRUE AND (client_ids IS NULL OR client_ids = '')");
+
+        log.debug("Removed client '{}' from client_ids of {} record(s), hard-deleted {} orphaned soft-deleted row(s)",
+                clientId, updated, purged);
+    }
 }

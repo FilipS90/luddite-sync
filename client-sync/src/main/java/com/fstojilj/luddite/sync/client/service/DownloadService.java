@@ -23,7 +23,7 @@ import org.springframework.stereotype.Service;
  * own short-lived socket connection via {@link ClientSocketFactory} and closes it once the
  * transfer completes — it never touches the persistent sync connection or its poll loop.
  *
- * <h2>Wire protocol (FILE request, {@code 0x02})</h2>
+ * <h2>Wire protocol (DOWNLOAD_FILE request, {@code 0x02})</h2>
  * <pre>
  * On connect:
  *   Client → [4b idLen][clientId (UTF-8)]
@@ -32,7 +32,7 @@ import org.springframework.stereotype.Service;
  *   Server → [8b fileSize (-1L = not found/denied)][fileSize bytes if ≥ 0]
  * </pre>
  *
- * <p>The server-side handler for this request type ({@code FileSocketService.handleFile})
+ * <p>The server-side handler for this request type ({@code FileSocketService.handleDownloadFile})
  * is already fully implemented — this class is purely client-side wiring.
  */
 @Service
@@ -40,7 +40,7 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class DownloadService {
 
-    private static final byte FILE = 0x02;
+    private static final byte DOWNLOAD_FILE = 0x02;
 
     /** Files larger than this are streamed to disk in chunks instead of read fully into memory. */
     private static final long LARGE_FILE_CHUNK_BYTES = 33L * 1024 * 1024;
@@ -157,7 +157,7 @@ public class DownloadService {
             sendClientId(out);
 
             byte[] pathBytes = qualifiedPath.getBytes(StandardCharsets.UTF_8);
-            out.writeByte(FILE);
+            out.writeByte(DOWNLOAD_FILE);
             out.writeInt(pathBytes.length);
             out.write(pathBytes);
             out.flush();

@@ -178,7 +178,7 @@ class DownloadServiceTest {
 
     /**
      * Minimal stand-in for the server's {@code FileSocketService}: accepts connections in a
-     * loop, reads the clientId frame and a FILE (0x02) request, and replies with a
+     * loop, reads the clientId frame and a DOWNLOAD_FILE (0x02) request, and replies with a
      * pre-registered response for the requested qualified path (or {@code -1L} if none was
      * registered).
      */
@@ -214,7 +214,7 @@ class DownloadServiceTest {
                         in.readNBytes(idLen); // clientId — not asserted here
 
                         byte type = in.readByte();
-                        if (type != 0x02) continue; // only FILE requests supported
+                        if (type != 0x02) continue; // only DOWNLOAD_FILE requests supported
 
                         int pathLen = in.readInt();
                         String qualifiedPath = new String(in.readNBytes(pathLen), StandardCharsets.UTF_8);

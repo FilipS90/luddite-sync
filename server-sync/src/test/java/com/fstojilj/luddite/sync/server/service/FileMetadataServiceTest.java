@@ -165,6 +165,14 @@ class FileMetadataServiceTest {
         verify(fileMetadataRepository).deleteAllByRootDirId(5);
     }
 
+    // ── deleteAllForClient ────────────────────────────────────────────────────
+
+    @Test
+    void deleteAllForClient_shouldDelegate() {
+        fileMetadataService.deleteAllForClient("hw-id-1");
+        verify(fileMetadataRepository).removeAllClientIdUsage("hw-id-1");
+    }
+
     // ── stampSyncVersion ──────────────────────────────────────────────────────
 
     @Test
