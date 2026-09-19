@@ -5,11 +5,13 @@ import com.fstojilj.luddite.sync.common.dto.DirListResponse;
 import com.fstojilj.luddite.sync.common.dto.DirVersionCheckRequest;
 import com.fstojilj.luddite.sync.common.dto.DirVersionCheckResponse;
 import com.fstojilj.luddite.sync.common.dto.DirVersionEntry;
+import com.fstojilj.luddite.sync.common.dto.TreeEntry;
 import com.fstojilj.luddite.sync.common.dto.TreeResponse;
 import com.fstojilj.luddite.sync.common.model.RootDir;
 import com.fstojilj.luddite.sync.server.service.AuthCacheService;
 import com.fstojilj.luddite.sync.server.service.FileMetadataService;
 import com.fstojilj.luddite.sync.server.service.RootDirService;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,22 +47,23 @@ public class DirsController {
     private final AuthCacheService authCacheService;
 
     /**
-     * Lists all public (non-private) root directory names.
+     * Lists all public (non-private) root directories with their total live file size.
      * Private directories are never exposed here; clients must use
      * {@code POST /api/dirs/{name}/auth} to access them directly by name.
      */
     @GetMapping
     public DirListResponse listDirs() {
-        List<String> publicDirs = rootDirService.findAll().stream()
+        Map<Integer, Long> sizes = fileMetadataService.sumFileSizeByRootDir();
+        List<TreeEntry> publicDirs = rootDirService.findAll().stream()
                 .filter(rd -> !rd.isPrivate())
-                .map(RootDir::getName)
-                .sorted()
+                .sorted(Comparator.comparing(RootDir::getName))
+                .map(rd -> new TreeEntry(rd.getName(), sizes.getOrDefault(rd.getId(), 0L)))
                 .toList();
         return new DirListResponse(publicDirs);
     }
 
     /**
-     * Returns the immediate child directory names under {@code under} (defaults to root level).
+     * Returns the immediate child directories and files under {@code under} (defaults to root level).
      * Requires {@code X-Auth-Hash} header for private directories. A private directory
      * without a valid hash answers 404, identically to a directory that does not exist,
      * so the endpoint cannot be used to discover private directory names.
@@ -86,9 +89,7 @@ public class DirsController {
             return ResponseEntity.notFound().build();
         }
 
-        List<String> childDirs  = fileMetadataService.findImmediateChildDirNames(dir.getId(), under);
-        List<String> childFiles = fileMetadataService.findImmediateChildFileNames(dir.getId(), under);
-        return ResponseEntity.ok(new TreeResponse(childDirs, childFiles));
+        return ResponseEntity.ok(fileMetadataService.findImmediateChildren(dir.getId(), under));
     }
 
     /**

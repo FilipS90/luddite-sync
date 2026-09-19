@@ -7,7 +7,9 @@ import com.fstojilj.luddite.sync.client.service.DownloadService;
 import com.fstojilj.luddite.sync.client.service.HostSettingsService;
 import com.fstojilj.luddite.sync.client.service.RootDirService;
 import com.fstojilj.luddite.sync.client.service.ServerApiClient;
+import com.fstojilj.luddite.sync.common.dto.TreeEntry;
 import com.fstojilj.luddite.sync.common.dto.TreeResponse;
+import com.fstojilj.luddite.sync.common.util.FileSizeFormat;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
@@ -27,6 +29,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import static com.fstojilj.luddite.sync.client.service.ClientSyncService.serverDirSizes;
 import static com.fstojilj.luddite.sync.client.service.ClientSyncService.serverDirs;
 import static java.lang.Thread.sleep;
 
@@ -85,10 +88,11 @@ public class ClientCli {
      * @param relPath path relative to the root dir; {@code ""} for the root dir itself
      * @param isFile  whether the item is a file rather than a directory
      * @param depth   nesting level below the listed location, for indentation
+     * @param size    size in bytes; for a directory, the sum of everything beneath it
      */
-    private record Entry(String dirName, String relPath, boolean isFile, int depth) {
+    private record Entry(String dirName, String relPath, boolean isFile, int depth, long size) {
         Entry(String dirName, String relPath, boolean isFile) {
-            this(dirName, relPath, isFile, 0);
+            this(dirName, relPath, isFile, 0, 0);
         }
     }
 
@@ -257,8 +261,9 @@ public class ClientCli {
         }
         for (int i = 0; i < listing.size(); i++) {
             Entry entry = listing.get(i);
-            System.out.printf("    %d. %s[%s] %s%n", i + 1, "  ".repeat(entry.depth()),
-                    entry.isFile() ? "file" : "dir ", lastSegment(entry.relPath()));
+            System.out.printf("    %d. %s[%s] %s  (%s)%n", i + 1, "  ".repeat(entry.depth()),
+                    entry.isFile() ? "file" : "dir ", lastSegment(entry.relPath()),
+                    FileSizeFormat.humanReadable(entry.size()));
         }
         System.out.println("  'browse <n>' enters a dir, 'download <n>' fetches an entry, 'up' goes back");
     }
@@ -270,15 +275,15 @@ public class ClientCli {
     private void collectEntries(String dirName, String subPath, String passwordHash,
                                 int levelsLeft, int depth, List<Entry> out) {
         TreeResponse tree = serverApiClient.fetchTree(dirName, subPath, passwordHash);
-        for (String child : tree.childNames()) {
-            String childPath = joinPath(subPath, child);
-            out.add(new Entry(dirName, childPath, false, depth));
+        for (TreeEntry child : tree.childDirs()) {
+            String childPath = joinPath(subPath, child.name());
+            out.add(new Entry(dirName, childPath, false, depth, child.size()));
             if (levelsLeft > 1) {
                 collectEntries(dirName, childPath, passwordHash, levelsLeft - 1, depth + 1, out);
             }
         }
-        for (String file : tree.fileNames()) {
-            out.add(new Entry(dirName, joinPath(subPath, file), true, depth));
+        for (TreeEntry file : tree.files()) {
+            out.add(new Entry(dirName, joinPath(subPath, file.name()), true, depth, file.size()));
         }
     }
 
@@ -445,7 +450,7 @@ public class ClientCli {
         String name = lastSlash < 0 ? subPath : subPath.substring(lastSlash + 1);
 
         return serverApiClient.fetchTree(dirName, parent, rootDirService.getPasswordHash(dirName))
-                .fileNames().contains(name);
+                .files().stream().anyMatch(f -> f.name().equals(name));
     }
 
     // ── remove ────────────────────────────────────────────────────────────────
@@ -636,7 +641,9 @@ public class ClientCli {
             System.out.println("  (none)");
         } else {
             for (int i = 1; i <= availableDirs.size(); i++) {
-                System.out.printf("  %d. %s%n", i, availableDirs.get(i - 1));
+                String name = availableDirs.get(i - 1);
+                System.out.printf("  %d. %s  (%s)%n", i, name,
+                        FileSizeFormat.humanReadable(serverDirSizes.getOrDefault(name, 0L)));
             }
         }
         System.out.println();

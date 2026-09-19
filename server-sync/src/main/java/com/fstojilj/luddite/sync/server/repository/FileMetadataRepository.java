@@ -1,5 +1,7 @@
 package com.fstojilj.luddite.sync.server.repository;
 
+import com.fstojilj.luddite.sync.common.dto.TreeEntry;
+import com.fstojilj.luddite.sync.common.dto.TreeResponse;
 import com.fstojilj.luddite.sync.common.model.FileMetadata;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -7,16 +9,16 @@ import org.jspecify.annotations.NonNull;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
-import org.springframework.jdbc.support.GeneratedKeyHolder;
-import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -41,44 +43,13 @@ public class FileMetadataRepository {
             .clientIds(rs.getString("client_ids"))
             .build();
 
-
-    public long add(FileMetadata fileMetadata) {
-        String sql = """
-                INSERT INTO file_metadata (filename, root_dir_id, relative_path, checksum, file_size, created_at, modified_at, sync_version)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """;
-
-        KeyHolder keyHolder = new GeneratedKeyHolder();
-
-        jdbcTemplate.update(connection -> {
-            PreparedStatement ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
-            ps.setString(1, fileMetadata.filename());
-            ps.setLong(2, fileMetadata.rootDirId());
-            ps.setString(3, fileMetadata.relativePath());
-            ps.setString(4, fileMetadata.checksum());
-            ps.setLong(5, fileMetadata.fileSize());
-            ps.setTimestamp(6, fileMetadata.createdAt() != null ? Timestamp.from(fileMetadata.createdAt()) : Timestamp.from(Instant.now()));
-            ps.setTimestamp(7, fileMetadata.modifiedAt() != null ? Timestamp.from(fileMetadata.modifiedAt()) : Timestamp.from(Instant.now()));
-            ps.setObject(8, fileMetadata.syncVersion());
-            return ps;
-        }, keyHolder);
-
-        Number key = keyHolder.getKey();
-        if (key == null) {
-            throw new IllegalStateException("Failed to retrieve generated key for FileMetadata");
-        }
-
-        log.debug("Inserted FileMetadata with id: {}", key.longValue());
-        return key.longValue();
-    }
-
     /**
      * Inserts a live file record, or refreshes the existing row at that path in place (live or
      * soft-deleted): marks it live, updates checksum, size and modification time, and resets
      * {@code sync_version} to {@code NULL} so the next poll re-delivers the file.
      * {@code client_ids} is preserved so clients holding a previous copy remain tracked.
      *
-     * <p>Must be used instead of {@link #add} for create/modify events: a soft-deleted row still
+     * <p>Must be used instead of {@link #addAll} for create/modify events: a soft-deleted row still
      * occupies the {@code UNIQUE (root_dir_id, relative_path, filename)} key until all clients
      * have acknowledged the delete.
      *
@@ -348,60 +319,61 @@ public class FileMetadataRepository {
     }
 
     /**
-     * Returns the distinct immediate child directory names under {@code parentRelPath}
-     * for a given root directory. Derives directory structure from file paths — there
-     * are no explicit directory rows in the schema.
-     * <p>
-     * <{@code ["photos"]}, and with {@code parentRelPath="photos"} returns
-     * *      * {p>For example, if the root contains files {@code photos/2024/img.jpg} and
-     * {@code photos/2023/img.jpg}, calling with {@code parentRelPath=""} returns
+     * Returns the immediate children under {@code parentRelPath} for a root directory:
+     * subdirectories (derived from file paths — the schema has no directory rows) with the
+     * summed size of every file beneath them, and files with their own size.
      *
      * @param rootDirId     root directory ID
-     * @param parentRelPath the path prefix to look under; use {@code ""} for the root level
-     * @return sorted list of immediate child directory names
-     * @code ["2024", "2023"]}.
+     * @param parentRelPath the path to look under; {@code ""} or {@code null} for the root level
+     * @return children sorted by name
      */
-    public List<String> findImmediateChildDirNames(int rootDirId, String parentRelPath) {
-        List<String> allPaths = jdbcTemplate.queryForList(
-                "SELECT relative_path FROM file_metadata WHERE root_dir_id = ? AND (deleted IS NULL OR deleted = FALSE)",
-                String.class, rootDirId);
-
+    public TreeResponse findImmediateChildren(int rootDirId, String parentRelPath) {
         String prefix = parentRelPath == null ? "" : parentRelPath.replace('\\', '/').replaceAll("^/+|/+$", "");
 
-        return allPaths.stream()
-                .map(p -> p.replace('\\', '/').replaceAll("^/+", ""))
-                .filter(p -> prefix.isEmpty() ? p.contains("/") : p.startsWith(prefix + "/"))
-                .map(p -> prefix.isEmpty() ? p : p.substring(prefix.length() + 1))
-                .map(p -> p.contains("/") ? p.substring(0, p.indexOf('/')) : null)
-                .filter(segment -> segment != null && !segment.isBlank())
-                .distinct()
-                .sorted()
-                .toList();
+        String sql = "SELECT relative_path, file_size FROM file_metadata WHERE root_dir_id = ? AND deleted = FALSE";
+        Object[] args = {rootDirId};
+        if (!prefix.isEmpty()) {
+            // '0' is the code point after '/', so this range is exactly "prefix/…"
+            sql += " AND relative_path >= ? AND relative_path < ?";
+            args = new Object[]{rootDirId, prefix + "/", prefix + "0"};
+        }
+
+        Map<String, Long> dirs = new TreeMap<>();
+        Map<String, Long> files = new TreeMap<>();
+        int skip = prefix.isEmpty() ? 0 : prefix.length() + 1;
+        jdbcTemplate.query(sql, rs -> {
+            String rest = rs.getString("relative_path").substring(skip);
+            long size = rs.getLong("file_size");
+            int slash = rest.indexOf('/');
+            if (slash < 0) {
+                files.put(rest, size);
+            } else {
+                dirs.merge(rest.substring(0, slash), size, Long::sum);
+            }
+        }, args);
+
+        return new TreeResponse(toEntries(dirs), toEntries(files));
+    }
+
+    private static List<TreeEntry> toEntries(Map<String, Long> byName) {
+        return byName.entrySet().stream().map(e -> new TreeEntry(e.getKey(), e.getValue())).toList();
     }
 
     /**
-     * Returns the immediate child file names directly under {@code parentRelPath}
-     * for a given root directory (i.e., files with no further path segments).
+     * Returns the total size of live files per root directory.
      *
-     * @param rootDirId     root directory ID
-     * @param parentRelPath the path prefix to look under; use {@code ""} for the root level
-     * @return sorted list of immediate child file names
+     * @return map of root_dir_id to summed file_size; roots with no live files are absent
      */
-    public List<String> findImmediateChildFileNames(int rootDirId, String parentRelPath) {
-        List<String> allPaths = jdbcTemplate.queryForList(
-                "SELECT relative_path FROM file_metadata WHERE root_dir_id = ? AND (deleted IS NULL OR deleted = FALSE)",
-                String.class, rootDirId);
-
-        String prefix = parentRelPath == null ? "" : parentRelPath.replace('\\', '/').replaceAll("^/+|/+$", "");
-
-        return allPaths.stream()
-                .map(p -> p.replace('\\', '/').replaceAll("^/+", ""))
-                .filter(p -> prefix.isEmpty() ? !p.contains("/") : p.startsWith(prefix + "/"))
-                .map(p -> prefix.isEmpty() ? p : p.substring(prefix.length() + 1))
-                .filter(p -> !p.contains("/") && !p.isBlank())
-                .distinct()
-                .sorted()
-                .toList();
+    public Map<Integer, Long> sumFileSizeByRootDir() {
+        return jdbcTemplate.query(
+                "SELECT root_dir_id, SUM(file_size) AS total FROM file_metadata WHERE deleted = FALSE GROUP BY root_dir_id",
+                rs -> {
+                    Map<Integer, Long> map = new HashMap<>();
+                    while (rs.next()) {
+                        map.put(rs.getInt("root_dir_id"), rs.getLong("total"));
+                    }
+                    return map;
+                });
     }
 
     /**
