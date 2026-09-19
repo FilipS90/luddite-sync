@@ -383,6 +383,53 @@ class FileMetadataRepositoryTest {
     }
 
     @Test
+    void acknowledgeDelete_twoClients_purgesRegardlessOfAckOrder() {
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg"), buildMeta("b.jpg", "b.jpg")));
+        repository.addClientIdToAll(1, List.of("a.jpg", "b.jpg"), "hw-id-1");
+        repository.addClientIdToAll(1, List.of("a.jpg", "b.jpg"), "hw-id-2");
+        repository.softDelete(1L, "a.jpg", 1L);
+        repository.softDelete(1L, "b.jpg", 2L);
+
+        repository.acknowledgeDelete(1, "a.jpg", "hw-id-1");
+        repository.acknowledgeDelete(1, "a.jpg", "hw-id-2");
+        repository.acknowledgeDelete(1, "b.jpg", "hw-id-2");
+        repository.acknowledgeDelete(1, "b.jpg", "hw-id-1");
+
+        assertThat(repository.findChangedSince(1, -1L, 100)).isEmpty();
+    }
+
+    @Test
+    void acknowledgeDelete_middleOfThreeClients_leavesOthersIntact() {
+        repository.addAll(List.of(buildMeta("photo.jpg", "photo.jpg")));
+        for (String id : List.of("hw-id-1", "hw-id-2", "hw-id-3")) {
+            repository.addClientIdToAll(1, List.of("photo.jpg"), id);
+        }
+        repository.softDelete(1L, "photo.jpg", 1L);
+        repository.acknowledgeDelete(1, "photo.jpg", "hw-id-2");
+
+        assertThat(repository.findChangedSince(1, -1L, 100).getFirst().clientIds()).isEqualTo("hw-id-1,hw-id-3");
+    }
+
+    @Test
+    void acknowledgeDelete_unknownClient_leavesListUnchanged() {
+        repository.addAll(List.of(buildMeta("photo.jpg", "photo.jpg")));
+        repository.addClientIdToAll(1, List.of("photo.jpg"), "hw-id-1");
+        repository.softDelete(1L, "photo.jpg", 1L);
+        repository.acknowledgeDelete(1, "photo.jpg", "hw-id-9");
+
+        assertThat(repository.findChangedSince(1, -1L, 100).getFirst().clientIds()).isEqualTo("hw-id-1");
+    }
+
+    @Test
+    void acknowledgeDelete_liveRow_isIgnored() {
+        repository.addAll(List.of(buildMeta("photo.jpg", "photo.jpg")));
+        repository.addClientIdToAll(1, List.of("photo.jpg"), "hw-id-1");
+        repository.acknowledgeDelete(1, "photo.jpg", "hw-id-1");
+
+        assertThat(repository.findChangedSince(1, -1L, 100).getFirst().clientIds()).isEqualTo("hw-id-1");
+    }
+
+    @Test
     void acknowledgeDelete_noClientsEverHeldFile_hardDeletesRow() {
         repository.addAll(List.of(buildMeta("photo.jpg", "photo.jpg")));
         repository.softDelete(1L, "photo.jpg", 1L);

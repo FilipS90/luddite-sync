@@ -250,45 +250,34 @@ public class FileMetadataRepository {
      * When the list becomes empty (all clients have acknowledged the delete) the row is
      * hard-deleted from the database.
      *
+     * <p>The removal is a single UPDATE so that acknowledgements from several clients
+     * arriving at the same time never overwrite each other's edit of the list.
+     *
      * @param rootDirId    root directory ID
      * @param relativePath relative file path
      * @param clientId     the client ID to remove
      */
     public void acknowledgeDelete(int rootDirId, String relativePath, String clientId) {
-        var results = jdbcTemplate.queryForList(
-                "SELECT client_ids FROM file_metadata WHERE root_dir_id = ? AND relative_path = ? AND deleted = TRUE",
-                rootDirId, relativePath);
-
-        if (results.isEmpty()) {
+        int rows = jdbcTemplate.update("""
+                        UPDATE file_metadata
+                        SET client_ids = trim(replace(',' || coalesce(client_ids, '') || ',', ',' || ? || ',', ','), ',')
+                        WHERE root_dir_id = ? AND relative_path = ? AND deleted = TRUE
+                        """,
+                clientId, rootDirId, relativePath);
+        if (rows == 0) {
             log.warn("acknowledgeDelete: no soft-deleted row for rootDirId={} '{}'", rootDirId, relativePath);
             return;
         }
 
-        String raw = (String) results.getFirst().get("client_ids");
-        if (raw == null || raw.isBlank()) {
-            // No more clients pending — hard-delete immediately
-            jdbcTemplate.update("DELETE FROM file_metadata WHERE root_dir_id = ? AND relative_path = ?",
-                    rootDirId, relativePath);
-            log.debug("acknowledgeDelete: client_ids already empty, hard-deleted rootDirId={} '{}'", rootDirId, relativePath);
-            return;
-        }
-
-        // Remove this client's ID from the comma-separated list
-        String updated = java.util.Arrays.stream(raw.split(","))
-                .map(String::trim)
-                .filter(id -> !id.equals(clientId))
-                .collect(java.util.stream.Collectors.joining(","));
-
-        if (updated.isEmpty()) {
-            jdbcTemplate.update("DELETE FROM file_metadata WHERE root_dir_id = ? AND relative_path = ?",
-                    rootDirId, relativePath);
+        int purged = jdbcTemplate.update("""
+                        DELETE FROM file_metadata
+                        WHERE root_dir_id = ? AND relative_path = ? AND deleted = TRUE AND client_ids = ''
+                        """,
+                rootDirId, relativePath);
+        if (purged > 0) {
             log.debug("acknowledgeDelete: last client acked delete, hard-deleted rootDirId={} '{}'", rootDirId, relativePath);
         } else {
-            jdbcTemplate.update(
-                    "UPDATE file_metadata SET client_ids = ? WHERE root_dir_id = ? AND relative_path = ?",
-                    updated, rootDirId, relativePath);
-            log.debug("acknowledgeDelete: removed '{}' from pending list for rootDirId={} '{}', remaining: {}",
-                    clientId, rootDirId, relativePath, updated);
+            log.debug("acknowledgeDelete: removed '{}' from pending list for rootDirId={} '{}'", clientId, rootDirId, relativePath);
         }
     }
 

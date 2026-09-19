@@ -460,15 +460,23 @@ drives them through the CLI. It needs `bash` and `sqlite3` and does not touch
 `~/.luddite`.
 
 ```bash
-e2e/weak-sync.sh              # builds the JARs, then runs the weak-sync scenarios
-e2e/weak-sync.sh --no-build   # reuse the JARs already in */target
+e2e/run-all.sh                # builds the JARs, then runs every suite below
+e2e/sync.sh --no-build        # reuse the JARs already in */target
 ```
 
-`e2e/lib.sh` holds the reusable pieces — `start_server`, `start_client N`,
-`server_cmd` / `client_cmd` (CLI over a FIFO), `client_files`, `client_db`,
-`server_db`, `wait_for_log`, `assert_eq` — so a new scenario script is just
-`source lib.sh` plus the steps to check. Logs and databases stay in `e2e/.run/` after a
-run for inspection.
+| Suite | Covers |
+|-------|--------|
+| `sync.sh` | two clients on one dir; adds at root (watcher) and in subdirs (scanner); edits; deletes and tombstone purging once every holder acks; a client offline during a delete; large-file chunking; `sync --path`; `remove` with and without `--delete`; re-subscribing; private dirs; a server restart with root and subdir changes made while it was down; the server dropping a root dir |
+| `weak-sync.sh` | local deletes, untracked files and a wiped mirror never trigger a re-download; only server-side changes move files |
+| `download.sh` | single files (incl. unicode names), subtrees, whole root dirs, `browse` + `download <n>`; 16 MB progress lines; overwriting; missing paths; private dirs with wrong and right passwords, including multi-file downloads that must not de-authorize the sync connection; the server stalling (read timeout, `.part` removed) and crashing mid-transfer |
+
+`e2e/lib.sh` holds the reusable pieces — `start_server` / `stop_server` / `restart_server`,
+`start_client N` / `stop_client N` / `restart_client N`, `server_cmd` / `client_cmd` (CLI
+over a FIFO), `wait_client N PATTERN` (matches only output printed after the last
+`client_cmd` or `mark_client`), `wait_for_server_db`, `client_files`,
+`client_downloaded_files`, `client_db`, `server_db`, `assert_eq`, `assert_same_content`,
+`assert_no_client_errors` — so a new scenario script is just `source lib.sh` plus the
+steps to check. Logs and databases stay in `e2e/.run/` after a run for inspection.
 
 Native packages are produced by the `Package Luddite Sync App` GitHub Actions workflow,
 which runs on every `v*` tag (or manually via *Run workflow*) and attaches the `.deb`,

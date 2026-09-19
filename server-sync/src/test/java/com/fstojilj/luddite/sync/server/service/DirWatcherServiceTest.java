@@ -1,5 +1,6 @@
 package com.fstojilj.luddite.sync.server.service;
 
+import com.fstojilj.luddite.sync.common.model.FileMetadata;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
@@ -11,11 +12,18 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.WatchService;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class DirWatcherServiceTest {
@@ -99,6 +107,40 @@ class DirWatcherServiceTest {
                 tempDir.resolve("test.jpg"), 1, "test.jpg");
 
         dirWatcherService.stopWatching(path);
+    }
+
+    @Test
+    void startWatching_indexesRootLevelAndSubdirFilesMissingFromDb() throws Exception {
+        Path rootFile = Files.writeString(tempDir.resolve("root.txt"), "root");
+        Path subFile = Files.writeString(Files.createDirectory(tempDir.resolve("sub")).resolve("nested.txt"), "nested");
+        when(fileMetadataService.findAllActiveByRootDirId(1)).thenReturn(List.of());
+        String path = tempDir.toAbsolutePath().toString();
+
+        dirWatcherService.startWatching(path, 1);
+
+        verify(fileMetadataService, timeout(3000)).addFileMetadata(rootFile, 1, "root.txt");
+        verify(fileMetadataService, timeout(3000)).addFileMetadata(subFile, 1, "sub/nested.txt");
+        dirWatcherService.stopWatching(path);
+    }
+
+    @Test
+    void startWatching_softDeletesRootLevelFileGoneFromDisk() throws Exception {
+        Path kept = Files.writeString(tempDir.resolve("kept.txt"), "kept");
+        when(fileMetadataService.findAllActiveByRootDirId(1)).thenReturn(List.of(
+                meta("kept.txt", Files.size(kept)), meta("gone.txt", 3)));
+        String path = tempDir.toAbsolutePath().toString();
+
+        dirWatcherService.startWatching(path, 1);
+
+        verify(fileMetadataService, timeout(3000)).softDeleteFileMetadata(1, "gone.txt");
+        verify(fileMetadataService, never()).softDeleteFileMetadata(1, "kept.txt");
+        verify(fileMetadataService, never()).addFileMetadata(any(), anyInt(), anyString());
+        dirWatcherService.stopWatching(path);
+    }
+
+    private static FileMetadata meta(String relativePath, long size) {
+        return FileMetadata.builder().rootDirId(1).filename(relativePath).relativePath(relativePath)
+                .fileSize(size).checksum("x").deleted(false).build();
     }
 
     @Test

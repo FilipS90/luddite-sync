@@ -59,8 +59,11 @@ public class DirWatcherService {
             return;
         }
         executor.execute(() -> watch(rootDir, rootDirId));
+        // Catch up on anything that changed while nobody was watching, root level included;
+        // from then on inotify covers the root level and the periodic scan the subdirs.
+        scheduler.execute(() -> reconcile(rootDir, rootDirId, true));
         ScheduledFuture<?> future = scheduler.scheduleAtFixedRate(
-                () -> scanSubdirs(rootDir, rootDirId),
+                () -> reconcile(rootDir, rootDirId, false),
                 scanIntervalSeconds, scanIntervalSeconds, TimeUnit.SECONDS);
         activeScanners.put(rootDir.toString(), future);
     }
@@ -137,18 +140,18 @@ public class DirWatcherService {
     }
 
     /**
-     * Periodically walks all subdirectory files under {@code rootDirPath} and
-     * reconciles the filesystem against the database: inserts new files,
-     * re-indexes modified files (by size), and soft-deletes removed files.
-     * Root-level files are intentionally excluded — they are covered by inotify.
+     * Walks the files under {@code rootDirPath} and reconciles the filesystem against the
+     * database: inserts new files, re-indexes modified files (by size), and soft-deletes
+     * removed files. The periodic scan passes {@code includeRootLevel = false}, since
+     * root-level files are covered by inotify while the watcher runs; the one-off scan at
+     * {@link #startWatching} includes them to pick up changes made while the server was down.
      */
-    private void scanSubdirs(Path rootDirPath, int rootDirId) {
-        log.debug("Starting periodic subdir scan for: {}", rootDirPath);
+    private void reconcile(Path rootDirPath, int rootDirId, boolean includeRootLevel) {
+        log.debug("Starting {} scan for: {}", includeRootLevel ? "full" : "subdir", rootDirPath);
 
-        // Build normalized relPath → FileMetadata map for subdirectory DB records
         Map<String, FileMetadata> dbState = fileMetadataService.findAllActiveByRootDirId(rootDirId)
                 .stream()
-                .filter(m -> normalizeRelPath(m.relativePath()).contains("/"))
+                .filter(m -> includeRootLevel || normalizeRelPath(m.relativePath()).contains("/"))
                 .collect(Collectors.toMap(
                         m -> normalizeRelPath(m.relativePath()),
                         m -> m,
@@ -158,7 +161,7 @@ public class DirWatcherService {
 
         try (var stream = Files.walk(rootDirPath)) {
             stream.filter(Files::isRegularFile)
-                    .filter(p -> !rootDirPath.equals(p.getParent())) // subdirectory files only
+                    .filter(p -> includeRootLevel || !rootDirPath.equals(p.getParent()))
                     .forEach(filePath -> {
                         String relPath = rootDirPath.relativize(filePath).toString().replace('\\', '/');
                         foundOnDisk.add(relPath);
@@ -197,7 +200,7 @@ public class DirWatcherService {
             }
         }
 
-        log.debug("Finished periodic subdir scan for: {}", rootDirPath);
+        log.debug("Finished scan for: {}", rootDirPath);
     }
 
     private static String normalizeRelPath(String path) {
