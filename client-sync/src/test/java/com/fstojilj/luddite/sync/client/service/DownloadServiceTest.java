@@ -9,20 +9,25 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
+import java.time.Duration;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -50,6 +55,7 @@ class DownloadServiceTest {
     @BeforeEach
     void setUp() throws Exception {
         ReflectionTestUtils.setField(downloadService, "mirrorDirPath", tempDir.toString());
+        ReflectionTestUtils.setField(downloadService, "readTimeoutMs", 500);
         lenient().when(clientIdService.getClientId()).thenReturn("test-client");
 
         fakeServer = new FakeFileServer();
@@ -100,6 +106,126 @@ class DownloadServiceTest {
 
         assertThat(result).isFalse();
         assertThat(Files.exists(destination)).isFalse();
+    }
+
+    @Test
+    void downloadSingleFile_multiBufferFile_arrivesIntact() throws Exception {
+        byte[] content = patterned(3 * 1024 * 1024 + 17);
+        fakeServer.respondWith("Movies/movie.mkv", content);
+
+        Path destination = tempDir.resolve("downloads/movie.mkv");
+        boolean result = downloadService.downloadSingleFile("Movies/movie.mkv", destination);
+
+        assertThat(result).isTrue();
+        assertThat(Files.readAllBytes(destination)).isEqualTo(content);
+        assertThat(Files.exists(partialOf(destination))).isFalse();
+    }
+
+    @Test
+    void downloadSingleFile_connectionClosedEarly_failsAndRemovesPartialFile() {
+        byte[] content = patterned(2 * 1024 * 1024);
+        fakeServer.respondTruncated("Movies/movie.mkv", content, content.length + 4096);
+
+        Path destination = tempDir.resolve("downloads/movie.mkv");
+        boolean result = assertTimeoutPreemptively(Duration.ofSeconds(5),
+                () -> downloadService.downloadSingleFile("Movies/movie.mkv", destination));
+
+        assertThat(result).isFalse();
+        assertThat(Files.exists(destination)).isFalse();
+        assertThat(Files.exists(partialOf(destination))).isFalse();
+    }
+
+    @Test
+    void downloadSingleFile_stalledConnection_failsAfterReadTimeout() throws Exception {
+        byte[] content = patterned(1024);
+        CountDownLatch release = fakeServer.respondThenStall("Movies/movie.mkv", content, content.length + 1);
+
+        Path destination = tempDir.resolve("downloads/movie.mkv");
+        try {
+            boolean result = assertTimeoutPreemptively(Duration.ofSeconds(5),
+                    () -> downloadService.downloadSingleFile("Movies/movie.mkv", destination));
+
+            assertThat(result).isFalse();
+            assertThat(Files.exists(destination)).isFalse();
+            assertThat(Files.exists(partialOf(destination))).isFalse();
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void downloadSingleFile_failure_leavesPreviousFileUntouched() throws Exception {
+        Path destination = tempDir.resolve("downloads/movie.mkv");
+        Files.createDirectories(destination.getParent());
+        Files.writeString(destination, "old content");
+        fakeServer.respondTruncated("Movies/movie.mkv", patterned(100), 200);
+
+        boolean result = downloadService.downloadSingleFile("Movies/movie.mkv", destination);
+
+        assertThat(result).isFalse();
+        assertThat(Files.readString(destination)).isEqualTo("old content");
+    }
+
+    // ── progress reporting ────────────────────────────────────────────────────
+
+    @Test
+    void downloadSingleFile_reportsProgressEveryStepAndOnCompletion() {
+        long size = 2 * DownloadService.PROGRESS_STEP_BYTES + 12345;
+        fakeServer.respondWith("Movies/movie.mkv", patterned((int) size));
+        List<long[]> reports = new ArrayList<>();
+
+        boolean result = downloadService.downloadSingleFile("Movies/movie.mkv",
+                tempDir.resolve("downloads/movie.mkv"),
+                (path, done, total) -> {
+                    assertThat(path).isEqualTo("Movies/movie.mkv");
+                    reports.add(new long[]{done, total});
+                });
+
+        assertThat(result).isTrue();
+        assertThat(reports).extracting(r -> r[1]).containsOnly(size);
+        assertThat(reports).extracting(r -> r[0]).containsExactly(
+                DownloadService.PROGRESS_STEP_BYTES, 2 * DownloadService.PROGRESS_STEP_BYTES, size);
+    }
+
+    @Test
+    void downloadSingleFile_smallFile_reportsCompletionOnce() {
+        fakeServer.respondWith("Movies/movie.mkv", "bytes".getBytes(StandardCharsets.UTF_8));
+        List<long[]> reports = new ArrayList<>();
+
+        downloadService.downloadSingleFile("Movies/movie.mkv",
+                tempDir.resolve("downloads/movie.mkv"),
+                (path, done, total) -> reports.add(new long[]{done, total}));
+
+        assertThat(reports).hasSize(1);
+        assertThat(reports.get(0)).containsExactly(5, 5);
+    }
+
+    @Test
+    void download_passesListenerThroughForEveryFile() {
+        when(rootDirService.getPasswordHash("Movies")).thenReturn(null);
+        when(serverApiClient.fetchTree("Movies", "", null))
+                .thenReturn(tree(List.of(), List.of("a.txt", "b.txt")));
+        fakeServer.respondWith("Movies/a.txt", "aa".getBytes(StandardCharsets.UTF_8));
+        fakeServer.respondWith("Movies/b.txt", "bbb".getBytes(StandardCharsets.UTF_8));
+        List<String> reported = new ArrayList<>();
+
+        int count = downloadService.download("Movies", "", false,
+                (path, done, total) -> reported.add(path + ":" + done + "/" + total));
+
+        assertThat(count).isEqualTo(2);
+        assertThat(reported).containsExactlyInAnyOrder("Movies/a.txt:2/2", "Movies/b.txt:3/3");
+    }
+
+    private static Path partialOf(Path destination) {
+        return destination.resolveSibling(destination.getFileName() + DownloadService.PARTIAL_SUFFIX);
+    }
+
+    private static byte[] patterned(int length) {
+        byte[] bytes = new byte[length];
+        for (int i = 0; i < length; i++) {
+            bytes[i] = (byte) (i * 31 + 7);
+        }
+        return bytes;
     }
 
     private static TreeResponse tree(List<String> dirs, List<String> files) {
@@ -190,8 +316,11 @@ class DownloadServiceTest {
      * registered).
      */
     private static final class FakeFileServer {
+        /** What the server sends for one path: the size header, the bytes, then optionally a stall. */
+        private record Response(long declaredSize, byte[] content, CountDownLatch stallUntil) { }
+
         private final ServerSocket serverSocket;
-        private final Map<String, byte[]> responses = new HashMap<>();
+        private final Map<String, Response> responses = new HashMap<>();
         private volatile boolean running = true;
 
         FakeFileServer() throws Exception {
@@ -203,11 +332,26 @@ class DownloadServiceTest {
         }
 
         void respondWith(String qualifiedPath, byte[] content) {
-            responses.put(qualifiedPath, content);
+            responses.put(qualifiedPath, new Response(content.length, content, null));
         }
 
         void respondNotFound(String qualifiedPath) {
             responses.put(qualifiedPath, null);
+        }
+
+        /** Declares {@code declaredSize} bytes but sends only {@code content} and closes. */
+        void respondTruncated(String qualifiedPath, byte[] content, long declaredSize) {
+            responses.put(qualifiedPath, new Response(declaredSize, content, null));
+        }
+
+        /**
+         * Declares {@code declaredSize} bytes, sends {@code content}, then keeps the socket
+         * open without sending anything until the returned latch is released.
+         */
+        CountDownLatch respondThenStall(String qualifiedPath, byte[] content, long declaredSize) {
+            CountDownLatch latch = new CountDownLatch(1);
+            responses.put(qualifiedPath, new Response(declaredSize, content, latch));
+            return latch;
         }
 
         void start() {
@@ -226,14 +370,17 @@ class DownloadServiceTest {
                         int pathLen = in.readInt();
                         String qualifiedPath = new String(in.readNBytes(pathLen), StandardCharsets.UTF_8);
 
-                        byte[] content = responses.get(qualifiedPath);
-                        if (content == null) {
+                        Response response = responses.get(qualifiedPath);
+                        if (response == null) {
                             out.writeLong(-1L);
                         } else {
-                            out.writeLong(content.length);
-                            out.write(content);
+                            out.writeLong(response.declaredSize());
+                            out.write(response.content());
                         }
                         out.flush();
+                        if (response != null && response.stallUntil() != null) {
+                            response.stallUntil().await(10, TimeUnit.SECONDS);
+                        }
                     } catch (Exception e) {
                         // Socket closed during shutdown — expected, stop looping
                         break;

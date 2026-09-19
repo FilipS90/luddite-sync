@@ -95,6 +95,13 @@ public class FileSocketService {
     private final ConcurrentHashMap<String, Long> lastSyncTimeWrite = new ConcurrentHashMap<>();
 
     /**
+     * Number of open sockets per client ID. A client keeps one long-lived sync connection and
+     * opens a short-lived one per downloaded file, all under the same ID; per-client state is
+     * only dropped when the last of them closes.
+     */
+    private final ConcurrentHashMap<String, Integer> openConnections = new ConcurrentHashMap<>();
+
+    /**
      * Serialises concurrent SYNC requests so that version minting and stamping are atomic.
      * Without this lock, two clients polling the same directory simultaneously could both
      * read the same {@code NULL sync_version} rows, mint different versions for them, and
@@ -205,7 +212,8 @@ public class FileSocketService {
             clientId = new String(in.readNBytes(idLen), StandardCharsets.UTF_8);
             log.info("Client {} identified as clientId='{}'", socket.getRemoteSocketAddress(), clientId);
 
-            connectedClients.put(clientId, socket.getRemoteSocketAddress().toString());
+            openConnections.merge(clientId, 1, Integer::sum);
+            connectedClients.putIfAbsent(clientId, socket.getRemoteSocketAddress().toString());
             log.info("Client '{}' ({}) connected", clientId, socket.getRemoteSocketAddress());
 
             final String finalClientId = clientId;
@@ -232,7 +240,7 @@ public class FileSocketService {
         } catch (IOException e) {
             log.info("Client '{}' disconnected: {}", clientId, socket.getRemoteSocketAddress());
         } finally {
-            if (clientId != null) {
+            if (clientId != null && closeConnection(clientId)) {
                 connectedClients.remove(clientId);
                 lastSyncTimeWrite.remove(clientId);
                 authCacheService.evict(clientId);
@@ -243,6 +251,15 @@ public class FileSocketService {
                 log.error("Error closing socket for client '{}': {}", clientId, e.getMessage());
             }
         }
+    }
+
+    /**
+     * Records that one of {@code clientId}'s sockets has closed.
+     *
+     * @return {@code true} if it was the client's last open socket
+     */
+    private boolean closeConnection(String clientId) {
+        return openConnections.computeIfPresent(clientId, (id, n) -> n > 1 ? n - 1 : null) == null;
     }
 
     /**

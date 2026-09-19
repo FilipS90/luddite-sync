@@ -831,7 +831,9 @@ public class ClientUI {
         new SwingWorker<Integer, Void>() {
             @Override
             protected Integer doInBackground() {
-                return downloadService.download(dirName, subPath, isFile);
+                return downloadService.download(dirName, subPath, isFile, (path, done, total) ->
+                        appendLog("[INFO]   " + path + ": " + FileSizeFormat.humanReadable(done)
+                                + " / " + FileSizeFormat.humanReadable(total)));
             }
 
             @Override

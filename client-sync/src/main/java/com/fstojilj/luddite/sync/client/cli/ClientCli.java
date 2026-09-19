@@ -430,7 +430,9 @@ public class ClientCli {
         String target = subPath.isEmpty() ? dirName : dirName + "/" + subPath;
         System.out.printf("  Downloading: %s ...%n", target);
 
-        int count = downloadService.download(dirName, subPath, isFile);
+        int count = downloadService.download(dirName, subPath, isFile, (path, done, total) ->
+                System.out.printf("    %s: %s / %s%n", path,
+                        FileSizeFormat.humanReadable(done), FileSizeFormat.humanReadable(total)));
         if (count > 0) {
             System.out.printf("  Downloaded %d file(s) to %s%n", count, Path.of(mirrorDir, "downloads"));
         } else {

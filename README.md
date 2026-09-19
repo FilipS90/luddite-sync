@@ -337,6 +337,12 @@ Downloads go to `<mirror-dir>/downloads/`. A single file is saved flat; a direct
 keeps its internal structure under `downloads/<name>/`. Downloads are one-shot — they
 are not kept in sync afterwards.
 
+Large files report progress every 16 MB. While a file is in flight it is written to
+`<name>.part` and only renamed once every byte has arrived, so an interrupted or reset
+connection never leaves a truncated file behind — the download simply reports failure
+and can be run again. A connection that sends nothing for
+`sync.client.download-read-timeout-ms` is given up on.
+
 ### Unsubscribing
 
 ```
@@ -392,6 +398,7 @@ java -jar server-sync-0.0.1-SNAPSHOT.jar --server.port=18080 --sync.socket.port=
 | `sync.client.mirror-dir` | `${user.home}/.luddite` | Where subscribed dirs and downloads are stored |
 | `sync.client.retain-local-directory` | `true` | Keep local files when the server stops sharing a directory you were subscribed to |
 | `sync.client.name` | `luddite-client` | Human-readable suffix written into the client-id file |
+| `sync.client.download-read-timeout-ms` | `60000` | Abandon a download when no bytes arrive for this long |
 | `sync.server.api-port` | `8080` | Server REST port; must match the server's `server.port` |
 | `spring.datasource.url` | `jdbc:sqlite:${user.home}/.luddite/client/sync.db` | Client state database |
 

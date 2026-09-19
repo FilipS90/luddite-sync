@@ -18,6 +18,8 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
@@ -35,6 +37,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -542,6 +545,100 @@ class FileSocketServiceTest {
 
         verify(syncTimeRepository).upsert(eq("hw-1"), anyLong());
         verify(syncTimeRepository).upsert(eq("hw-2"), anyLong());
+    }
+
+    // ── serveClient — per-client state across several sockets ───────────────
+
+    @Test
+    void serveClient_downloadSocketClosing_keepsAuthWhileSyncSocketIsOpen() throws Exception {
+        int port = startOnFreePort();
+        try (Socket sync = identify(port, "hw-1");
+             Socket download = identify(port, "hw-1")) {
+            requestDownload(download, "unknown/file.bin");
+
+            download.close();
+            awaitConnectionCount("hw-1", 1);
+
+            verify(authCacheService, never()).evict("hw-1");
+            assertThat(fileSocketService.listConnectedClients()).hasSize(1);
+        } finally {
+            fileSocketService.stop();
+        }
+        verify(authCacheService, timeout(2000)).evict("hw-1");
+    }
+
+    @Test
+    void serveClient_lastSocketClosing_evictsAuthAndConnectedClient() throws Exception {
+        int port = startOnFreePort();
+        try {
+            Socket first = identify(port, "hw-1");
+            Socket second = identify(port, "hw-1");
+            awaitConnectionCount("hw-1", 2);
+
+            first.close();
+            awaitConnectionCount("hw-1", 1);
+            verify(authCacheService, never()).evict("hw-1");
+
+            second.close();
+            verify(authCacheService, timeout(2000)).evict("hw-1");
+            awaitConnectionCount("hw-1", 0);
+            assertThat(fileSocketService.listConnectedClients()).isEmpty();
+        } finally {
+            fileSocketService.stop();
+        }
+    }
+
+    @Test
+    void serveClient_distinctClients_evictedIndependently() throws Exception {
+        int port = startOnFreePort();
+        try (Socket other = identify(port, "hw-2")) {
+            Socket one = identify(port, "hw-1");
+            awaitConnectionCount("hw-1", 1);
+
+            one.close();
+            verify(authCacheService, timeout(2000)).evict("hw-1");
+            verify(authCacheService, never()).evict("hw-2");
+            assertThat(fileSocketService.listConnectedClients()).hasSize(1);
+        } finally {
+            fileSocketService.stop();
+        }
+    }
+
+    private int startOnFreePort() throws Exception {
+        ReflectionTestUtils.setField(fileSocketService, "port", 0);
+        fileSocketService.start();
+        return ((ServerSocket) ReflectionTestUtils.getField(fileSocketService, "serverSocket")).getLocalPort();
+    }
+
+    private static Socket identify(int port, String clientId) throws IOException {
+        Socket socket = new Socket("localhost", port);
+        byte[] id = clientId.getBytes(StandardCharsets.UTF_8);
+        var out = new DataOutputStream(socket.getOutputStream());
+        out.writeInt(id.length);
+        out.write(id);
+        out.flush();
+        return socket;
+    }
+
+    /** Sends one DOWNLOAD_FILE request and waits for the server's size reply. */
+    private static void requestDownload(Socket socket, String qualifiedPath) throws IOException {
+        byte[] path = qualifiedPath.getBytes(StandardCharsets.UTF_8);
+        var out = new DataOutputStream(socket.getOutputStream());
+        out.writeByte(FileSocketService.DOWNLOAD_FILE);
+        out.writeInt(path.length);
+        out.write(path);
+        out.flush();
+        assertThat(new DataInputStream(socket.getInputStream()).readLong()).isEqualTo(-1L);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void awaitConnectionCount(String clientId, int expected) throws InterruptedException {
+        var open = (ConcurrentHashMap<String, Integer>) ReflectionTestUtils.getField(fileSocketService, "openConnections");
+        long deadline = System.currentTimeMillis() + 2000;
+        while (open.getOrDefault(clientId, 0) != expected && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
+        assertThat(open.getOrDefault(clientId, 0)).isEqualTo(expected);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

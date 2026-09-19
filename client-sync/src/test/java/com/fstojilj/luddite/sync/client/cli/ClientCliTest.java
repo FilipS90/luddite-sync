@@ -309,9 +309,9 @@ class ClientCliTest {
     @Test
     void handle_download_rootDir_downloadsAsDirectory() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
-        when(downloadService.download("photos", "", false)).thenReturn(3);
+        when(downloadService.download(eq("photos"), eq(""), eq(false), any())).thenReturn(3);
         handle("download photos");
-        verify(downloadService).download("photos", "", false);
+        verify(downloadService).download(eq("photos"), eq(""), eq(false), any());
         assertThat(output()).contains("Downloaded 3 file(s)");
     }
 
@@ -320,9 +320,9 @@ class ClientCliTest {
         when(rootDirService.findAll()).thenReturn(List.of());
         when(serverApiClient.fetchTree("photos", "2024", null))
                 .thenReturn(tree(List.of(), List.of("a.jpg")));
-        when(downloadService.download("photos", "2024/a.jpg", true)).thenReturn(1);
+        when(downloadService.download(eq("photos"), eq("2024/a.jpg"), eq(true), any())).thenReturn(1);
         handle("download photos 2024/a.jpg");
-        verify(downloadService).download("photos", "2024/a.jpg", true);
+        verify(downloadService).download(eq("photos"), eq("2024/a.jpg"), eq(true), any());
         assertThat(output()).contains("Downloaded 1 file(s)");
     }
 
@@ -331,23 +331,23 @@ class ClientCliTest {
         when(rootDirService.findAll()).thenReturn(List.of());
         when(serverApiClient.fetchTree("photos", "", null))
                 .thenReturn(tree(List.of("2024"), List.of()));
-        when(downloadService.download("photos", "2024", false)).thenReturn(5);
+        when(downloadService.download(eq("photos"), eq("2024"), eq(false), any())).thenReturn(5);
         handle("download photos 2024");
-        verify(downloadService).download("photos", "2024", false);
+        verify(downloadService).download(eq("photos"), eq("2024"), eq(false), any());
     }
 
     @Test
     void handle_download_byIndex_resolvesDirName() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
-        when(downloadService.download("documents", "", false)).thenReturn(1);
+        when(downloadService.download(eq("documents"), eq(""), eq(false), any())).thenReturn(1);
         handle("download 2");
-        verify(downloadService).download("documents", "", false);
+        verify(downloadService).download(eq("documents"), eq(""), eq(false), any());
     }
 
     @Test
     void handle_download_noFiles_printsFailure() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
-        when(downloadService.download("photos", "", false)).thenReturn(0);
+        when(downloadService.download(eq("photos"), eq(""), eq(false), any())).thenReturn(0);
         handle("download photos");
         assertThat(output()).contains("Download failed or found no files");
     }
@@ -582,10 +582,10 @@ class ClientCliTest {
         when(rootDirService.findAll()).thenReturn(List.of());
         when(serverApiClient.fetchTree("photos", "", null))
                 .thenReturn(tree(List.of("2024"), List.of("cover.jpg")));
-        when(downloadService.download("photos", "cover.jpg", true)).thenReturn(1);
+        when(downloadService.download(eq("photos"), eq("cover.jpg"), eq(true), any())).thenReturn(1);
         handle("browse photos");
         handle("download 2");
-        verify(downloadService).download("photos", "cover.jpg", true);
+        verify(downloadService).download(eq("photos"), eq("cover.jpg"), eq(true), any());
         verify(serverApiClient, times(1)).fetchTree(any(), any(), any());
     }
 
@@ -594,10 +594,10 @@ class ClientCliTest {
         when(rootDirService.findAll()).thenReturn(List.of());
         when(serverApiClient.fetchTree("photos", "", null))
                 .thenReturn(tree(List.of("2024"), List.of("cover.jpg")));
-        when(downloadService.download("photos", "2024", false)).thenReturn(3);
+        when(downloadService.download(eq("photos"), eq("2024"), eq(false), any())).thenReturn(3);
         handle("browse photos");
         handle("download 1");
-        verify(downloadService).download("photos", "2024", false);
+        verify(downloadService).download(eq("photos"), eq("2024"), eq(false), any());
     }
 
     // ── browse --depth ────────────────────────────────────────────────────────
@@ -624,10 +624,10 @@ class ClientCliTest {
                 .thenReturn(tree(List.of("2024"), List.of("cover.jpg")));
         when(serverApiClient.fetchTree("photos", "2024", null))
                 .thenReturn(tree(List.of("may"), List.of()));
-        when(downloadService.download("photos", "2024/may", false)).thenReturn(2);
+        when(downloadService.download(eq("photos"), eq("2024/may"), eq(false), any())).thenReturn(2);
         handle("browse photos --depth 2");
         handle("download 2");
-        verify(downloadService).download("photos", "2024/may", false);
+        verify(downloadService).download(eq("photos"), eq("2024/may"), eq(false), any());
     }
 
     @Test

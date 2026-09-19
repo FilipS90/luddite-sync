@@ -11,7 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>Populated by {@code DirsController} when a client successfully authenticates
  * against a private directory via {@code POST /api/dirs/{name}/auth}. Read by
  * {@code FileSocketService} to gate access to private dirs on every SYNC and DOWNLOAD_FILE
- * request. Evicted when the client's socket disconnects.
+ * request. Evicted when the client's last open socket disconnects.
  */
 @Service
 public class AuthCacheService {
@@ -43,7 +43,7 @@ public class AuthCacheService {
 
     /**
      * Removes all cached authorizations for {@code clientId}.
-     * Should be called when the client's socket disconnects.
+     * Should be called when the client's last open socket disconnects.
      *
      * @param clientId the client whose entries should be evicted
      */

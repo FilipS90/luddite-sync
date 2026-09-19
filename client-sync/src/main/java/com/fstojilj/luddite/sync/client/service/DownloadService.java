@@ -4,11 +4,13 @@ import com.fstojilj.luddite.sync.common.dto.TreeEntry;
 import com.fstojilj.luddite.sync.common.dto.TreeResponse;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -43,8 +45,25 @@ public class DownloadService {
 
     private static final byte DOWNLOAD_FILE = 0x02;
 
-    /** Files larger than this are streamed to disk in chunks instead of read fully into memory. */
-    private static final long LARGE_FILE_CHUNK_BYTES = 33L * 1024 * 1024;
+    /** Size of the read/write buffer used to stream file bytes from the socket to disk. */
+    private static final int BUFFER_BYTES = 1024 * 1024;
+
+    /** Progress is reported to the listener every time this many more bytes have landed on disk. */
+    static final long PROGRESS_STEP_BYTES = 16L * 1024 * 1024;
+
+    /** Suffix of the temporary file a download is written to until it is complete. */
+    static final String PARTIAL_SUFFIX = ".part";
+
+    /**
+     * Receives progress updates while a file is being downloaded: one call per
+     * {@value #PROGRESS_STEP_BYTES} bytes received, plus one when the file is complete.
+     */
+    @FunctionalInterface
+    public interface ProgressListener {
+        ProgressListener NONE = (qualifiedPath, bytesDone, totalBytes) -> { };
+
+        void onProgress(String qualifiedPath, long bytesDone, long totalBytes);
+    }
 
     private final ServerApiClient serverApiClient;
     private final RootDirService rootDirService;
@@ -53,6 +72,13 @@ public class DownloadService {
 
     @Value("${sync.client.mirror-dir}")
     private String mirrorDirPath;
+
+    /**
+     * How long a download socket may sit without receiving any bytes before the transfer
+     * is abandoned, so a dead connection fails instead of blocking the caller forever.
+     */
+    @Value("${sync.client.download-read-timeout-ms:60000}")
+    private int readTimeoutMs;
 
     /**
      * Downloads a root directory, subdirectory, or single file from the server into the
@@ -70,13 +96,21 @@ public class DownloadService {
      * @return the number of files successfully downloaded
      */
     public int download(String dirName, String subPath, boolean isFile) {
+        return download(dirName, subPath, isFile, ProgressListener.NONE);
+    }
+
+    /**
+     * Same as {@link #download(String, String, boolean)}, reporting per-file progress to
+     * {@code listener} as bytes arrive. The listener is invoked on the calling thread.
+     */
+    public int download(String dirName, String subPath, boolean isFile, ProgressListener listener) {
         refreshSocketPort();
         Path downloadsRoot = Path.of(mirrorDirPath, "downloads");
 
         if (isFile) {
             String qualifiedPath = dirName + "/" + subPath;
             Path destination = downloadsRoot.resolve(lastSegment(subPath));
-            boolean ok = downloadSingleFile(qualifiedPath, destination);
+            boolean ok = downloadSingleFile(qualifiedPath, destination, listener);
             log.info("Download of file '{}' {}", qualifiedPath, ok ? "succeeded" : "failed");
             return ok ? 1 : 0;
         }
@@ -90,7 +124,7 @@ public class DownloadService {
         for (String relFile : relativeFiles) {
             String qualifiedPath = subPath.isEmpty() ? dirName + "/" + relFile : dirName + "/" + subPath + "/" + relFile;
             Path destination = destinationRoot.resolve(adjustPathSeparatorsForOS(relFile));
-            if (downloadSingleFile(qualifiedPath, destination)) {
+            if (downloadSingleFile(qualifiedPath, destination, listener)) {
                 successCount++;
             }
         }
@@ -147,12 +181,22 @@ public class DownloadService {
      * the persistent sync connection), writing it to {@code destination} and overwriting
      * any existing file there.
      *
+     * <p>Bytes are streamed into {@code destination + ".part"} and the partial file is only
+     * renamed to {@code destination} once every byte has arrived, so an interrupted transfer
+     * never leaves a truncated file that looks complete. On failure the partial file is removed.
+     *
      * @param qualifiedPath qualified path of the form {@code "dirName/relativePath"}
      * @param destination   local destination path to write the file to
      * @return {@code true} if the file was found and downloaded successfully
      */
     public boolean downloadSingleFile(String qualifiedPath, Path destination) {
+        return downloadSingleFile(qualifiedPath, destination, ProgressListener.NONE);
+    }
+
+    public boolean downloadSingleFile(String qualifiedPath, Path destination, ProgressListener listener) {
+        Path partial = destination.resolveSibling(destination.getFileName() + PARTIAL_SUFFIX);
         try (Socket socket = socketFactory.connect()) {
+            socket.setSoTimeout(readTimeoutMs);
             var out = new DataOutputStream(socket.getOutputStream());
             var in = new DataInputStream(socket.getInputStream());
 
@@ -171,11 +215,13 @@ public class DownloadService {
             }
 
             Files.createDirectories(destination.getParent());
-            writeFileBytes(in, destination, fileSize);
+            writeFileBytes(in, partial, fileSize, qualifiedPath, listener);
+            Files.move(partial, destination, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
             log.debug("Downloaded '{}' ({} bytes) to '{}'", qualifiedPath, fileSize, destination);
             return true;
         } catch (Exception e) {
             log.warn("Download failed for '{}': {}", qualifiedPath, e.getMessage());
+            deleteQuietly(partial);
             return false;
         }
     }
@@ -195,29 +241,48 @@ public class DownloadService {
     }
 
     /**
-     * Reads exactly {@code fileSize} bytes from {@code in} and writes them to {@code destination}.
-     * Small files are read fully into memory; large files are streamed in fixed-size chunks.
+     * Reads exactly {@code fileSize} bytes from {@code in} and writes them to {@code destination},
+     * streaming through a fixed-size buffer so the file grows on disk as bytes arrive.
      *
-     * @param in          the server input stream, positioned at the start of the file content
-     * @param destination local file path to write to
-     * @param fileSize    number of bytes to read
-     * @throws IOException if reading or writing fails
+     * @param in            the server input stream, positioned at the start of the file content
+     * @param destination   local file path to write to
+     * @param fileSize      number of bytes to read
+     * @param qualifiedPath the file being downloaded, passed through to {@code listener}
+     * @param listener      receives progress every {@value #PROGRESS_STEP_BYTES} bytes and on completion
+     * @throws EOFException if the stream ends before {@code fileSize} bytes have been read
+     * @throws IOException  if reading or writing fails
      */
-    private void writeFileBytes(DataInputStream in, Path destination, long fileSize) throws IOException {
-        if (fileSize <= LARGE_FILE_CHUNK_BYTES) {
-            byte[] fileBytes = in.readNBytes((int) fileSize);
-            Files.write(destination, fileBytes);
-        } else {
-            try (var fileOut = Files.newOutputStream(destination)) {
-                byte[] buf = new byte[(int) LARGE_FILE_CHUNK_BYTES];
-                long remaining = fileSize;
-                while (remaining > 0) {
-                    int toRead = (int) Math.min(buf.length, remaining);
-                    int read = in.readNBytes(buf, 0, toRead); // reads exactly toRead bytes
-                    fileOut.write(buf, 0, read);
-                    remaining -= read;
+    private void writeFileBytes(DataInputStream in, Path destination, long fileSize,
+                                String qualifiedPath, ProgressListener listener) throws IOException {
+        try (var fileOut = Files.newOutputStream(destination)) {
+            byte[] buf = new byte[BUFFER_BYTES];
+            long done = 0;
+            long lastReported = 0;
+            while (done < fileSize) {
+                int toRead = (int) Math.min(buf.length, fileSize - done);
+                int read = in.readNBytes(buf, 0, toRead);
+                if (read < toRead) {
+                    throw new EOFException("connection closed after " + (done + read) + " of " + fileSize + " bytes");
+                }
+                fileOut.write(buf, 0, read);
+                done += read;
+                if (done - lastReported >= PROGRESS_STEP_BYTES) {
+                    lastReported = done;
+                    log.debug("Downloading '{}': {}/{} bytes", qualifiedPath, done, fileSize);
+                    listener.onProgress(qualifiedPath, done, fileSize);
                 }
             }
+            if (lastReported != fileSize) {
+                listener.onProgress(qualifiedPath, fileSize, fileSize);
+            }
+        }
+    }
+
+    private static void deleteQuietly(Path path) {
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException e) {
+            log.warn("Could not remove partial download '{}': {}", path, e.getMessage());
         }
     }
 
