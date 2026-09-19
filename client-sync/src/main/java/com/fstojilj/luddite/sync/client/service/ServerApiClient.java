@@ -17,6 +17,7 @@ import org.springframework.web.client.RestClient;
 import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Thin HTTP client for the server's directory REST API.
@@ -43,6 +44,9 @@ public class ServerApiClient {
 
     private volatile RestClient restClient;
     private final int apiPort;
+
+    /** Set while {@code /api/dirs} is failing, so a long outage logs once instead of on every poll. */
+    private final AtomicBoolean publicDirsUnreachable = new AtomicBoolean(false);
 
     @Autowired
     public ServerApiClient(@Value("${sync.server.api-port:8080}") int apiPort) {
@@ -111,9 +115,14 @@ public class ServerApiClient {
                     .uri("/api/dirs")
                     .retrieve()
                     .body(DirListResponse.class);
+            if (publicDirsUnreachable.compareAndSet(true, false)) {
+                log.info("fetchPublicDirs: server reachable again");
+            }
             return response != null && response.dirs() != null ? response.dirs() : List.of();
         } catch (Exception e) {
-            log.warn("fetchPublicDirs failed: {}", e.getMessage());
+            if (publicDirsUnreachable.compareAndSet(false, true)) {
+                log.warn("fetchPublicDirs failed (further failures suppressed until it recovers): {}", e.getMessage());
+            }
             return List.of();
         }
     }

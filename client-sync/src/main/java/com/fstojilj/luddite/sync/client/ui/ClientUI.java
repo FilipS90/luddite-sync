@@ -85,6 +85,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import static com.fstojilj.luddite.sync.client.ui.RetroTheme.*;
 
@@ -102,6 +103,8 @@ import static com.fstojilj.luddite.sync.client.ui.RetroTheme.*;
 public class ClientUI {
 
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
+    // Spring Boot's console pattern colours log lines; the log panel is a plain JTextArea.
+    private static final Pattern ANSI_ESCAPE = Pattern.compile("\u001B\\[[;\\d]*m");
     // Tolerance (in px) for treating the log viewport as "at the bottom" for auto-scroll purposes.
     private static final int LOG_AUTOSCROLL_SLACK_PX = 4;
     // Thickness (in px) of the draggable edge/corner resize *hit-test* zone around the
@@ -1140,13 +1143,17 @@ public class ClientUI {
                             treeListModel.addElement(new TreeItem(dir.name(), dir.name(), 0, true, false, dir.size()));
                         }
                     }
-                    Set<String> newRoots = newRootSizes.keySet();
-                    for (int i = treeListModel.size() - 1; i >= 0; i--) {
-                        TreeItem item = treeListModel.getElementAt(i);
-                        if (item.isRootDir() && !newRoots.contains(item.rootDirName())) {
-                            collapseTreeItem(i);
-                            treeListModel.remove(i);
-                            expandedKeys.remove(item.key());
+                    // An unreachable server yields an empty list too; only prune while connected,
+                    // so the last known tree stays browsable during an outage.
+                    if (snap.connectionState() != ConnectionState.DISCONNECTED) {
+                        Set<String> newRoots = newRootSizes.keySet();
+                        for (int i = treeListModel.size() - 1; i >= 0; i--) {
+                            TreeItem item = treeListModel.getElementAt(i);
+                            if (item.isRootDir() && !newRoots.contains(item.rootDirName())) {
+                                collapseTreeItem(i);
+                                treeListModel.remove(i);
+                                expandedKeys.remove(item.key());
+                            }
                         }
                     }
 
@@ -1220,7 +1227,7 @@ public class ClientUI {
             public void write(int b) {
                 if (b == '\n') {
                     if (buf.size() > 0) {
-                        String line = buf.toString(StandardCharsets.UTF_8);
+                        String line = ANSI_ESCAPE.matcher(buf.toString(StandardCharsets.UTF_8)).replaceAll("");
                         buf.reset();
                         if (!line.isBlank()) appendLog(line);
                     }

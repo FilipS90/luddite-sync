@@ -62,6 +62,22 @@ class ServerApiClientTest {
         mockServer.verify();
     }
 
+    @Test
+    void fetchPublicDirs_recoversAfterServerError() throws Exception {
+        mockServer.expect(requestTo(BASE_URL + "/api/dirs"))
+                .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR));
+        mockServer.expect(requestTo(BASE_URL + "/api/dirs"))
+                .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR));
+        DirListResponse body = new DirListResponse(List.of(new TreeEntry("Movies", 1L)));
+        mockServer.expect(requestTo(BASE_URL + "/api/dirs"))
+                .andRespond(withSuccess(objectMapper.writeValueAsString(body), MediaType.APPLICATION_JSON));
+
+        assertThat(client.fetchPublicDirs()).isEmpty();
+        assertThat(client.fetchPublicDirs()).isEmpty();
+        assertThat(client.fetchPublicDirs()).containsExactly(new TreeEntry("Movies", 1L));
+        mockServer.verify();
+    }
+
     // ── fetchTree ─────────────────────────────────────────────────────────────
 
     @Test
