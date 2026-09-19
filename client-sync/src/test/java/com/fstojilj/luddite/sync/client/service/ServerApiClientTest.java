@@ -2,6 +2,7 @@ package com.fstojilj.luddite.sync.client.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fstojilj.luddite.sync.common.dto.DirListResponse;
+import com.fstojilj.luddite.sync.common.dto.TreeEntry;
 import com.fstojilj.luddite.sync.common.dto.TreeResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,7 @@ import org.springframework.web.client.RestClient;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -39,25 +41,25 @@ class ServerApiClientTest {
 
     @Test
     void fetchPublicDirs_returnsListOnSuccess() throws Exception {
-        DirListResponse body = new DirListResponse(List.of("Movies", "Photos"));
+        DirListResponse body = new DirListResponse(List.of(new TreeEntry("Movies", 100L), new TreeEntry("Photos", 0L)));
         mockServer.expect(requestTo(BASE_URL + "/api/dirs"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(objectMapper.writeValueAsString(body), MediaType.APPLICATION_JSON));
 
-        List<String> result = client.fetchPublicDirs();
+        List<TreeEntry> result = client.fetchPublicDirs();
 
-        assertThat(result).containsExactly("Movies", "Photos");
+        assertThat(result).containsExactly(new TreeEntry("Movies", 100L), new TreeEntry("Photos", 0L));
         mockServer.verify();
     }
 
     @Test
-    void fetchPublicDirs_returnsEmptyOnServerError() {
+    void fetchPublicDirs_throwsOnServerError() {
         mockServer.expect(requestTo(BASE_URL + "/api/dirs"))
                 .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR));
 
-        List<String> result = client.fetchPublicDirs();
-
-        assertThat(result).isEmpty();
+        assertThatThrownBy(client::fetchPublicDirs)
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("Failed to fetch public dirs");
         mockServer.verify();
     }
 
@@ -65,35 +67,36 @@ class ServerApiClientTest {
 
     @Test
     void fetchTree_returnsChildrenAtRootLevel() throws Exception {
-        TreeResponse body = new TreeResponse(List.of("Action", "Drama"), List.of("cover.jpg"));
+        TreeResponse body = new TreeResponse(
+                List.of(new TreeEntry("Action", 10L), new TreeEntry("Drama", 20L)), List.of(new TreeEntry("cover.jpg", 5L)));
         mockServer.expect(requestTo(BASE_URL + "/api/dirs/Movies/tree"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(objectMapper.writeValueAsString(body), MediaType.APPLICATION_JSON));
 
         TreeResponse result = client.fetchTree("Movies", "", null);
 
-        assertThat(result.childNames()).containsExactly("Action", "Drama");
-        assertThat(result.fileNames()).containsExactly("cover.jpg");
+        assertThat(result.childDirs()).containsExactly(new TreeEntry("Action", 10L), new TreeEntry("Drama", 20L));
+        assertThat(result.files()).containsExactly(new TreeEntry("cover.jpg", 5L));
         mockServer.verify();
     }
 
     @Test
     void fetchTree_sendsUnderParam() throws Exception {
-        TreeResponse body = new TreeResponse(List.of("2024", "2023"), List.of());
+        TreeResponse body = new TreeResponse(List.of(new TreeEntry("2024", 1L), new TreeEntry("2023", 1L)), List.of());
         mockServer.expect(requestTo(BASE_URL + "/api/dirs/Movies/tree?under=Action"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(objectMapper.writeValueAsString(body), MediaType.APPLICATION_JSON));
 
         TreeResponse result = client.fetchTree("Movies", "Action", null);
 
-        assertThat(result.childNames()).containsExactly("2024", "2023");
-        assertThat(result.fileNames()).isEmpty();
+        assertThat(result.childDirs()).extracting(TreeEntry::name).containsExactly("2024", "2023");
+        assertThat(result.files()).isEmpty();
         mockServer.verify();
     }
 
     @Test
     void fetchTree_sendsAuthHashHeaderForPrivateDir() throws Exception {
-        TreeResponse body = new TreeResponse(List.of("hidden"), List.of());
+        TreeResponse body = new TreeResponse(List.of(new TreeEntry("hidden", 1L)), List.of());
         mockServer.expect(requestTo(BASE_URL + "/api/dirs/Secrets/tree"))
                 .andExpect(method(HttpMethod.GET))
                 .andExpect(header("X-Auth-Hash", "abc123"))
@@ -101,7 +104,7 @@ class ServerApiClientTest {
 
         TreeResponse result = client.fetchTree("Secrets", "", "abc123");
 
-        assertThat(result.childNames()).containsExactly("hidden");
+        assertThat(result.childDirs()).extracting(TreeEntry::name).containsExactly("hidden");
         mockServer.verify();
     }
 
@@ -112,8 +115,8 @@ class ServerApiClientTest {
 
         TreeResponse result = client.fetchTree("Secrets", "", "wronghash");
 
-        assertThat(result.childNames()).isEmpty();
-        assertThat(result.fileNames()).isEmpty();
+        assertThat(result.childDirs()).isEmpty();
+        assertThat(result.files()).isEmpty();
         mockServer.verify();
     }
 

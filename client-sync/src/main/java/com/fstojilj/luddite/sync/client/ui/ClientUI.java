@@ -6,7 +6,9 @@ import com.fstojilj.luddite.sync.client.service.DownloadService;
 import com.fstojilj.luddite.sync.client.service.HostSettingsService;
 import com.fstojilj.luddite.sync.client.service.RootDirService;
 import com.fstojilj.luddite.sync.client.service.ServerApiClient;
+import com.fstojilj.luddite.sync.common.dto.TreeEntry;
 import com.fstojilj.luddite.sync.common.dto.TreeResponse;
+import com.fstojilj.luddite.sync.common.util.FileSizeFormat;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -77,6 +79,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -126,11 +129,11 @@ public class ClientUI {
     /**
      * Represents one row in the left tree panel.
      */
-    private record TreeItem(String rootDirName, String fullRelPath, int depth, boolean isRootDir, boolean isFile) {
+    private record TreeItem(String rootDirName, String fullRelPath, int depth, boolean isRootDir, boolean isFile, long size) {
         String displayName() {
-            if (isRootDir) return rootDirName;
             int slash = fullRelPath.lastIndexOf('/');
-            return slash < 0 ? fullRelPath : fullRelPath.substring(slash + 1);
+            String name = isRootDir ? rootDirName : slash < 0 ? fullRelPath : fullRelPath.substring(slash + 1);
+            return name + "  (" + FileSizeFormat.humanReadable(size) + ")";
         }
 
         String key() {
@@ -609,15 +612,15 @@ public class ClientUI {
                 @Override
                 protected void done() {
                     try {
-                        com.fstojilj.luddite.sync.common.dto.TreeResponse resp = get();
+                        TreeResponse resp = get();
                         int insertAt = index + 1;
-                        for (String dir : resp.childNames()) {
-                            String childRel = item.isRootDir() ? dir : item.fullRelPath() + "/" + dir;
-                            treeListModel.add(insertAt++, new TreeItem(item.rootDirName(), childRel, item.depth() + 1, false, false));
+                        for (TreeEntry dir : resp.childDirs()) {
+                            String childRel = item.isRootDir() ? dir.name() : item.fullRelPath() + "/" + dir.name();
+                            treeListModel.add(insertAt++, new TreeItem(item.rootDirName(), childRel, item.depth() + 1, false, false, dir.size()));
                         }
-                        for (String file : resp.fileNames()) {
-                            String childRel = item.isRootDir() ? file : item.fullRelPath() + "/" + file;
-                            treeListModel.add(insertAt++, new TreeItem(item.rootDirName(), childRel, item.depth() + 1, false, true));
+                        for (TreeEntry file : resp.files()) {
+                            String childRel = item.isRootDir() ? file.name() : item.fullRelPath() + "/" + file.name();
+                            treeListModel.add(insertAt++, new TreeItem(item.rootDirName(), childRel, item.depth() + 1, false, true, file.size()));
                         }
                         expandedKeys.add(key);
                     } catch (Exception ex) {
@@ -1108,7 +1111,7 @@ public class ClientUI {
         new SwingWorker<RefreshSnapshot, Void>() {
             @Override
             protected RefreshSnapshot doInBackground() {
-                List<String> srv = serverApiClient.fetchPublicDirs();
+                List<TreeEntry> srv = serverApiClient.fetchPublicDirs();
                 List<String> subs = rootDirService.retrieveAllInSyncDirs();
                 ConnectionState state = clientSyncService.getConnectionState();
                 return new RefreshSnapshot(srv, subs, state);
@@ -1119,18 +1122,25 @@ public class ClientUI {
                 try {
                     RefreshSnapshot snap = get();
 
-                    // Update left panel: add new root dirs, remove gone ones
+                    // Update left panel: add new root dirs, refresh sizes, remove gone ones
+                    Map<String, Long> newRootSizes = new HashMap<>();
+                    for (TreeEntry dir : snap.serverDirs()) newRootSizes.put(dir.name(), dir.size());
                     Set<String> currentRoots = new HashSet<>();
                     for (int i = 0; i < treeListModel.size(); i++) {
                         TreeItem item = treeListModel.getElementAt(i);
-                        if (item.isRootDir()) currentRoots.add(item.rootDirName());
-                    }
-                    for (String dir : snap.serverDirs()) {
-                        if (!currentRoots.contains(dir)) {
-                            treeListModel.addElement(new TreeItem(dir, dir, 0, true, false));
+                        if (!item.isRootDir()) continue;
+                        currentRoots.add(item.rootDirName());
+                        Long size = newRootSizes.get(item.rootDirName());
+                        if (size != null && size != item.size()) {
+                            treeListModel.set(i, new TreeItem(item.rootDirName(), item.fullRelPath(), 0, true, false, size));
                         }
                     }
-                    Set<String> newRoots = new HashSet<>(snap.serverDirs());
+                    for (TreeEntry dir : snap.serverDirs()) {
+                        if (!currentRoots.contains(dir.name())) {
+                            treeListModel.addElement(new TreeItem(dir.name(), dir.name(), 0, true, false, dir.size()));
+                        }
+                    }
+                    Set<String> newRoots = newRootSizes.keySet();
                     for (int i = treeListModel.size() - 1; i >= 0; i--) {
                         TreeItem item = treeListModel.getElementAt(i);
                         if (item.isRootDir() && !newRoots.contains(item.rootDirName())) {
@@ -1167,7 +1177,7 @@ public class ClientUI {
         }.execute();
     }
 
-    private record RefreshSnapshot(List<String> serverDirs,
+    private record RefreshSnapshot(List<TreeEntry> serverDirs,
                                    List<String> subscribedDirs,
                                    ConnectionState connectionState) {
     }

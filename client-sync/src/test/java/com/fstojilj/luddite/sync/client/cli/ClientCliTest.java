@@ -6,6 +6,7 @@ import com.fstojilj.luddite.sync.client.service.DownloadService;
 import com.fstojilj.luddite.sync.client.service.HostSettingsService;
 import com.fstojilj.luddite.sync.client.service.RootDirService;
 import com.fstojilj.luddite.sync.client.service.ServerApiClient;
+import com.fstojilj.luddite.sync.common.dto.TreeEntry;
 import com.fstojilj.luddite.sync.common.dto.TreeResponse;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -70,6 +71,12 @@ class ClientCliTest {
 
     private String output() {
         return out.toString();
+    }
+
+    private static TreeResponse tree(List<String> dirs, List<String> files) {
+        return new TreeResponse(
+                dirs.stream().map(d -> new TreeEntry(d, 0)).toList(),
+                files.stream().map(f -> new TreeEntry(f, 0)).toList());
     }
 
     // ── empty line ────────────────────────────────────────────────────────────
@@ -247,17 +254,19 @@ class ClientCliTest {
     @Test
     void handle_browse_noArg_atTopLevel_printsServerDirs() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
+        ReflectionTestUtils.setField(ClientSyncService.class, "serverDirSizes", Map.of("photos", 2048L));
         handle("browse");
-        assertThat(output()).contains("1. photos").contains("2. documents").contains("3. music");
+        assertThat(output()).contains("1. photos  (2.0 KB)").contains("2. documents  (0 B)").contains("3. music");
     }
 
     @Test
     void handle_browse_rootDir_printsChildrenAndFiles() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
         when(serverApiClient.fetchTree("photos", "", null))
-                .thenReturn(new TreeResponse(List.of("2024"), List.of("cover.jpg")));
+                .thenReturn(new TreeResponse(List.of(new TreeEntry("2024", 3 * 1024 * 1024)),
+                        List.of(new TreeEntry("cover.jpg", 512))));
         handle("browse photos");
-        assertThat(output()).contains("1. [dir ] 2024").contains("2. [file] cover.jpg");
+        assertThat(output()).contains("1. [dir ] 2024  (3.0 MB)").contains("2. [file] cover.jpg  (512 B)");
     }
 
     @Test
@@ -265,7 +274,7 @@ class ClientCliTest {
         when(rootDirService.findAll()).thenReturn(List.of());
         when(rootDirService.getPasswordHash("photos")).thenReturn("hash");
         when(serverApiClient.fetchTree("photos", "2024/may", "hash"))
-                .thenReturn(new TreeResponse(List.of(), List.of("a.jpg")));
+                .thenReturn(tree(List.of(), List.of("a.jpg")));
         handle("browse photos /2024/may/");
         assertThat(output()).contains("photos/2024/may").contains("1. [file] a.jpg");
     }
@@ -274,7 +283,7 @@ class ClientCliTest {
     void handle_browse_emptyTree_printsEmpty() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
         when(serverApiClient.fetchTree("photos", "", null))
-                .thenReturn(new TreeResponse(List.of(), List.of()));
+                .thenReturn(tree(List.of(), List.of()));
         handle("browse photos");
         assertThat(output()).contains("(empty, or access denied)");
     }
@@ -283,7 +292,7 @@ class ClientCliTest {
     void handle_tree_isAliasForBrowse() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
         when(serverApiClient.fetchTree("music", "", null))
-                .thenReturn(new TreeResponse(List.of("rock"), List.of()));
+                .thenReturn(tree(List.of("rock"), List.of()));
         handle("tree music");
         assertThat(output()).contains("1. [dir ] rock");
     }
@@ -310,7 +319,7 @@ class ClientCliTest {
     void handle_download_fileSubPath_downloadsAsFile() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
         when(serverApiClient.fetchTree("photos", "2024", null))
-                .thenReturn(new TreeResponse(List.of(), List.of("a.jpg")));
+                .thenReturn(tree(List.of(), List.of("a.jpg")));
         when(downloadService.download("photos", "2024/a.jpg", true)).thenReturn(1);
         handle("download photos 2024/a.jpg");
         verify(downloadService).download("photos", "2024/a.jpg", true);
@@ -321,7 +330,7 @@ class ClientCliTest {
     void handle_download_dirSubPath_downloadsAsDirectory() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
         when(serverApiClient.fetchTree("photos", "", null))
-                .thenReturn(new TreeResponse(List.of("2024"), List.of()));
+                .thenReturn(tree(List.of("2024"), List.of()));
         when(downloadService.download("photos", "2024", false)).thenReturn(5);
         handle("download photos 2024");
         verify(downloadService).download("photos", "2024", false);
@@ -448,7 +457,7 @@ class ClientCliTest {
     void handle_browse_number_atTopLevel_entersServerDir() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
         when(serverApiClient.fetchTree("documents", "", null))
-                .thenReturn(new TreeResponse(List.of("tax"), List.of()));
+                .thenReturn(tree(List.of("tax"), List.of()));
         handle("browse 2");
         assertThat(output()).contains("documents").contains("1. [dir ] tax");
     }
@@ -457,11 +466,11 @@ class ClientCliTest {
     void handle_browse_number_afterListing_entersThatEntry() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
         when(serverApiClient.fetchTree("photos", "", null))
-                .thenReturn(new TreeResponse(List.of("2024"), List.of("cover.jpg")));
+                .thenReturn(tree(List.of("2024"), List.of("cover.jpg")));
         when(serverApiClient.fetchTree("photos", "2024", null))
-                .thenReturn(new TreeResponse(List.of("may"), List.of()));
+                .thenReturn(tree(List.of("may"), List.of()));
         when(serverApiClient.fetchTree("photos", "2024/may", null))
-                .thenReturn(new TreeResponse(List.of(), List.of("a.jpg")));
+                .thenReturn(tree(List.of(), List.of("a.jpg")));
         handle("browse photos");
         handle("browse 1");
         handle("browse 1");
@@ -472,7 +481,7 @@ class ClientCliTest {
     void handle_browse_number_onFile_pointsToDownload() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
         when(serverApiClient.fetchTree("photos", "", null))
-                .thenReturn(new TreeResponse(List.of("2024"), List.of("cover.jpg")));
+                .thenReturn(tree(List.of("2024"), List.of("cover.jpg")));
         handle("browse photos");
         handle("browse 2");
         verify(serverApiClient, never()).fetchTree(eq("photos"), eq("cover.jpg"), any());
@@ -491,7 +500,7 @@ class ClientCliTest {
     void handle_browse_noArg_afterListing_relistsCurrentLocation() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
         when(serverApiClient.fetchTree("photos", "2024", null))
-                .thenReturn(new TreeResponse(List.of("may"), List.of()));
+                .thenReturn(tree(List.of("may"), List.of()));
         handle("browse photos 2024");
         handle("browse");
         verify(serverApiClient, times(2)).fetchTree("photos", "2024", null);
@@ -501,11 +510,11 @@ class ClientCliTest {
     void handle_up_goesToParentAndStopsAtLevelOne() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
         when(serverApiClient.fetchTree("photos", "2024/may", null))
-                .thenReturn(new TreeResponse(List.of(), List.of("a.jpg")));
+                .thenReturn(tree(List.of(), List.of("a.jpg")));
         when(serverApiClient.fetchTree("photos", "2024", null))
-                .thenReturn(new TreeResponse(List.of("may"), List.of()));
+                .thenReturn(tree(List.of("may"), List.of()));
         when(serverApiClient.fetchTree("photos", "", null))
-                .thenReturn(new TreeResponse(List.of("2024"), List.of()));
+                .thenReturn(tree(List.of("2024"), List.of()));
         handle("browse photos 2024/may");
         handle("up");
         handle("browse up");
@@ -528,9 +537,9 @@ class ClientCliTest {
     void handle_up_atLevelOne_keepsListingUsable() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
         when(serverApiClient.fetchTree("photos", "", null))
-                .thenReturn(new TreeResponse(List.of("2024"), List.of()));
+                .thenReturn(tree(List.of("2024"), List.of()));
         when(serverApiClient.fetchTree("photos", "2024", null))
-                .thenReturn(new TreeResponse(List.of(), List.of()));
+                .thenReturn(tree(List.of(), List.of()));
         handle("browse photos");
         handle("browse up");
         handle("browse 1");
@@ -550,7 +559,7 @@ class ClientCliTest {
         when(rootDirService.findAll()).thenReturn(List.of(new ClientRootDir("vault", 1L, null)));
         when(rootDirService.getPasswordHash("vault")).thenReturn("hash");
         when(serverApiClient.fetchTree("vault", "", "hash"))
-                .thenReturn(new TreeResponse(List.of(), List.of("secret.txt")));
+                .thenReturn(tree(List.of(), List.of("secret.txt")));
         handle("browse vault");
         assertThat(output()).contains("1. [file] secret.txt");
     }
@@ -559,9 +568,9 @@ class ClientCliTest {
     void handle_dirs_resetsListingToServerDirs() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
         when(serverApiClient.fetchTree("photos", "", null))
-                .thenReturn(new TreeResponse(List.of("2024"), List.of()));
+                .thenReturn(tree(List.of("2024"), List.of()));
         when(serverApiClient.fetchTree("music", "", null))
-                .thenReturn(new TreeResponse(List.of(), List.of()));
+                .thenReturn(tree(List.of(), List.of()));
         handle("browse photos");
         handle("dirs");
         handle("browse 3");
@@ -572,7 +581,7 @@ class ClientCliTest {
     void handle_download_number_afterListing_downloadsThatEntry() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
         when(serverApiClient.fetchTree("photos", "", null))
-                .thenReturn(new TreeResponse(List.of("2024"), List.of("cover.jpg")));
+                .thenReturn(tree(List.of("2024"), List.of("cover.jpg")));
         when(downloadService.download("photos", "cover.jpg", true)).thenReturn(1);
         handle("browse photos");
         handle("download 2");
@@ -584,7 +593,7 @@ class ClientCliTest {
     void handle_download_number_afterListing_downloadsSubdirEntry() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
         when(serverApiClient.fetchTree("photos", "", null))
-                .thenReturn(new TreeResponse(List.of("2024"), List.of("cover.jpg")));
+                .thenReturn(tree(List.of("2024"), List.of("cover.jpg")));
         when(downloadService.download("photos", "2024", false)).thenReturn(3);
         handle("browse photos");
         handle("download 1");
@@ -597,9 +606,9 @@ class ClientCliTest {
     void handle_browse_depth_listsNestedLevelsIndentedAndNumberedFlat() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
         when(serverApiClient.fetchTree("photos", "", null))
-                .thenReturn(new TreeResponse(List.of("2024"), List.of("cover.jpg")));
+                .thenReturn(tree(List.of("2024"), List.of("cover.jpg")));
         when(serverApiClient.fetchTree("photos", "2024", null))
-                .thenReturn(new TreeResponse(List.of("may"), List.of()));
+                .thenReturn(tree(List.of("may"), List.of()));
         handle("browse photos --depth 2");
         verify(serverApiClient, never()).fetchTree(eq("photos"), eq("2024/may"), any());
         assertThat(output())
@@ -612,9 +621,9 @@ class ClientCliTest {
     void handle_browse_depth_entriesAtAnyLevelAreAddressableByNumber() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
         when(serverApiClient.fetchTree("photos", "", null))
-                .thenReturn(new TreeResponse(List.of("2024"), List.of("cover.jpg")));
+                .thenReturn(tree(List.of("2024"), List.of("cover.jpg")));
         when(serverApiClient.fetchTree("photos", "2024", null))
-                .thenReturn(new TreeResponse(List.of("may"), List.of()));
+                .thenReturn(tree(List.of("may"), List.of()));
         when(downloadService.download("photos", "2024/may", false)).thenReturn(2);
         handle("browse photos --depth 2");
         handle("download 2");
@@ -625,11 +634,11 @@ class ClientCliTest {
     void handle_browse_depth_onNumberAndOnCurrentLocation() throws Exception {
         when(rootDirService.findAll()).thenReturn(List.of());
         when(serverApiClient.fetchTree("photos", "", null))
-                .thenReturn(new TreeResponse(List.of("2024"), List.of()));
+                .thenReturn(tree(List.of("2024"), List.of()));
         when(serverApiClient.fetchTree("photos", "2024", null))
-                .thenReturn(new TreeResponse(List.of("may"), List.of()));
+                .thenReturn(tree(List.of("may"), List.of()));
         when(serverApiClient.fetchTree("photos", "2024/may", null))
-                .thenReturn(new TreeResponse(List.of(), List.of("a.jpg")));
+                .thenReturn(tree(List.of(), List.of("a.jpg")));
         handle("browse 1 --depth 2");
         handle("browse --depth 3");
         verify(serverApiClient, times(1)).fetchTree("photos", "2024/may", null);

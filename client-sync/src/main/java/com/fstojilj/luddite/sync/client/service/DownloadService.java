@@ -1,5 +1,6 @@
 package com.fstojilj.luddite.sync.client.service;
 
+import com.fstojilj.luddite.sync.common.dto.TreeEntry;
 import com.fstojilj.luddite.sync.common.dto.TreeResponse;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -129,11 +130,12 @@ public class DownloadService {
                                         String relativePrefix, List<String> result) {
         TreeResponse tree = serverApiClient.fetchTree(dirName, subPath, passwordHash);
 
-        for (String fileName : tree.fileNames()) {
-            result.add(relativePrefix.isEmpty() ? fileName : relativePrefix + "/" + fileName);
+        for (TreeEntry file : tree.files()) {
+            result.add(relativePrefix.isEmpty() ? file.name() : relativePrefix + "/" + file.name());
         }
 
-        for (String childDir : tree.childNames()) {
+        for (TreeEntry dir : tree.childDirs()) {
+            String childDir = dir.name();
             String childSubPath = subPath.isEmpty() ? childDir : subPath + "/" + childDir;
             String childPrefix = relativePrefix.isEmpty() ? childDir : relativePrefix + "/" + childDir;
             collectDescendantFiles(dirName, childSubPath, passwordHash, childPrefix, result);

@@ -1,5 +1,7 @@
 package com.fstojilj.luddite.sync.server.repository;
 
+import com.fstojilj.luddite.sync.common.dto.TreeEntry;
+import com.fstojilj.luddite.sync.common.dto.TreeResponse;
 import com.fstojilj.luddite.sync.common.model.FileMetadata;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -56,19 +58,11 @@ class FileMetadataRepositoryTest {
                 .build();
     }
 
-    // ── add ───────────────────────────────────────────────────────────────────
-
-    @Test
-    void add_validMetadata_returnsGeneratedId() {
-        long id = repository.add(buildMeta("photo.jpg", "photo.jpg"));
-        assertThat(id).isGreaterThan(0);
-    }
-
     // ── findChangedSince ──────────────────────────────────────────────────────
 
     @Test
     void findChangedSince_noSyncVersion_returnsUndeliveredRows() {
-        repository.add(buildMeta("photo.jpg", "photo.jpg"));
+        repository.addAll(List.of(buildMeta("photo.jpg", "photo.jpg")));
         List<FileMetadata> changed = repository.findChangedSince(1, -1L, 100);
         assertThat(changed).hasSize(1);
         assertThat(changed.getFirst().filename()).isEqualTo("photo.jpg");
@@ -76,7 +70,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void findChangedSince_afterVersionStamp_doesNotReturn() {
-        repository.add(buildMeta("photo.jpg", "photo.jpg"));
+        repository.addAll(List.of(buildMeta("photo.jpg", "photo.jpg")));
         repository.updateSyncVersion(1, "photo.jpg", 5L);
         List<FileMetadata> changed = repository.findChangedSince(1, 5L, 100);
         assertThat(changed).isEmpty();
@@ -84,9 +78,9 @@ class FileMetadataRepositoryTest {
 
     @Test
     void findChangedSince_respectsLimit() {
-        repository.add(buildMeta("a.jpg", "a.jpg"));
-        repository.add(buildMeta("b.jpg", "b.jpg"));
-        repository.add(buildMeta("c.jpg", "c.jpg"));
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg")));
+        repository.addAll(List.of(buildMeta("b.jpg", "b.jpg")));
+        repository.addAll(List.of(buildMeta("c.jpg", "c.jpg")));
         List<FileMetadata> changed = repository.findChangedSince(1, -1L, 2);
         assertThat(changed).hasSize(2);
     }
@@ -94,7 +88,7 @@ class FileMetadataRepositoryTest {
     @Test
     void findChangedSince_limitedBatch_returnsLowestVersionsAndExcludesUndelivered() {
         for (int i = 1; i <= 150; i++) {
-            repository.add(buildMeta(i + ".jpg", i + ".jpg"));
+            repository.addAll(List.of(buildMeta(i + ".jpg", i + ".jpg")));
             repository.updateSyncVersion(1, i + ".jpg", i);
         }
         repository.upsert(buildMeta("5.jpg", "5.jpg").toBuilder().checksum("modified").build());
@@ -109,7 +103,7 @@ class FileMetadataRepositoryTest {
     @Test
     void findChangedSince_undeliveredRows_comeAfterAllStampedRows() {
         for (int i = 1; i <= 150; i++) {
-            repository.add(buildMeta(i + ".jpg", i + ".jpg"));
+            repository.addAll(List.of(buildMeta(i + ".jpg", i + ".jpg")));
             repository.updateSyncVersion(1, i + ".jpg", i);
         }
         repository.upsert(buildMeta("5.jpg", "5.jpg").toBuilder().checksum("modified").build());
@@ -127,7 +121,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void updateSyncVersion_setsVersion() {
-        repository.add(buildMeta("photo.jpg", "photo.jpg"));
+        repository.addAll(List.of(buildMeta("photo.jpg", "photo.jpg")));
         repository.updateSyncVersion(1, "photo.jpg", 10L);
         List<FileMetadata> rows = repository.findChangedSince(1, 9L, 100);
         assertThat(rows).hasSize(1);
@@ -138,7 +132,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void delete_existingRow_removesIt() {
-        repository.add(buildMeta("photo.jpg", "photo.jpg"));
+        repository.addAll(List.of(buildMeta("photo.jpg", "photo.jpg")));
         repository.delete(1, "photo.jpg");
         assertThat(repository.findChangedSince(1, -1L, 100)).isEmpty();
     }
@@ -147,8 +141,8 @@ class FileMetadataRepositoryTest {
 
     @Test
     void deleteAllByRootDirId_removesAll() {
-        repository.add(buildMeta("a.jpg", "a.jpg"));
-        repository.add(buildMeta("b.jpg", "b.jpg"));
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg")));
+        repository.addAll(List.of(buildMeta("b.jpg", "b.jpg")));
         repository.deleteAllByRootDirId(1);
         assertThat(repository.findChangedSince(1, -1L, 100)).isEmpty();
     }
@@ -166,7 +160,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void upsert_softDeletedPath_revivesRowAndKeepsClientIds() {
-        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg")));
         repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
         repository.softDelete(1L, "a.jpg", 5L);
 
@@ -184,7 +178,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void upsert_livePath_refreshesAndResetsSyncVersionKeepingClientIds() {
-        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg")));
         repository.updateSyncVersion(1, "a.jpg", 7L);
         repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
 
@@ -200,8 +194,8 @@ class FileMetadataRepositoryTest {
 
     @Test
     void addClientIdToAll_nullClientIds_setsClientId() {
-        repository.add(buildMeta("a.jpg", "a.jpg"));
-        repository.add(buildMeta("b.jpg", "b.jpg"));
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg")));
+        repository.addAll(List.of(buildMeta("b.jpg", "b.jpg")));
         repository.addClientIdToAll(1, List.of("a.jpg", "b.jpg"), "hw-id-1");
 
         List<FileMetadata> rows = repository.findChangedSince(1, -1L, 100);
@@ -211,7 +205,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void addClientIdToAll_existingClient_appendsCommaSeparated() {
-        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg")));
         repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
         repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-2");
 
@@ -221,7 +215,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void addClientIdToAll_sameClientTwice_isIdempotent() {
-        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg")));
         repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
         repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
 
@@ -231,7 +225,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void addClientIdToAll_prefixOfExistingId_isStillAppended() {
-        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg")));
         repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-10");
         repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
 
@@ -241,8 +235,8 @@ class FileMetadataRepositoryTest {
 
     @Test
     void addClientIdToAll_onlyTouchesGivenPaths() {
-        repository.add(buildMeta("a.jpg", "a.jpg"));
-        repository.add(buildMeta("b.jpg", "b.jpg"));
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg")));
+        repository.addAll(List.of(buildMeta("b.jpg", "b.jpg")));
         repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
 
         List<FileMetadata> rows = repository.findChangedSince(1, -1L, 100);
@@ -252,7 +246,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void addClientIdToAll_noPaths_isNoOp() {
-        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg")));
         repository.addClientIdToAll(1, List.of(), "hw-id-1");
         assertThat(repository.findChangedSince(1, -1L, 100).getFirst().clientIds()).isNull();
     }
@@ -267,7 +261,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void removeAllClientIdUsage_middleOfList_removesOnlyThatId() {
-        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg")));
         repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
         repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-2");
         repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-3");
@@ -279,8 +273,8 @@ class FileMetadataRepositoryTest {
 
     @Test
     void removeAllClientIdUsage_firstAndLastOfList_removesCleanly() {
-        repository.add(buildMeta("a.jpg", "a.jpg"));
-        repository.add(buildMeta("b.jpg", "b.jpg"));
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg")));
+        repository.addAll(List.of(buildMeta("b.jpg", "b.jpg")));
         repository.addClientIdToAll(1, List.of("a.jpg", "b.jpg"), "hw-id-1");
         repository.addClientIdToAll(1, List.of("a.jpg", "b.jpg"), "hw-id-2");
 
@@ -294,7 +288,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void removeAllClientIdUsage_prefixOfAnotherId_leavesLongerIdIntact() {
-        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg")));
         repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-10");
         repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
 
@@ -305,7 +299,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void removeAllClientIdUsage_unknownClient_leavesRowsUntouched() {
-        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg")));
         repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
 
         repository.removeAllClientIdUsage("hw-id-9");
@@ -315,7 +309,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void removeAllClientIdUsage_softDeletedRowWithOtherClients_keepsRow() {
-        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg")));
         repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
         repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-2");
         repository.softDelete(1L, "a.jpg", 5L);
@@ -327,7 +321,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void removeAllClientIdUsage_lastClientOfSoftDeletedRow_hardDeletesRow() {
-        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg")));
         repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
         repository.softDelete(1L, "a.jpg", 5L);
 
@@ -340,7 +334,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void removeAllClientIdUsage_lastClientOfLiveRow_keepsRow() {
-        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg")));
         repository.addClientIdToAll(1, List.of("a.jpg"), "hw-id-1");
 
         repository.removeAllClientIdUsage("hw-id-1");
@@ -353,7 +347,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void softDelete_marksRowAsDeletedAndKeepsClientIds() {
-        repository.add(buildMeta("photo.jpg", "photo.jpg"));
+        repository.addAll(List.of(buildMeta("photo.jpg", "photo.jpg")));
         repository.updateSyncVersion(1, "photo.jpg", 1L);
         repository.addClientIdToAll(1, List.of("photo.jpg"), "hw-id-1");
         repository.softDelete(1L, "photo.jpg", 2L);
@@ -368,7 +362,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void acknowledgeDelete_lastClient_hardDeletesRow() {
-        repository.add(buildMeta("photo.jpg", "photo.jpg"));
+        repository.addAll(List.of(buildMeta("photo.jpg", "photo.jpg")));
         repository.addClientIdToAll(1, List.of("photo.jpg"), "hw-id-1");
         repository.softDelete(1L, "photo.jpg", 1L);
         repository.acknowledgeDelete(1, "photo.jpg", "hw-id-1");
@@ -377,7 +371,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void acknowledgeDelete_oneOfTwoClients_removesFromList() {
-        repository.add(buildMeta("photo.jpg", "photo.jpg"));
+        repository.addAll(List.of(buildMeta("photo.jpg", "photo.jpg")));
         repository.addClientIdToAll(1, List.of("photo.jpg"), "hw-id-1");
         repository.addClientIdToAll(1, List.of("photo.jpg"), "hw-id-2");
         repository.softDelete(1L, "photo.jpg", 1L);
@@ -390,7 +384,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void acknowledgeDelete_noClientsEverHeldFile_hardDeletesRow() {
-        repository.add(buildMeta("photo.jpg", "photo.jpg"));
+        repository.addAll(List.of(buildMeta("photo.jpg", "photo.jpg")));
         repository.softDelete(1L, "photo.jpg", 1L);
         repository.acknowledgeDelete(1, "photo.jpg", "hw-id-1");
         assertThat(repository.findChangedSince(1, -1L, 100)).isEmpty();
@@ -401,7 +395,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void lifecycle_allHoldersAck_rowIsHardDeletedOnlyAfterTheLastOne() {
-        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg")));
         receivedBy("a.jpg", "c1", "c2", "c3");
         repository.softDelete(1L, "a.jpg", 5L);
 
@@ -416,7 +410,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void lifecycle_offlineHolder_keepsTombstoneUntilItComesBack() {
-        repository.add(buildMeta("d.jpg", "d.jpg"));
+        repository.addAll(List.of(buildMeta("d.jpg", "d.jpg")));
         receivedBy("d.jpg", "c1", "c2", "c3");
         repository.softDelete(1L, "d.jpg", 5L);
         repository.acknowledgeDelete(1, "d.jpg", "c1");
@@ -432,7 +426,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void acknowledgeDelete_fromClientNotInList_doesNotShortenListOrHardDelete() {
-        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg")));
         receivedBy("a.jpg", "c1", "c2");
         repository.softDelete(1L, "a.jpg", 5L);
 
@@ -444,7 +438,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void acknowledgeDelete_onLiveRow_isIgnored() {
-        repository.add(buildMeta("a.jpg", "a.jpg"));
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg")));
         receivedBy("a.jpg", "c1");
 
         repository.acknowledgeDelete(1, "a.jpg", "c1");
@@ -456,7 +450,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void lifecycle_modifyThenDelete_holdersSurviveTheModify() {
-        repository.add(buildMeta("e.jpg", "e.jpg"));
+        repository.addAll(List.of(buildMeta("e.jpg", "e.jpg")));
         receivedBy("e.jpg", "c1", "c2", "c3");
 
         repository.upsert(buildMeta("e.jpg", "e.jpg").toBuilder().checksum("v2").build()); // modify
@@ -469,7 +463,7 @@ class FileMetadataRepositoryTest {
 
     @Test
     void lifecycle_deleteThenRecreate_revivesRowAndReDeliversToEveryone() {
-        repository.add(buildMeta("e.jpg", "e.jpg"));
+        repository.addAll(List.of(buildMeta("e.jpg", "e.jpg")));
         receivedBy("e.jpg", "c1", "c2", "c3");
         repository.softDelete(1L, "e.jpg", 5L);
         repository.acknowledgeDelete(1, "e.jpg", "c1");
@@ -491,12 +485,12 @@ class FileMetadataRepositoryTest {
     }
 
     @Test
-    void add_whileTombstoneOccupiesPath_violatesUniqueConstraint() {
-        repository.add(buildMeta("a.jpg", "a.jpg"));
+    void addAll_whileTombstoneOccupiesPath_violatesUniqueConstraint() {
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg")));
         receivedBy("a.jpg", "c1");
         repository.softDelete(1L, "a.jpg", 5L);
 
-        assertThatThrownBy(() -> repository.add(buildMeta("a.jpg", "a.jpg")))
+        assertThatThrownBy(() -> repository.addAll(List.of(buildMeta("a.jpg", "a.jpg"))))
                 .isInstanceOf(DataAccessException.class)
                 .hasMessageContaining("UNIQUE constraint failed");
     }
@@ -510,6 +504,104 @@ class FileMetadataRepositoryTest {
                 .filter(r -> r.relativePath().equals(path)).findFirst();
     }
 
+    // ── findImmediateChildren ────────────────────────────────────────────────
+
+    private void seedTree() {
+        repository.addAll(List.of(
+                file("readme.txt", 10),
+                file("photos/a.jpg", 100),
+                file("photos/b.jpg", 200),
+                file("photos/2024/c.jpg", 1000),
+                file("photos/2024/deep/d.jpg", 5000),
+                file("photos2/x.jpg", 7),
+                file("music/song.mp3", 3000)));
+    }
+
+    private FileMetadata file(String relativePath, long size) {
+        String name = relativePath.substring(relativePath.lastIndexOf('/') + 1);
+        return buildMeta(name, relativePath).toBuilder().fileSize(size).build();
+    }
+
+    @Test
+    void findImmediateChildren_rootLevel_listsTopDirsWithDescendantSumsAndFiles() {
+        seedTree();
+        TreeResponse tree = repository.findImmediateChildren(1, "");
+
+        assertThat(tree.childDirs()).containsExactly(
+                new TreeEntry("music", 3000),
+                new TreeEntry("photos", 6300),
+                new TreeEntry("photos2", 7));
+        assertThat(tree.files()).containsExactly(new TreeEntry("readme.txt", 10));
+    }
+
+    @Test
+    void findImmediateChildren_nullAndSlashOnlyPrefix_behaveAsRootLevel() {
+        seedTree();
+        TreeResponse root = repository.findImmediateChildren(1, "");
+
+        assertThat(repository.findImmediateChildren(1, null)).isEqualTo(root);
+        assertThat(repository.findImmediateChildren(1, "/")).isEqualTo(root);
+    }
+
+    @Test
+    void findImmediateChildren_nestedPrefix_doesNotBleedIntoSiblingWithSamePrefix() {
+        seedTree();
+        TreeResponse tree = repository.findImmediateChildren(1, "photos");
+
+        assertThat(tree.childDirs()).containsExactly(new TreeEntry("2024", 6000));
+        assertThat(tree.files()).containsExactly(new TreeEntry("a.jpg", 100), new TreeEntry("b.jpg", 200));
+    }
+
+    @Test
+    void findImmediateChildren_prefixWithSurroundingSlashes_isNormalized() {
+        seedTree();
+        TreeResponse plain = repository.findImmediateChildren(1, "photos/2024");
+
+        assertThat(plain.childDirs()).containsExactly(new TreeEntry("deep", 5000));
+        assertThat(plain.files()).containsExactly(new TreeEntry("c.jpg", 1000));
+        assertThat(repository.findImmediateChildren(1, "/photos/2024/")).isEqualTo(plain);
+        assertThat(repository.findImmediateChildren(1, "photos\\2024")).isEqualTo(plain);
+    }
+
+    @Test
+    void findImmediateChildren_unknownPrefix_returnsEmpty() {
+        seedTree();
+        TreeResponse tree = repository.findImmediateChildren(1, "nope");
+
+        assertThat(tree.childDirs()).isEmpty();
+        assertThat(tree.files()).isEmpty();
+    }
+
+    @Test
+    void findImmediateChildren_excludesSoftDeletedRows() {
+        seedTree();
+        receivedBy("photos/2024/deep/d.jpg", "c1");
+        repository.softDelete(1L, "photos/2024/deep/d.jpg", 5L);
+        receivedBy("readme.txt", "c1");
+        repository.softDelete(1L, "readme.txt", 6L);
+
+        TreeResponse root = repository.findImmediateChildren(1, "");
+        assertThat(root.files()).isEmpty();
+        assertThat(root.childDirs()).contains(new TreeEntry("photos", 1300));
+        assertThat(repository.findImmediateChildren(1, "photos/2024").childDirs()).isEmpty();
+    }
+
+    // ── sumFileSizeByRootDir ─────────────────────────────────────────────────
+
+    @Test
+    void sumFileSizeByRootDir_noRows_returnsEmptyMap() {
+        assertThat(repository.sumFileSizeByRootDir()).isEmpty();
+    }
+
+    @Test
+    void sumFileSizeByRootDir_sumsLiveRowsPerRoot() {
+        seedTree();
+        receivedBy("music/song.mp3", "c1");
+        repository.softDelete(1L, "music/song.mp3", 5L);
+
+        assertThat(repository.sumFileSizeByRootDir()).containsExactly(Map.entry(1, 6317L));
+    }
+
     // ── getMaxSyncVersionByRootDir ────────────────────────────────────────────
 
     @Test
@@ -520,8 +612,8 @@ class FileMetadataRepositoryTest {
 
     @Test
     void getMaxSyncVersionByRootDir_withRows_returnsMaxPerDir() {
-        repository.add(buildMeta("a.jpg", "a.jpg"));
-        repository.add(buildMeta("b.jpg", "b.jpg"));
+        repository.addAll(List.of(buildMeta("a.jpg", "a.jpg")));
+        repository.addAll(List.of(buildMeta("b.jpg", "b.jpg")));
         repository.updateSyncVersion(1, "a.jpg", 5L);
         repository.updateSyncVersion(1, "b.jpg", 10L);
         Map<Integer, Long> result = repository.getMaxSyncVersionByRootDir();

@@ -3,7 +3,7 @@ package com.fstojilj.luddite.sync.common.dto;
 import java.util.List;
 
 /**
- * @param childNames immediate child subdirectory names
- * @param fileNames  immediate child file names (no further path segments)
+ * @param childDirs immediate child subdirectories
+ * @param files     immediate child files (no further path segments)
  */
-public record TreeResponse(List<String> childNames, List<String> fileNames) {}
+public record TreeResponse(List<TreeEntry> childDirs, List<TreeEntry> files) {}

@@ -77,7 +77,6 @@ class FileMetadataServiceTest {
         Path file = Files.writeString(tempDir.resolve("photo.jpg"), "data");
         fileMetadataService.addFileMetadata(file, 1, "photo.jpg");
         verify(fileMetadataRepository).upsert(any(FileMetadata.class));
-        verify(fileMetadataRepository, never()).add(any(FileMetadata.class));
     }
 
     @Test
@@ -98,21 +97,21 @@ class FileMetadataServiceTest {
     void addFileMetadata_ignoredFile_thumbsDb_shouldNotInsert() throws Exception {
         Path thumbs = Files.writeString(tempDir.resolve("Thumbs.db"), "data");
         fileMetadataService.addFileMetadata(thumbs, 1, "Thumbs.db");
-        verify(fileMetadataRepository, never()).add(any());
+        verify(fileMetadataRepository, never()).upsert(any());
     }
 
     @Test
     void addFileMetadata_ignoredFile_desktopIni_shouldNotInsert() throws Exception {
         Path ini = Files.writeString(tempDir.resolve("desktop.ini"), "data");
         fileMetadataService.addFileMetadata(ini, 1, "desktop.ini");
-        verify(fileMetadataRepository, never()).add(any());
+        verify(fileMetadataRepository, never()).upsert(any());
     }
 
     @Test
     void addFileMetadata_ignoredFile_caseInsensitive_shouldNotInsert() throws Exception {
         Path upper = Files.writeString(tempDir.resolve("THUMBS.DB"), "data");
         fileMetadataService.addFileMetadata(upper, 1, "THUMBS.DB");
-        verify(fileMetadataRepository, never()).add(any());
+        verify(fileMetadataRepository, never()).upsert(any());
     }
 
     // ── updateFileMetadata ────────────────────────────────────────────────────

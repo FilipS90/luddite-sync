@@ -1,5 +1,6 @@
 package com.fstojilj.luddite.sync.client.service;
 
+import com.fstojilj.luddite.sync.common.dto.TreeEntry;
 import com.fstojilj.luddite.sync.common.dto.TreeResponse;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -101,14 +102,20 @@ class DownloadServiceTest {
         assertThat(Files.exists(destination)).isFalse();
     }
 
+    private static TreeResponse tree(List<String> dirs, List<String> files) {
+        return new TreeResponse(
+                dirs.stream().map(d -> new TreeEntry(d, 0)).toList(),
+                files.stream().map(f -> new TreeEntry(f, 0)).toList());
+    }
+
     // ── collectDescendantFiles ────────────────────────────────────────────────
 
     @Test
     void collectDescendantFiles_walksNestedTreeAndPreservesStructure() {
         when(serverApiClient.fetchTree("Movies", "The_Rock", null))
-                .thenReturn(new TreeResponse(List.of("extras"), List.of("movie.mkv")));
+                .thenReturn(tree(List.of("extras"), List.of("movie.mkv")));
         when(serverApiClient.fetchTree("Movies", "The_Rock/extras", null))
-                .thenReturn(new TreeResponse(List.of(), List.of("deleted_scene.mkv")));
+                .thenReturn(tree(List.of(), List.of("deleted_scene.mkv")));
 
         List<String> result = downloadService.collectDescendantFiles("Movies", "The_Rock", null);
 
@@ -118,7 +125,7 @@ class DownloadServiceTest {
     @Test
     void collectDescendantFiles_rootDir_usesEmptySubPath() {
         when(serverApiClient.fetchTree("Movies", "", null))
-                .thenReturn(new TreeResponse(List.of(), List.of("readme.txt")));
+                .thenReturn(tree(List.of(), List.of("readme.txt")));
 
         List<String> result = downloadService.collectDescendantFiles("Movies", "", null);
 
@@ -141,7 +148,7 @@ class DownloadServiceTest {
     void download_subdir_recreatesStructureUnderItemName() {
         when(rootDirService.getPasswordHash("Movies")).thenReturn(null);
         when(serverApiClient.fetchTree("Movies", "The_Rock", null))
-                .thenReturn(new TreeResponse(List.of(), List.of("movie.mkv")));
+                .thenReturn(tree(List.of(), List.of("movie.mkv")));
         fakeServer.respondWith("Movies/The_Rock/movie.mkv", "bytes".getBytes(StandardCharsets.UTF_8));
 
         int count = downloadService.download("Movies", "The_Rock", false);
@@ -154,7 +161,7 @@ class DownloadServiceTest {
     void download_rootDir_usesRootDirNameAsDestinationFolder() {
         when(rootDirService.getPasswordHash("Movies")).thenReturn(null);
         when(serverApiClient.fetchTree("Movies", "", null))
-                .thenReturn(new TreeResponse(List.of(), List.of("readme.txt")));
+                .thenReturn(tree(List.of(), List.of("readme.txt")));
         fakeServer.respondWith("Movies/readme.txt", "bytes".getBytes(StandardCharsets.UTF_8));
 
         int count = downloadService.download("Movies", "", false);

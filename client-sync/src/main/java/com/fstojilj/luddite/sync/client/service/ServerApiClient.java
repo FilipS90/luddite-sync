@@ -2,6 +2,7 @@ package com.fstojilj.luddite.sync.client.service;
 
 import com.fstojilj.luddite.sync.common.dto.AuthRequest;
 import com.fstojilj.luddite.sync.common.dto.DirListResponse;
+import com.fstojilj.luddite.sync.common.dto.TreeEntry;
 import com.fstojilj.luddite.sync.common.dto.ServerPortResponse;
 import com.fstojilj.luddite.sync.common.dto.TreeResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -49,7 +50,9 @@ public class ServerApiClient {
         this.restClient = buildClient(null);
     }
 
-    /** Package-private constructor for testing with a pre-built RestClient. */
+    /**
+     * Package-private constructor for testing with a pre-built RestClient.
+     */
     ServerApiClient(RestClient restClient) {
         this.restClient = restClient;
         this.apiPort = -1;
@@ -100,9 +103,9 @@ public class ServerApiClient {
     }
 
     /**
-     * Returns all public (non-private) root directory names advertised by the server.
+     * Returns all public (non-private) root directories advertised by the server, with sizes.
      */
-    public List<String> fetchPublicDirs() {
+    public List<TreeEntry> fetchPublicDirs() {
         try {
             DirListResponse response = restClient.get()
                     .uri("/api/dirs")
@@ -111,7 +114,7 @@ public class ServerApiClient {
             return response != null && response.dirs() != null ? response.dirs() : List.of();
         } catch (Exception e) {
             log.warn("fetchPublicDirs failed: {}", e.getMessage());
-            return List.of();
+            throw new RuntimeException("Failed to fetch public dirs", e);
         }
     }
 
@@ -141,8 +144,8 @@ public class ServerApiClient {
                     .body(TreeResponse.class);
             if (response == null) return new TreeResponse(List.of(), List.of());
             return new TreeResponse(
-                    response.childNames() != null ? response.childNames() : List.of(),
-                    response.fileNames() != null ? response.fileNames() : List.of());
+                    response.childDirs() != null ? response.childDirs() : List.of(),
+                    response.files() != null ? response.files() : List.of());
         } catch (HttpClientErrorException.NotFound e) {
             log.warn("fetchTree: dir '{}' not found or access denied", dirName);
             return new TreeResponse(List.of(), List.of());

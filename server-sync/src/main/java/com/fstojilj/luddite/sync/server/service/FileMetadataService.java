@@ -1,5 +1,6 @@
 package com.fstojilj.luddite.sync.server.service;
 
+import com.fstojilj.luddite.sync.common.dto.TreeResponse;
 import com.fstojilj.luddite.sync.common.model.FileMetadata;
 import com.fstojilj.luddite.sync.server.repository.FileMetadataRepository;
 import lombok.RequiredArgsConstructor;
@@ -14,6 +15,7 @@ import java.io.File;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -248,14 +250,14 @@ public class FileMetadataService implements ApplicationRunner {
     }
 
     /**
-     * Returns the distinct immediate child directory names under {@code parentRelPath}.
+     * Returns the immediate child directories and files under {@code parentRelPath}, with sizes.
      * Use {@code ""} to query the root level.
      */
-    public List<String> findImmediateChildDirNames(int rootDirId, String parentRelPath) {
-        return fileMetadataRepository.findImmediateChildDirNames(rootDirId, parentRelPath);
+    public TreeResponse findImmediateChildren(int rootDirId, String parentRelPath) {
+        return fileMetadataRepository.findImmediateChildren(rootDirId, parentRelPath);
     }
 
-    public List<String> findImmediateChildFileNames(int rootDirId, String parentRelPath) {
-        return fileMetadataRepository.findImmediateChildFileNames(rootDirId, parentRelPath);
+    public Map<Integer, Long> sumFileSizeByRootDir() {
+        return fileMetadataRepository.sumFileSizeByRootDir();
     }
 }

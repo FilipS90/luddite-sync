@@ -3,6 +3,7 @@ package com.fstojilj.luddite.sync.client.service;
 import com.fstojilj.luddite.sync.client.event.ServerDirsAvailableEvent;
 import com.fstojilj.luddite.sync.client.model.ClientRootDir;
 import com.fstojilj.luddite.sync.client.repository.HostRepository;
+import com.fstojilj.luddite.sync.common.dto.TreeEntry;
 import com.fstojilj.luddite.sync.common.util.PasswordUtils;
 import jakarta.annotation.PreDestroy;
 import lombok.Getter;
@@ -27,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -85,6 +87,9 @@ public class ClientSyncService implements ApplicationRunner {
      * and the UI refresh loop. Updated via HTTP on each connect cycle.
      */
     public static List<String> serverDirs = new ArrayList<>();
+
+    /** Total live file size per server dir name, from the same advertisement as {@link #serverDirs}. */
+    public static Map<String, Long> serverDirSizes = new ConcurrentHashMap<>();
 
     private volatile boolean running = false;
 
@@ -163,7 +168,8 @@ public class ClientSyncService implements ApplicationRunner {
     private void connectAndSync() {
         while (running) {
             try {
-                List<String> serverPublicDirs = serverApiClient.fetchPublicDirs();
+                List<TreeEntry> serverPublicDirEntries = serverApiClient.fetchPublicDirs();
+                List<String> serverPublicDirs = serverPublicDirEntries.stream().map(TreeEntry::name).toList();
 
                 if (serverPublicDirs.isEmpty()) {
                     log.warn("Server returned no public directories — waiting 5s before retry");
@@ -172,6 +178,8 @@ public class ClientSyncService implements ApplicationRunner {
                 }
 
                 serverDirs = serverPublicDirs;
+                serverDirSizes = serverPublicDirEntries.stream()
+                        .collect(Collectors.toMap(TreeEntry::name, TreeEntry::size, Long::sum, ConcurrentHashMap::new));
                 log.info("Server advertises {} public dir(s): {}", serverPublicDirs.size(), serverPublicDirs);
                 serverDirsEventPublisher.publishEvent(new ServerDirsAvailableEvent(serverPublicDirs));
 
