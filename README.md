@@ -469,14 +469,18 @@ e2e/sync.sh --no-build        # reuse the JARs already in */target
 | `sync.sh` | two clients on one dir; adds at root (watcher) and in subdirs (scanner); edits; deletes and tombstone purging once every holder acks; a client offline during a delete; large-file chunking; `sync --path`; `remove` with and without `--delete`; re-subscribing; private dirs; a server restart with root and subdir changes made while it was down; the server dropping a root dir |
 | `weak-sync.sh` | local deletes, untracked files and a wiped mirror never trigger a re-download; only server-side changes move files |
 | `download.sh` | single files (incl. unicode names), subtrees, whole root dirs, `browse` + `download <n>`; 16 MB progress lines; overwriting; missing paths; private dirs with wrong and right passwords, including multi-file downloads that must not de-authorize the sync connection; the server stalling (read timeout, `.part` removed) and crashing mid-transfer |
+| `protocol.sh` | a dir bigger than one 100-record response batch, delivered over several polls with one version per file; two clients racing for the same fresh dir; a root dir added while clients run, subscribed by index after `refresh`; the same relative path in two dirs; renames, empty files, non-ASCII names and spaces, a subtree created in one go; `browse --depth`, `browse <n>`, `up`, `list` |
+| `resilience.sh` | the server and the client killed mid-sync of a large file (nothing credited, re-sent whole on return) and a stalled server that neither drops nor corrupts the transfer; private dirs re-authenticating after a server crash; the socket port moved under a live connection; a client killed mid-download and a server killed during a multi-file download (finished files kept, no `.part` left, retry completes the set); both clients offline across a set of changes |
 
 `e2e/lib.sh` holds the reusable pieces — `start_server` / `stop_server` / `restart_server`,
-`start_client N` / `stop_client N` / `restart_client N`, `server_cmd` / `client_cmd` (CLI
-over a FIFO), `wait_client N PATTERN` (matches only output printed after the last
-`client_cmd` or `mark_client`), `wait_for_server_db`, `client_files`,
+`start_client N` / `stop_client N` / `restart_client N` (both take a signal, so `KILL`
+simulates a crash), `server_cmd` / `client_cmd` (CLI over a FIFO), `wait_client N PATTERN`
+(matches only output printed after the last `client_cmd` or `mark_client`),
+`wait_for_server_db` / `wait_for_client_db`, `wait_for_client_files`, `wait_for_min_size`
+(waits until a transfer is far enough along to interrupt), `client_files`,
 `client_downloaded_files`, `client_db`, `server_db`, `assert_eq`, `assert_same_content`,
-`assert_no_client_errors` — so a new scenario script is just `source lib.sh` plus the
-steps to check. Logs and databases stay in `e2e/.run/` after a run for inspection.
+`assert_partial`, `assert_no_client_errors` — so a new scenario script is just
+`source lib.sh` plus the steps to check. Logs and databases stay in `e2e/.run/` after a run for inspection.
 
 Native packages are produced by the `Package Luddite Sync App` GitHub Actions workflow,
 which runs on every `v*` tag (or manually via *Run workflow*) and attaches the `.deb`,
@@ -501,7 +505,6 @@ Three Maven modules:
 | `GET /api/dirs` | Names of public root dirs |
 | `GET /api/dirs/{name}/tree?under=<sub>` | Immediate child dirs and files. Header `X-Auth-Hash` required for private dirs; `404` when the dir is unknown *or* private and unauthorized |
 | `POST /api/dirs/{name}/auth` | `{clientId, passwordHash}` → `200` granted, `403` denied |
-| `POST /api/dirs/versions` | Current max sync version per subscribed dir (used to decide whether a SYNC is needed) |
 | `GET /api/server/socket-port` | Port the file socket currently listens on |
 
 ### Socket protocol (server, port 8888)

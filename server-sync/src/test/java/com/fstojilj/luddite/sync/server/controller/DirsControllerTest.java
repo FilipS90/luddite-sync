@@ -2,18 +2,12 @@ package com.fstojilj.luddite.sync.server.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fstojilj.luddite.sync.common.dto.AuthRequest;
-import com.fstojilj.luddite.sync.common.dto.DirVersionCheckRequest;
-import com.fstojilj.luddite.sync.common.dto.DirVersionEntry;
 import com.fstojilj.luddite.sync.common.dto.TreeEntry;
 import com.fstojilj.luddite.sync.common.dto.TreeResponse;
 import com.fstojilj.luddite.sync.common.model.RootDir;
 import com.fstojilj.luddite.sync.server.service.AuthCacheService;
 import com.fstojilj.luddite.sync.server.service.FileMetadataService;
 import com.fstojilj.luddite.sync.server.service.RootDirService;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -23,6 +17,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -205,68 +204,5 @@ class DirsControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new AuthRequest("client-1", "wronghash"))))
                 .andExpect(status().isForbidden());
-    }
-
-    // ── POST /api/sync/versions ───────────────────────────────────────────────
-
-    @Test
-    void checkVersions_returnsCurrentVersionForPublicDir() throws Exception {
-        RootDir pub = RootDir.builder().id(1).name("Movies").isPrivate(false).build();
-        when(rootDirService.findByName("Movies")).thenReturn(Optional.of(pub));
-        when(fileMetadataService.getMaxSyncVersionForDir(1)).thenReturn(42L);
-
-        DirVersionCheckRequest req = new DirVersionCheckRequest(List.of(new DirVersionEntry("Movies", null)));
-
-        mvc.perform(post("/api/dirs/versions")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(req)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.versions.Movies").value(42));
-    }
-
-    @Test
-    void checkVersions_omitsPrivateDirOnWrongHash() throws Exception {
-        RootDir priv = RootDir.builder().id(2).name("Secrets").isPrivate(true).password("abc123").build();
-        when(rootDirService.findByName("Secrets")).thenReturn(Optional.of(priv));
-
-        DirVersionCheckRequest req = new DirVersionCheckRequest(
-                List.of(new DirVersionEntry("Secrets", "wronghash")));
-
-        mvc.perform(post("/api/dirs/versions")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(req)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.versions.Secrets").doesNotExist());
-    }
-
-    @Test
-    void checkVersions_includesPrivateDirOnCorrectHash() throws Exception {
-        RootDir priv = RootDir.builder().id(2).name("Secrets").isPrivate(true).password("abc123").build();
-        when(rootDirService.findByName("Secrets")).thenReturn(Optional.of(priv));
-        when(fileMetadataService.getMaxSyncVersionForDir(2)).thenReturn(7L);
-
-        DirVersionCheckRequest req = new DirVersionCheckRequest(
-                List.of(new DirVersionEntry("Secrets", "abc123")));
-
-        mvc.perform(post("/api/dirs/versions")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(req)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.versions.Secrets").value(7));
-    }
-
-    @Test
-    void checkVersions_returnsZeroWhenNoVersionsExist() throws Exception {
-        RootDir pub = RootDir.builder().id(1).name("Empty").isPrivate(false).build();
-        when(rootDirService.findByName("Empty")).thenReturn(Optional.of(pub));
-        when(fileMetadataService.getMaxSyncVersionForDir(1)).thenReturn(null);
-
-        DirVersionCheckRequest req = new DirVersionCheckRequest(List.of(new DirVersionEntry("Empty", null)));
-
-        mvc.perform(post("/api/dirs/versions")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(req)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.versions.Empty").value(0));
     }
 }

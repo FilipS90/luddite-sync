@@ -2,20 +2,12 @@ package com.fstojilj.luddite.sync.server.controller;
 
 import com.fstojilj.luddite.sync.common.dto.AuthRequest;
 import com.fstojilj.luddite.sync.common.dto.DirListResponse;
-import com.fstojilj.luddite.sync.common.dto.DirVersionCheckRequest;
-import com.fstojilj.luddite.sync.common.dto.DirVersionCheckResponse;
-import com.fstojilj.luddite.sync.common.dto.DirVersionEntry;
 import com.fstojilj.luddite.sync.common.dto.TreeEntry;
 import com.fstojilj.luddite.sync.common.dto.TreeResponse;
 import com.fstojilj.luddite.sync.common.model.RootDir;
 import com.fstojilj.luddite.sync.server.service.AuthCacheService;
 import com.fstojilj.luddite.sync.server.service.FileMetadataService;
 import com.fstojilj.luddite.sync.server.service.RootDirService;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -27,6 +19,11 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 /**
  * REST API for directory operations.
@@ -125,40 +122,6 @@ public class DirsController {
             log.warn("POST /api/dirs/{}/auth — DENIED (wrong password)", name);
             return ResponseEntity.status(403).build();
         }
-    }
-
-    /**
-     * Version check — client sends the list of dir names it is subscribed to (plus optional
-     * password hash for private dirs); server returns the current {@code MAX(sync_version)}
-     * per dir. The client compares against its own stored version and decides whether to
-     * open a socket SYNC request.
-     *
-     * <p>Dirs with an invalid or missing password hash are silently omitted from the response.
-     *
-     * @param request body listing subscribed dirs
-     */
-    @PostMapping("/versions")
-    public DirVersionCheckResponse checkVersions(@RequestBody DirVersionCheckRequest request) {
-        Map<String, Long> versions = new HashMap<>();
-
-        for (DirVersionEntry entry : request.dirs()) {
-            Optional<RootDir> dirOpt = rootDirService.findByName(entry.dirName());
-            if (dirOpt.isEmpty()) {
-                log.debug("checkVersions: unknown dir '{}', skipping", entry.dirName());
-                continue;
-            }
-
-            RootDir dir = dirOpt.get();
-            if (dir.isPrivate() && !isAuthorized(dir, entry.passwordHash())) {
-                log.warn("checkVersions: unauthorized access attempt for private dir '{}', skipping", entry.dirName());
-                continue;
-            }
-
-            Long version = fileMetadataService.getMaxSyncVersionForDir(dir.getId());
-            versions.put(entry.dirName(), version != null ? version : 0L);
-        }
-
-        return new DirVersionCheckResponse(versions);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

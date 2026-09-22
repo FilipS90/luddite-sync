@@ -1,6 +1,7 @@
 package com.fstojilj.luddite.sync.client.service;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.InjectMocks;
@@ -11,14 +12,18 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.EOFException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
+import java.util.Arrays;
+import java.util.Random;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
@@ -196,6 +201,49 @@ class ClientSyncServiceApplyRecordTest {
         assertThat(mirror.resolve("new/dir/f.txt")).hasBinaryContent(payload);
         verify(fileMetadataService).recordSynced(DIR, DIR + "/new/dir/f.txt");
         assertThat(out.size()).as("no ACK for live files").isZero();
+    }
+
+    @Test
+    void liveFile_streamEndsBeforeTheAnnouncedSize_failsWithoutRecordingSynced() {
+        byte[] payload = "short".getBytes(StandardCharsets.UTF_8);
+        DataInputStream in = new DataInputStream(new ByteArrayInputStream(payload));
+
+        assertThatThrownBy(() -> clientSyncService.applyRecord(in, new DataOutputStream(new ByteArrayOutputStream()),
+                DIR, mirror, FLAG_LIVE, DIR + "/f.txt", 1L, payload.length + 10L))
+                .isInstanceOf(EOFException.class)
+                .hasMessageContaining("connection closed after " + payload.length);
+
+        assertThat(mirror.resolve("f.txt")).doesNotExist();
+        verify(fileMetadataService, never()).recordSynced(anyString(), anyString());
+    }
+
+    @Test
+    @Timeout(60)
+    void chunkedFile_arrivesWhole_isWrittenChunkByChunkAndRecorded() throws Exception {
+        byte[] payload = new byte[34 * 1024 * 1024];
+        new Random(42).nextBytes(payload);
+        DataInputStream in = new DataInputStream(new ByteArrayInputStream(payload));
+
+        clientSyncService.applyRecord(in, new DataOutputStream(new ByteArrayOutputStream()),
+                DIR, mirror, FLAG_LIVE, DIR + "/big.bin", 7L, payload.length);
+
+        assertThat(mirror.resolve("big.bin")).hasSize(payload.length);
+        assertThat(Arrays.equals(Files.readAllBytes(mirror.resolve("big.bin")), payload))
+                .as("every chunk written, in order").isTrue();
+        verify(fileMetadataService).recordSynced(DIR, DIR + "/big.bin");
+    }
+
+    @Test
+    @Timeout(30)
+    void chunkedFile_streamEndsBeforeTheAnnouncedSize_failsInsteadOfAskingADeadStreamForMore() {
+        byte[] payload = "short".getBytes(StandardCharsets.UTF_8);
+        DataInputStream in = new DataInputStream(new ByteArrayInputStream(payload));
+
+        assertThatThrownBy(() -> clientSyncService.applyRecord(in, new DataOutputStream(new ByteArrayOutputStream()),
+                DIR, mirror, FLAG_LIVE, DIR + "/big.bin", 1L, 34L * 1024 * 1024))
+                .isInstanceOf(EOFException.class);
+
+        verify(fileMetadataService, never()).recordSynced(anyString(), anyString());
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────

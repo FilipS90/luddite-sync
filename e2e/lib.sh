@@ -117,6 +117,32 @@ wait_for_server_db() {
     done
 }
 
+# wait_for_client_db N SQL EXPECTED [TIMEOUT_S] — polls a client DB until the query yields EXPECTED.
+wait_for_client_db() {
+    local n="$1" sql="$2" expected="$3" timeout="${4:-30}" i=0
+    until [ "$(client_db "$n" "$sql")" = "$expected" ]; do
+        sleep 0.5
+        i=$((i + 1))
+        if [ "$i" -ge $((timeout * 2)) ]; then
+            fail "timed out waiting for client $n db [$sql] = [$expected], got [$(client_db "$n" "$sql")]"
+            return 1
+        fi
+    done
+}
+
+# wait_for_client_files N DIR COUNT [TIMEOUT_S] — until COUNT files are mirrored under DIR.
+wait_for_client_files() {
+    local n="$1" dir="$2" expected="$3" timeout="${4:-60}" i=0
+    until [ "$(client_files "$n" | grep -c "^$dir/")" = "$expected" ]; do
+        sleep 0.5
+        i=$((i + 1))
+        if [ "$i" -ge $((timeout * 2)) ]; then
+            fail "timed out waiting for $expected file(s) in client $n dir $dir, have $(client_files "$n" | grep -c "^$dir/")"
+            return 1
+        fi
+    done
+}
+
 # Remote addresses the server currently lists for `listc`, one per line.
 server_connected_clients() {
     server_cmd listc
@@ -149,14 +175,15 @@ start_client() {
     wait_for_log "$dir/client.log" "Server advertises" 60
 }
 
+# stop_client N [SIGNAL] — SIGKILL simulates a crash; the default TERM is a clean shutdown.
 stop_client() {
     local pidfile="$E2E_ROOT/c$1/client.pid"
-    kill "$(cat "$pidfile")" 2>/dev/null
+    kill -"${2:-TERM}" "$(cat "$pidfile")" 2>/dev/null
     while kill -0 "$(cat "$pidfile")" 2>/dev/null; do sleep 0.2; done
 }
 
 restart_client() {
-    stop_client "$1"
+    stop_client "$1" "${2:-TERM}"
     : > "$E2E_ROOT/c$1/client.log"
     start_client "$1"
 }
@@ -218,6 +245,23 @@ wait_for_path() {
     done
 }
 
+# wait_for_min_size PATH BYTES [TIMEOUT_S] — polls until a file has grown to at least BYTES,
+# i.e. until a transfer is demonstrably under way and can be interrupted. Polls far faster than
+# the other waits: over loopback even a 160 MB file is through in a few hundred milliseconds.
+wait_for_min_size() {
+    local path="$1" min="$2" timeout="${3:-60}" i=0
+    until [ -f "$path" ] && [ "$(file_size "$path")" -ge "$min" ]; do
+        sleep 0.02
+        i=$((i + 1))
+        if [ "$i" -ge $((timeout * 50)) ]; then
+            fail "timed out waiting for $path to reach $min bytes, at $(file_size "$path")"
+            return 1
+        fi
+    done
+}
+
+file_size() { stat -c %s "$1" 2>/dev/null || echo 0; }
+
 # Waits until the client has gone at least two poll intervals without new activity.
 settle() { sleep "${1:-8}"; }
 
@@ -235,6 +279,18 @@ assert_same_content() {
     local what="$1" expected="$2" actual="$3"
     if [ ! -f "$actual" ]; then fail "$what: $actual missing"; return; fi
     if [ "$(sha "$expected")" = "$(sha "$actual")" ]; then pass "$what"; else fail "$what: content differs from $expected"; fi
+}
+
+# assert_partial WHAT COMPLETE PARTIAL — PARTIAL is on disk but shorter than COMPLETE, which is
+# what an interrupted transfer leaves behind; a full-length file means the interruption came too late.
+assert_partial() {
+    local what="$1" complete="$2" partial="$3"
+    if [ ! -f "$partial" ]; then fail "$what: $partial missing"; return; fi
+    if [ "$(file_size "$partial")" -lt "$(file_size "$complete")" ]; then
+        pass "$what"
+    else
+        fail "$what: $partial already holds all $(file_size "$complete") bytes"
+    fi
 }
 
 assert_exists()  { if [ -e "$2" ]; then pass "$1"; else fail "$1: $2 missing"; fi; }

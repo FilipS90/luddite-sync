@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
@@ -468,6 +469,9 @@ public class ClientSyncService implements ApplicationRunner {
             if (fileSizeBytes <= 33L * 1024 * 1024) {
                 // Small file — read whole into memory, write at once
                 byte[] fileBytes = in.readNBytes((int) fileSizeBytes);
+                if (fileBytes.length < fileSizeBytes) {
+                    throw truncatedRecord(fileBytes.length, fileSizeBytes);
+                }
                 Files.write(target, fileBytes);
             } else {
                 // Large file — read in 33 MB chunks, stream directly to disk
@@ -476,7 +480,10 @@ public class ClientSyncService implements ApplicationRunner {
                     long remaining = fileSizeBytes;
                     while (remaining > 0) {
                         int toRead = (int) Math.min(buf.length, remaining);
-                        int read = in.readNBytes(buf, 0, toRead); // reads exactly toRead bytes
+                        int read = in.readNBytes(buf, 0, toRead);
+                        if (read < toRead) {
+                            throw truncatedRecord(fileSizeBytes - remaining + read, fileSizeBytes);
+                        }
                         fileOut.write(buf, 0, read);
                         remaining -= read;
                     }
@@ -486,6 +493,18 @@ public class ClientSyncService implements ApplicationRunner {
             String fileSizeMb = String.format("%.2f", (double) fileSizeBytes / (1024 * 1024));
             log.info("Written: {} ({} MB, v{})", relPath, fileSizeMb, syncVersion);
         }
+    }
+
+    /**
+     * The failure for a record whose file bytes stopped arriving early. {@link java.io.InputStream#readNBytes}
+     * reports a short read instead of throwing, so without turning one into an exception the poll loop
+     * would keep asking a dead socket for the rest of the file and never surface the disconnect.
+     *
+     * @param received      file bytes received before the stream ran dry
+     * @param fileSizeBytes file bytes the record announced
+     */
+    private EOFException truncatedRecord(long received, long fileSizeBytes) {
+        return new EOFException("connection closed after " + received + " of " + fileSizeBytes + " bytes");
     }
 
     /**

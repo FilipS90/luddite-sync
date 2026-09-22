@@ -7,7 +7,8 @@ E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ "${1:-}" = "--no-build" ] || (cd "$E2E_DIR/.." && ./mvnw -q -DskipTests package) || exit 1
 
 failed=()
-for script in "$E2E_DIR"/sync.sh "$E2E_DIR"/weak-sync.sh "$E2E_DIR"/download.sh; do
+for script in "$E2E_DIR"/sync.sh "$E2E_DIR"/weak-sync.sh "$E2E_DIR"/download.sh \
+               "$E2E_DIR"/protocol.sh "$E2E_DIR"/resilience.sh; do
     printf '\n\033[1;35m#### %s\033[0m\n' "$(basename "$script")"
     "$script" --no-build || failed+=("$(basename "$script")")
 done
