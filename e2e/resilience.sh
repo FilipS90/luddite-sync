@@ -125,7 +125,7 @@ assert_exists "sync continues once the port moves back" "$M1/share/p3.txt"
 
 log "Client killed mid-download: no truncated file is left where the download should land"
 client_cmd 2 download mixed z-big.bin
-wait_for_path "$DL2/z-big.bin.part" 60
+wait_for_min_size "$DL2/z-big.bin.part" "$PARTIAL_BYTES" 60
 stop_client 2 KILL
 assert_missing "no finished file from the interrupted download" "$DL2/z-big.bin"
 assert_exists "mirror survives the crash" "$M2/share/a.txt"
@@ -137,7 +137,7 @@ assert_missing "no .part left after the retry" "$DL2/z-big.bin.part"
 
 log "Server killed mid multi-file download: finished files are kept, the retry completes the set"
 client_cmd 2 download mixed
-wait_for_path "$DL2/mixed/z-big.bin.part" 60
+wait_for_min_size "$DL2/mixed/z-big.bin.part" "$PARTIAL_BYTES" 60
 stop_server KILL
 wait_client 2 "Downloaded 3 file\(s\)" 60
 assert_eq "small files that finished first are kept" $'mixed/a.txt\nmixed/b.txt\nmixed/c.txt' \

@@ -16,6 +16,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.ServerSocket;
@@ -25,6 +26,7 @@ import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -60,10 +62,10 @@ class FileSocketServiceTest {
     @TempDir
     Path tempDir;
 
-    // ── sendFileBytes — small path (≤ 33 MB → sendAllFileBytes) ──────────────
+    // ── sendFileBytes — the payload matches the announced length ─────────────
 
     @Test
-    void sendFileBytes_smallFile_sendsAllBytes() throws Exception {
+    void sendFileBytes_sendsExactlyTheAnnouncedCount() throws Exception {
         byte[] content = "small file content".getBytes(StandardCharsets.UTF_8);
         Path file = Files.write(tempDir.resolve("small.bin"), content);
 
@@ -74,60 +76,54 @@ class FileSocketServiceTest {
     }
 
     @Test
-    void sendFileBytes_exactlyAtThreshold_usesSmallPath() throws Exception {
-        byte[] content = "threshold content".getBytes(StandardCharsets.UTF_8);
-        Path file = Files.write(tempDir.resolve("threshold.bin"), content);
+    void sendFileBytes_fileGrewSinceHeader_sendsOnlyTheAnnouncedCount() throws Exception {
+        byte[] content = "announced-part-and-then-some-more".getBytes(StandardCharsets.UTF_8);
+        Path file = Files.write(tempDir.resolve("grown.bin"), content);
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        // fileBytesSize == 33 MB boundary → must take the small (sendAllFileBytes) path
-        invokeSendFileBytes(new DataOutputStream(baos), file, 33L * 1024 * 1024);
+        invokeSendFileBytes(new DataOutputStream(baos), file, 14);
+
+        assertThat(baos.toByteArray()).isEqualTo("announced-part".getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void sendFileBytes_fileShorterThanAnnounced_throwsEOFException() throws Exception {
+        Path file = Files.write(tempDir.resolve("short.bin"), "five5".getBytes(StandardCharsets.UTF_8));
+
+        assertThatThrownBy(() ->
+                invokeSendFileBytes(new DataOutputStream(new ByteArrayOutputStream()), file, 50))
+                .isInstanceOf(EOFException.class);
+    }
+
+    @Test
+    void sendFileBytes_zeroBytes_writesNothing() throws Exception {
+        Path file = Files.write(tempDir.resolve("empty.bin"), new byte[0]);
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        invokeSendFileBytes(new DataOutputStream(baos), file, 0);
+
+        assertThat(baos.toByteArray()).isEmpty();
+    }
+
+    @Test
+    void sendFileBytes_countAboveChunkSize_streamsEveryByte() throws Exception {
+        byte[] content = new byte[(33 * 1024 * 1024) + 1024];
+        ThreadLocalRandom.current().nextBytes(content);
+        Path file = Files.write(tempDir.resolve("over-chunk.bin"), content);
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        invokeSendFileBytes(new DataOutputStream(baos), file, content.length);
 
         assertThat(baos.toByteArray()).isEqualTo(content);
     }
 
-    // ── sendFileBytes — large path (> 33 MB → chunked) ───────────────────────
+    // ── sendFileBytes — IOException propagation ───────────────────────────────
 
     @Test
-    void sendFileBytes_largeFilePath_sendsAllBytesViaChunkedStream() throws Exception {
-        byte[] content = "large file streamed in chunks".getBytes(StandardCharsets.UTF_8);
-        Path file = Files.write(tempDir.resolve("large.bin"), content);
-
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        // Pass fileBytesSize just above threshold to force the chunked path
-        invokeSendFileBytes(new DataOutputStream(baos), file, 33L * 1024 * 1024 + 1);
-
-        assertThat(baos.toByteArray()).isEqualTo(content);
-    }
-
-    @Test
-    void sendFileBytes_bothPaths_produceIdenticalOutput() throws Exception {
-        byte[] content = "identical content for both paths".getBytes(StandardCharsets.UTF_8);
-        Path file = Files.write(tempDir.resolve("same.bin"), content);
-
-        ByteArrayOutputStream small = new ByteArrayOutputStream();
-        invokeSendFileBytes(new DataOutputStream(small), file, 100);                      // small path
-
-        ByteArrayOutputStream chunked = new ByteArrayOutputStream();
-        invokeSendFileBytes(new DataOutputStream(chunked), file, 34L * 1024 * 1024);     // chunked path
-
-        assertThat(small.toByteArray()).isEqualTo(chunked.toByteArray());
-    }
-
-    // ── sendFileBytes / sendAllFileBytes — IOException propagation ────────────
-
-    @Test
-    void sendFileBytes_smallPath_missingFile_throwsIOException() {
+    void sendFileBytes_missingFile_throwsIOException() {
         Path ghost = tempDir.resolve("ghost.bin");
         assertThatThrownBy(() ->
                 invokeSendFileBytes(new DataOutputStream(new ByteArrayOutputStream()), ghost, 10))
-                .isInstanceOf(IOException.class);
-    }
-
-    @Test
-    void sendFileBytes_largeChunkedPath_missingFile_throwsIOException() {
-        Path ghost = tempDir.resolve("ghost-large.bin");
-        assertThatThrownBy(() ->
-                invokeSendFileBytes(new DataOutputStream(new ByteArrayOutputStream()), ghost, 34L * 1024 * 1024))
                 .isInstanceOf(IOException.class);
     }
 

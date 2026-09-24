@@ -63,13 +63,9 @@ jobs:
       - name: Run e2e suites
         run: e2e/run-all.sh --no-build
 
-      # e2e_setup wipes e2e/.run at the start of each suite, so these are the logs of
-      # whichever suite was running when the job stopped.
       - name: Upload e2e logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-logs
-          path: |
-            e2e/.run/*.log
-            e2e/.run/c*/*.log
+          path: e2e/.run/**/*.log

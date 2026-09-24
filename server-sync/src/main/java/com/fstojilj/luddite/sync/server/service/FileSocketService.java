@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 
 import javax.net.ssl.SSLServerSocket;
 import java.io.DataInputStream;
+import java.io.EOFException;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -67,6 +68,9 @@ public class FileSocketService {
 
     /** Minimum gap between two {@code sync_time} writes for the same client. */
     private static final long SYNC_TIME_WRITE_INTERVAL_MS = 60 * 60 * 1000L;
+
+    /** Upper bound on the streaming buffer; smaller files allocate only what they need. */
+    private static final int MAX_CHUNK_BYTES = 33 * 1024 * 1024;
 
     // ── Dependencies ─────────────────────────────────────────────────────────
     private final FileMetadataService fileMetadataService;
@@ -233,7 +237,10 @@ public class FileSocketService {
                         String qualifiedPath = new String(in.readNBytes(pathLen), StandardCharsets.UTF_8);
                         handleDeleteAck(qualifiedPath, finalClientId);
                     }
-                    default -> log.warn("Unexpected byte {} from client '{}'", msg, finalClientId);
+                    default -> {
+                        log.warn("Unexpected byte {} from client '{}' — dropping the connection", msg, finalClientId);
+                        throw new IOException("stream desync from client '" + finalClientId + "'");
+                    }
                 }
             }
 
@@ -470,51 +477,34 @@ public class FileSocketService {
     // ── File streaming helpers ─────────────────────────────────────────────────
 
     /**
-     * Streams file bytes to the client in chunks.
+     * Streams exactly {@code fileBytesSize} bytes of {@code absPath} to the client, matching the
+     * length already announced in the record header.
      *
-     * <p>If the file is deleted from disk between the DB query and the read, this method logs
-     * a warning and stops streaming.
+     * <p>A file that grew after its size was sampled is cut at the announced length — the watcher
+     * indexes the later content and a following sync carries it. A file that shrank, or that was
+     * deleted between the DB query and the read, cannot fill the announced length, so the record
+     * fails and the connection is dropped rather than leaving the client's stream misaligned.
      *
      * @param out           the client's output stream
      * @param absPath       the absolute path to the file on disk
-     * @param fileBytesSize the expected size of the file in bytes
-     * @throws IOException if reading or writing fails
+     * @param fileBytesSize the number of bytes announced for this file
+     * @throws IOException if reading or writing fails, or the file is shorter than announced
      */
     private void sendFileBytes(DataOutputStream out, Path absPath, long fileBytesSize) throws IOException {
-        if (fileBytesSize <= 33 * 1024 * 1024) {
-            sendAllFileBytes(absPath, out);
-            return;
-        }
-
-        long chunkSize = 33L * 1024 * 1024;
+        long remaining = fileBytesSize;
         try (var in = Files.newInputStream(absPath)) {
-            byte[] buf = new byte[(int) chunkSize];
-            int read;
-            while ((read = in.read(buf)) != -1) {
+            byte[] buf = new byte[(int) Math.min(remaining, MAX_CHUNK_BYTES)];
+            while (remaining > 0) {
+                int read = in.read(buf, 0, (int) Math.min(buf.length, remaining));
+                if (read < 0) {
+                    throw new EOFException("'" + absPath + "' ended after " + (fileBytesSize - remaining)
+                            + " of " + fileBytesSize + " announced bytes");
+                }
                 out.write(buf, 0, read);
+                remaining -= read;
             }
         } catch (IOException e) {
-            log.error("Failed to read file bytes for '{}': {}", absPath, e.getMessage());
-            throw e;
-        }
-    }
-
-    /**
-     * Reads the entire file into memory and writes it to the output stream.
-     *
-     * <p>Used for small files (≤ 33 MB) to reduce latency. For larger files, {@link #sendFileBytes}
-     * is used to stream in chunks.
-     *
-     * @param absPath the absolute path to the file on disk
-     * @param out     the client's output stream
-     * @throws IOException if reading or writing fails
-     */
-    private void sendAllFileBytes(Path absPath, DataOutputStream out) throws IOException {
-        try {
-            byte[] bytes = Files.readAllBytes(absPath);
-            out.write(bytes);
-        } catch (IOException e) {
-            log.warn("Failed to read file bytes for '{}': {}", absPath, e.getMessage());
+            log.error("Failed to send file bytes for '{}': {}", absPath, e.getMessage());
             throw e;
         }
     }
