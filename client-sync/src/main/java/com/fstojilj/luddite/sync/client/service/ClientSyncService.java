@@ -404,10 +404,13 @@ public class ClientSyncService implements ApplicationRunner {
 
             if (connectionState == ConnectionState.TRANSFERRING) connectionState = ConnectionState.IDLE;
 
-            // Check for server-initiated signals (non-blocking: peek at available bytes)
-            if (in.available() > 0) {
-                byte signal = in.readByte();
-                log.warn("Unexpected byte from server outside poll: {}", signal);
+            // Bytes left over between poll responses mean the stream is misaligned: the record
+            // framing no longer matches what the server sent, so anything read from here on is
+            // garbage. Drop the connection and let the reconnect start from a clean stream.
+            int leftover = in.available();
+            if (leftover > 0) {
+                log.warn("Stream desync: {} unexpected byte(s) from server outside poll", leftover);
+                throw new IOException("stream desync: " + leftover + " unexpected byte(s) from server");
             }
 
             sleep(POLL_INTERVAL_MS);
