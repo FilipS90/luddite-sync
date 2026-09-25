@@ -9,7 +9,7 @@
     </parent>
     <artifactId>server-sync</artifactId>
     <name>Server Sync</name>
-    <description>Leader node - serves photos and handles sync requests</description>
+    <description>Leader node - serves shared directories and handles sync requests</description>
     <dependencies>
         <!-- Common module -->
         <dependency>

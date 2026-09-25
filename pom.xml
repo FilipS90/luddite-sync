@@ -16,7 +16,7 @@
     <packaging>pom</packaging>
 
     <name>Luddite Sync Parent</name>
-    <description>Photo synchronization tool - Parent POM</description>
+    <description>File synchronization tool - Parent POM</description>
 
     <modules>
         <module>common-sync</module>

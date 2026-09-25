@@ -94,6 +94,9 @@ public class ClientSyncService implements ApplicationRunner {
 
     private volatile boolean running = false;
 
+    /** Set by {@link #reconnect()}; cuts short the waits in the sync loop that happen with no socket open. */
+    private volatile boolean repollRequested = false;
+
     /**
      * -- GETTER --
      * Returns the current state of the sync connection, explicitly tracked at each
@@ -156,6 +159,7 @@ public class ClientSyncService implements ApplicationRunner {
         // Set state eagerly so the UI reflects the drop immediately, rather than waiting
         // for the background loop to observe the resulting IOException.
         connectionState = ConnectionState.DISCONNECTED;
+        repollRequested = true;
         // Do NOT set running=false — that exits the loop entirely.
         // Closing the socket causes an IOException in connectAndSync which triggers a reconnect.
         closeSocket();
@@ -169,12 +173,13 @@ public class ClientSyncService implements ApplicationRunner {
     private void connectAndSync() {
         while (running) {
             try {
+                repollRequested = false;
                 List<TreeEntry> serverPublicDirEntries = serverApiClient.fetchPublicDirs();
                 List<String> serverPublicDirs = serverPublicDirEntries.stream().map(TreeEntry::name).toList();
 
                 if (serverPublicDirs.isEmpty()) {
-                    log.warn("Server returned no public directories — waiting 5s before retry");
-                    sleep(15_000);
+                    log.warn("Server returned no public directories — waiting 15s before retry");
+                    sleepUnlessRepoll(15_000);
                     continue;
                 }
 
@@ -186,13 +191,11 @@ public class ClientSyncService implements ApplicationRunner {
 
                 // Wait for user to subscribe if nothing configured yet
                 List<String> clientListeningDirs = rootDirService.retrieveAllInSyncDirs();
-                if (clientListeningDirs.isEmpty()) {
-                    while (running) {
-                        sleep(7_000);
-                        clientListeningDirs = rootDirService.retrieveAllInSyncDirs();
-                        if (!clientListeningDirs.isEmpty()) break;
-                    }
+                while (clientListeningDirs.isEmpty() && running && !repollRequested) {
+                    sleepUnlessRepoll(7_000);
+                    clientListeningDirs = rootDirService.retrieveAllInSyncDirs();
                 }
+                if (repollRequested) continue;
 
                 List<String> privateDirNames = rootDirService.findAllPrivate().stream()
                         .map(e -> e[0])
@@ -579,6 +582,17 @@ public class ClientSyncService implements ApplicationRunner {
             Thread.sleep(millis);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * Sleeps for up to {@code millis}, returning early once {@link #reconnect()} has been called
+     * or the service is stopped.
+     */
+    private void sleepUnlessRepoll(long millis) {
+        long deadline = System.currentTimeMillis() + millis;
+        while (running && !repollRequested && System.currentTimeMillis() < deadline) {
+            sleep(Math.min(250, deadline - System.currentTimeMillis()));
         }
     }
 
