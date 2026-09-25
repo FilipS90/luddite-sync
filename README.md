@@ -107,13 +107,13 @@ its own, and gives every node a stable name via MagicDNS.
 
 1. Install Tailscale on the server and on each client machine, log in with the same
    account (or invite the other users to your tailnet).
-2. On the server, note its Tailscale hostname (e.g. `nas`) or its `100.x.y.z` address
-   — `tailscale status` shows both.
-3. On each client, point it at the server:
-   ```
-   host nas
-   ```
-   (or `host 100.x.y.z`). The choice is remembered across restarts.
+2. In the Tailscale admin console, name the server machine `luddite-server`. That is the
+   host name the client connects to by default, so clients find the server with no extra
+   setup. If the server uses another name, set it on each client with `host <name>` in
+   the CLI, or in the desktop UI by typing it into the **HOST ▸** field and pressing
+   **[ CONNECT ]** (see [First run](#first-run-point-it-at-your-server)).
+
+![Tailscale machines list with the server named luddite-server](docs/images/tailscale-machines.png)
 
 ### All-Windows nodes → **Radmin VPN**
 
@@ -246,11 +246,12 @@ java -jar client-sync-0.0.1-SNAPSHOT.jar --sync.client.ui=swing  # desktop windo
 
 ### First run: point it at your server
 
-The client ships with a placeholder host name (`luddite-server`). Set the real one once;
-it is stored in the client's database and reused on every later start:
+The client connects to `luddite-server` by default. If your server has that name on the
+VPN (as in the Tailscale setup above), nothing needs to be set. Otherwise set the real
+one once; it is stored in the client's database and reused on every later start:
 
 ```
-host nas              # Tailscale MagicDNS name
+host nas              # Tailscale machine name
 host 26.12.34.56      # Radmin VPN IP
 host 192.168.1.10     # plain LAN
 ```
@@ -384,11 +385,26 @@ or with an `application.yml` placed next to the JAR.
 | `server.port` | `8080` | REST API port |
 | `sync.socket.port` | `8888` | File-transfer socket port (also changeable live with `port`) |
 | `sync.watcher.scan-interval-seconds` | `30` | How often subdirectories are re-scanned for changes |
-| `spring.datasource.url` | `jdbc:sqlite:${user.home}/.luddite/server/photos.db` | Metadata database |
+| `spring.datasource.url` | `jdbc:sqlite:${user.home}/.luddite/server/sync.db` | Metadata database |
+
+### Ports
+
+Ports are set when an application starts; any of the forms above works:
+
+| Port | Command-line flag | Environment variable |
+|------|-------------------|----------------------|
+| Server REST | `--server.port=18080` | `SERVER_PORT=18080` |
+| Server socket | `--sync.socket.port=18888` | `SYNC_SOCKET_PORT=18888` |
+| Client (must match server REST) | `--sync.server.api-port=18080` | `SYNC_SERVER_API_PORT=18080` |
 
 ```bash
 java -jar server-sync-0.0.1-SNAPSHOT.jar --server.port=18080 --sync.socket.port=18888
+java -jar client-sync-0.0.1-SNAPSHOT.jar --sync.server.api-port=18080
 ```
+
+While running, only the socket port can change, with the server's `port` command;
+clients rediscover it automatically. Changing the REST port requires restarting the
+server, and every client needs the matching `sync.server.api-port`.
 
 ### Client
 
@@ -416,7 +432,7 @@ java -jar client-sync-0.0.1-SNAPSHOT.jar --sync.client.mirror-dir=/data/luddite 
 
 ```
 ~/.luddite/                     (Windows: C:\Users\<you>\.luddite\)
-├── server/photos.db            server metadata (shared dirs, file index, delete acks)
+├── server/sync.db              server metadata (shared dirs, file index, delete acks)
 ├── client/sync.db              client state (subscriptions, sync versions, host history)
 ├── client-id                   stable client identity; delete to make the server treat this
 │                               machine as a brand-new client
@@ -470,7 +486,7 @@ e2e/sync.sh --no-build        # reuse the JARs already in */target
 | `weak-sync.sh` | local deletes, untracked files and a wiped mirror never trigger a re-download; only server-side changes move files |
 | `download.sh` | single files (incl. unicode names), subtrees, whole root dirs, `browse` + `download <n>`; 16 MB progress lines; overwriting; missing paths; private dirs with wrong and right passwords, including multi-file downloads that must not de-authorize the sync connection; the server stalling (read timeout, `.part` removed) and crashing mid-transfer |
 | `protocol.sh` | a dir bigger than one 100-record response batch, delivered over several polls with one version per file; two clients racing for the same fresh dir; a root dir added while clients run, subscribed by index after `refresh`; the same relative path in two dirs; renames, empty files, non-ASCII names and spaces, a subtree created in one go; `browse --depth`, `browse <n>`, `up`, `list` |
-| `resilience.sh` | the server and the client killed mid-sync of a large file (nothing credited, re-sent whole on return) and a stalled server that neither drops nor corrupts the transfer; private dirs re-authenticating after a server crash; the socket port moved under a live connection; a client killed mid-download and a server killed during a multi-file download (finished files kept, no `.part` left, retry completes the set); both clients offline across a set of changes |
+| `resilience.sh` | the server and the client killed mid-sync of a large file (nothing credited, re-sent whole on return) and a stalled server that neither drops nor corrupts the transfer; private dirs re-authenticating after a server crash; the socket port moved under a live connection; a host switch with nothing subscribed listing the new host's dirs within seconds; a client killed mid-download and a server killed during a multi-file download (finished files kept, no `.part` left, retry completes the set); both clients offline across a set of changes |
 
 `e2e/lib.sh` holds the reusable pieces — `start_server` / `stop_server` / `restart_server`,
 `start_client N` / `stop_client N` / `restart_client N` (both take a signal, so `KILL`
@@ -562,5 +578,5 @@ for the file to change on the server, or run `remove <name>` followed by `sync <
 pull the whole directory again.
 
 **Start over on the server**
-Stop it and delete `~/.luddite/server/photos.db`. Shares must then be `add`ed again;
+Stop it and delete `~/.luddite/server/sync.db`. Shares must then be `add`ed again;
 the shared files themselves are never modified.

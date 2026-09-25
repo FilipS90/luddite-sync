@@ -54,7 +54,7 @@ start_server() {
     [ -p "$E2E_ROOT/server.in" ] || _open_fifo "$E2E_ROOT/server.in"
     nohup java $JAVA_OPTS -jar "$SERVER_JAR" \
         --server.port="$API_PORT" --sync.socket.port="$SOCKET_PORT" \
-        --spring.datasource.url="jdbc:sqlite:$E2E_ROOT/server/db/photos.db" \
+        --spring.datasource.url="jdbc:sqlite:$E2E_ROOT/server/db/sync.db" \
         --sync.watcher.scan-interval-seconds="$SCAN_INTERVAL" \
         --logging.level.com.fstojilj="$LOG_LEVEL" \
         < "$E2E_ROOT/server.in" > "$E2E_ROOT/server.log" 2>&1 &
@@ -217,7 +217,7 @@ client_downloaded_files() { (cd "$E2E_ROOT/c$1/mirror/downloads" 2>/dev/null && 
 # The apps hold the databases open, so both helpers wait out short write locks instead of erroring.
 client_db()    { sqlite3 -cmd '.timeout 5000' "$E2E_ROOT/c$1/sync.db" "$2"; }
 client_version() { client_db "$1" "SELECT last_sync_version FROM root_dirs WHERE dir_name='$2'"; }
-server_db()    { sqlite3 -cmd '.timeout 5000' "$E2E_ROOT/server/db/photos.db" "$1"; }
+server_db()    { sqlite3 -cmd '.timeout 5000' "$E2E_ROOT/server/db/sync.db" "$1"; }
 
 # wait_for_log FILE PATTERN [TIMEOUT_S] — polls for a grep -E match.
 wait_for_log() {

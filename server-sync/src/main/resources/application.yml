@@ -2,7 +2,7 @@ spring:
   application:
     name: server-sync
   datasource:
-    url: jdbc:sqlite:${user.home}/.luddite/server/photos.db
+    url: jdbc:sqlite:${user.home}/.luddite/server/sync.db
     driver-class-name: org.sqlite.JDBC
   jdbc:
     template:
