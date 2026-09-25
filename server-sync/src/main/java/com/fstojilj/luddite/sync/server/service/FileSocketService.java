@@ -11,7 +11,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import javax.net.ssl.SSLServerSocket;
 import java.io.DataInputStream;
 import java.io.EOFException;
 import java.io.DataOutputStream;
@@ -116,9 +115,7 @@ public class FileSocketService {
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     /**
-     * Builds the server socket and starts the client-acceptor platform thread.
-     * When {@code sync.socket.tls-enabled} is {@code true} (default), an mTLS
-     * {@link SSLServerSocket} is created; otherwise a plain {@link ServerSocket} is used.
+     * Builds the plain TCP server socket and starts the client-acceptor platform thread.
      *
      * @throws Exception if the socket cannot be created
      */
