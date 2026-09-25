@@ -131,7 +131,7 @@ public class ClientSyncService implements ApplicationRunner {
     }
 
     /**
-     * Signals the poll loop to stop and closes the underlying SSL socket.
+     * Signals the poll loop to stop and closes the underlying socket.
      * Invoked automatically by Spring during application shutdown.
      */
     @PreDestroy
@@ -562,7 +562,7 @@ public class ClientSyncService implements ApplicationRunner {
     }
 
     /**
-     * Closes the SSL socket, suppressing any {@link IOException}.
+     * Closes the socket, suppressing any {@link IOException}.
      */
     private void closeSocket() {
         try {

@@ -90,8 +90,12 @@ If you want a full copy again, unsubscribe and resubscribe (`remove <name>` then
 - All machines must be able to reach the server on **TCP 8080** (REST) and
   **TCP 8888** (file socket). Both ports are configurable — see
   [Configuration reference](#configuration-reference).
-- A private network between the machines. Luddite Sync has no TLS and no user
-  accounts; it is designed to run **inside a VPN**, not on the open internet.
+- A private network between the machines. Luddite Sync has **no TLS** and no user
+  accounts, by design: certificates and keystores would have to be generated,
+  distributed and renewed on every node, which makes setup harder and breaks easily
+  across mixed Linux / Windows / macOS machines. Traffic is plain TCP and HTTP, so run
+  it **inside a VPN** (such as Tailscale, below), which already encrypts and
+  authenticates every link — not on the open internet.
 
 ---
 
