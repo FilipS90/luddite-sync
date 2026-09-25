@@ -11,7 +11,7 @@
 
     <artifactId>client-sync</artifactId>
     <name>Client Sync</name>
-    <description>Follower node - syncs photos from the server</description>
+    <description>Follower node - syncs shared directories from the server</description>
 
     <dependencies>
         <!-- Common module -->

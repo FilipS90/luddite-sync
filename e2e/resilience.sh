@@ -1,6 +1,7 @@
 #!/bin/bash
 # Interrupted transfers: the server or the client dying or stalling in the middle of a sync or a
-# download, a socket port moved under a live connection, and clients catching up after an outage.
+# download, a socket port moved under a live connection, a host switch listing the new dirs, and
+# clients catching up after an outage.
 #
 # Usage: e2e/resilience.sh [--no-build]
 
@@ -122,6 +123,13 @@ mark_client 1
 echo "port-3" > "$SHARE_DIR/p3.txt"
 wait_client 1 "Written: share/p3.txt" 60
 assert_exists "sync continues once the port moves back" "$M1/share/p3.txt"
+
+log "Host switched with nothing subscribed: the new host's dirs are listed within seconds"
+start_client 3
+client_cmd 3 host 127.0.0.1
+wait_client 3 "Server advertises" 5
+assert_client_said 3 "Server advertises .*share" "unsubscribed client lists the new host's dirs"
+stop_client 3
 
 log "Client killed mid-download: no truncated file is left where the download should land"
 client_cmd 2 download mixed z-big.bin
