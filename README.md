@@ -110,7 +110,7 @@ by hostname or IP. Two setups have worked well:
 its own, and gives every node a stable name via MagicDNS.
 
 1. Install Tailscale on the server and on each client machine, log in with the same
-   account (or invite the other users to your tailnet).
+   account.
 2. In the Tailscale admin console, name the server machine `luddite-server`. That is the
    host name the client connects to by default, so clients find the server with no extra
    setup. If the server uses another name, set it on each client with `host <name>` in
